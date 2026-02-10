@@ -22,6 +22,7 @@ model User {
   resetTokenExpiry     DateTime?
   failedLoginAttempts  Int      @default(0)
   lockoutUntil         DateTime?
+  tokenVersion         Int      @default(0)
 
   passwordHistory      String[] @default([])
 

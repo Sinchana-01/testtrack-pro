@@ -13,6 +13,8 @@ const PASSWORD_REGEX =
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&]).{8,}$/;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000;
+const ACCESS_TOKEN_EXPIRY = "15m";
+const REFRESH_TOKEN_EXPIRY = "7d";
 
 const isStrongPassword = (password: string): boolean =>
   PASSWORD_REGEX.test(password);
@@ -29,6 +31,33 @@ const getApiBaseUrl = (): string =>
 
 const getFrontendBaseUrl = (): string =>
   process.env.FRONTEND_BASE_URL || process.env.BASE_URL || "http://localhost:3001";
+
+const getAccessSecret = (): string => process.env.JWT_SECRET as string;
+
+const getRefreshSecret = (): string =>
+  (process.env.JWT_REFRESH_SECRET as string) || (process.env.JWT_SECRET as string);
+
+const signAccessToken = (user: {
+  id: string;
+  role: Role;
+  tokenVersion: number;
+}): string =>
+  jwt.sign(
+    { userId: user.id, role: user.role, tokenVersion: user.tokenVersion, type: "access" },
+    getAccessSecret(),
+    { expiresIn: ACCESS_TOKEN_EXPIRY }
+  );
+
+const signRefreshToken = (user: {
+  id: string;
+  role: Role;
+  tokenVersion: number;
+}): string =>
+  jwt.sign(
+    { userId: user.id, role: user.role, tokenVersion: user.tokenVersion, type: "refresh" },
+    getRefreshSecret(),
+    { expiresIn: REFRESH_TOKEN_EXPIRY }
+  );
 
 /* =========================
    REGISTER (WITH EMAIL VERIFICATION)
@@ -225,16 +254,24 @@ router.post("/login", async (req: Request, res: Response) => {
       return res.status(401).json({ message: "Invalid credentials" });
     }
 
-    const tokenExpiry = rememberMe ? "7d" : "15m";
-    const token = jwt.sign(
-      { userId: user.id, role: user.role },
-      process.env.JWT_SECRET as string,
-      { expiresIn: tokenExpiry }
-    );
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    });
+    const refreshToken = signRefreshToken({
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    });
 
     return res.status(200).json({
       message: "Login successful",
-      token,
+      token: accessToken,
+      accessToken,
+      refreshToken,
+      accessTokenExpiresIn: ACCESS_TOKEN_EXPIRY,
+      refreshTokenExpiresIn: REFRESH_TOKEN_EXPIRY,
       user: {
         id: user.id,
         name: user.name,
@@ -245,6 +282,69 @@ router.post("/login", async (req: Request, res: Response) => {
   } catch (error) {
     console.error("LOGIN ERROR:", error);
     return res.status(500).json({ message: "Server error" });
+  }
+});
+
+/* =========================
+   REFRESH ACCESS TOKEN
+========================= */
+router.post("/refresh-token", async (req: Request, res: Response) => {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken || typeof refreshToken !== "string") {
+      return res.status(400).json({ message: "Refresh token is required" });
+    }
+
+    const decoded = jwt.verify(refreshToken, getRefreshSecret()) as {
+      userId: string;
+      role: Role;
+      tokenVersion: number;
+      type?: "access" | "refresh";
+    };
+
+    if (decoded.type !== "refresh") {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: {
+        id: true,
+        role: true,
+        tokenVersion: true,
+        isVerified: true,
+      },
+    });
+
+    if (!user || !user.isVerified) {
+      return res.status(401).json({ message: "Invalid refresh token" });
+    }
+
+    if (user.tokenVersion !== decoded.tokenVersion) {
+      return res.status(401).json({ message: "Session expired. Please login again." });
+    }
+
+    const nextAccessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    });
+    const nextRefreshToken = signRefreshToken({
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    });
+
+    return res.json({
+      message: "Token refreshed",
+      accessToken: nextAccessToken,
+      refreshToken: nextRefreshToken,
+      accessTokenExpiresIn: ACCESS_TOKEN_EXPIRY,
+      refreshTokenExpiresIn: REFRESH_TOKEN_EXPIRY,
+    });
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid or expired refresh token" });
   }
 });
 
@@ -413,6 +513,26 @@ router.post(
     }
   }
 );
+
+/* =========================
+   LOGOUT ALL DEVICES
+========================= */
+router.post("/logout-all", authenticate, async (req: AuthRequest, res: Response) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.user!.userId },
+      data: {
+        tokenVersion: {
+          increment: 1,
+        },
+      },
+    });
+
+    return res.json({ message: "Logged out from all devices" });
+  } catch (error) {
+    return res.status(500).json({ message: "Server error" });
+  }
+});
 
 /* =========================
    READ ALL USERS
