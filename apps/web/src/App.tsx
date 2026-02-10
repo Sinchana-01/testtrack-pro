@@ -1,23 +1,38 @@
-import { useState } from "react";
-import { loginApi, registerApi, resetPasswordApi } from "./api.ts";
+import { useEffect, useState } from "react";
+import { loginApi, registerApi, forgotPasswordApi, resetPasswordApi } from "./api";
 import "./App.css";
 
-type Screen = "login" | "register" | "forgot" | "dashboard";
+type Screen = "login" | "register" | "forgot" | "reset" | "dashboard";
 
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
   const [role, setRole] = useState("TESTER");
   const [rememberMe, setRememberMe] = useState(false);
+  const [resetToken, setResetToken] = useState("");
 
   /* PASSWORD RULES */
   const isValidPassword = (pwd: string) =>
     pwd.length >= 8 &&
     /[A-Z]/.test(pwd) &&
+    /[a-z]/.test(pwd) &&
     /[0-9]/.test(pwd) &&
     /[@$!%*?&]/.test(pwd);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token") || "";
+    const path = window.location.pathname.toLowerCase();
+    const isResetPath = path === "/reset-password";
+
+    if (isResetPath && token) {
+      setResetToken(token);
+      setScreen("reset");
+    }
+  }, []);
 
   /* REGISTER */
   const handleRegister = async () => {
@@ -41,7 +56,7 @@ function App() {
       localStorage.setItem("token", res.token);
       setScreen("dashboard");
     } else {
-      alert("Invalid email or password");
+      alert(res.message || "Invalid email or password");
     }
   };
 
@@ -121,7 +136,7 @@ function App() {
             />
 
             <div className="note">
-              Password must include uppercase, number & special character
+              Password must include uppercase, lowercase, number & special character
             </div>
 
             <select
@@ -145,7 +160,7 @@ function App() {
 
         {screen === "forgot" && (
           <>
-            <h3>Reset Password</h3>
+            <h3>Forgot Password</h3>
 
             <input
               className="input"
@@ -153,32 +168,76 @@ function App() {
               onChange={(e) => setEmail(e.target.value)}
             />
 
-            <input
-              className="input"
-              type="password"
-              placeholder="New password"
-              onChange={(e) => setPassword(e.target.value)}
-            />
-
             <button
               className="button"
               onClick={async () => {
-                if (!isValidPassword(password)) {
-                  alert(
-                    "Password must be at least 8 chars and include uppercase, number, and special character"
-                  );
-                  return;
-                }
-
-                const res = await resetPasswordApi(email, password);
+                const res = await forgotPasswordApi(email);
                 alert(res.message);
                 setScreen("login");
               }}
             >
-              Reset Password
+              Send Reset Link
             </button>
 
             <div className="link" onClick={() => setScreen("login")}>
+              Back to login
+            </div>
+          </>
+        )}
+
+        {screen === "reset" && (
+          <>
+            <h3>Reset Password</h3>
+
+            {!resetToken ? (
+              <div className="note">Invalid reset link. Please request a new one.</div>
+            ) : (
+              <>
+                <input
+                  className="input"
+                  type="password"
+                  placeholder="New password"
+                  onChange={(e) => setNewPassword(e.target.value)}
+                />
+
+                <div className="note">
+                  Password must include uppercase, lowercase, number & special character
+                </div>
+
+                <button
+                  className="button"
+                  onClick={async () => {
+                    if (!isValidPassword(newPassword)) {
+                      alert(
+                        "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
+                      );
+                      return;
+                    }
+
+                    const res = await resetPasswordApi(resetToken, newPassword);
+                    alert(res.message || "Password reset complete");
+
+                    if (
+                      typeof res.message === "string" &&
+                      res.message.toLowerCase().includes("successful")
+                    ) {
+                      window.history.replaceState({}, "", "/");
+                      setScreen("login");
+                    }
+                  }}
+                >
+                  Set New Password
+                </button>
+              </>
+            )}
+
+            <div
+              className="link"
+              onClick={() => {
+                window.history.replaceState({}, "", "/");
+                setScreen("login");
+              }}
+            >
               Back to login
             </div>
           </>
