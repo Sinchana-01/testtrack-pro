@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
-import { loginApi, registerApi, forgotPasswordApi, resetPasswordApi } from "./api";
+import {
+  clearSessionTokens,
+  forgotPasswordApi,
+  getRefreshToken,
+  loginApi,
+  logoutAllApi,
+  refreshTokenApi,
+  registerApi,
+  resetPasswordApi,
+  setSessionTokens,
+} from "./api";
 import "./App.css";
 
 type Screen = "login" | "register" | "forgot" | "reset" | "dashboard";
@@ -34,6 +44,26 @@ function App() {
     }
   }, []);
 
+  useEffect(() => {
+    if (screen !== "dashboard") {
+      return;
+    }
+
+    const intervalId = window.setInterval(async () => {
+      const refreshToken = getRefreshToken();
+      if (!refreshToken) {
+        return;
+      }
+
+      const refreshed = await refreshTokenApi(refreshToken);
+      if (refreshed?.accessToken && refreshed?.refreshToken) {
+        setSessionTokens(refreshed.accessToken, refreshed.refreshToken);
+      }
+    }, 14 * 60 * 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [screen]);
+
   /* REGISTER */
   const handleRegister = async () => {
     if (!isValidPassword(password)) {
@@ -52,8 +82,8 @@ function App() {
   const handleLogin = async () => {
     const res = await loginApi(email, password, rememberMe);
 
-    if (res.token) {
-      localStorage.setItem("token", res.token);
+    if (res.accessToken && res.refreshToken) {
+      setSessionTokens(res.accessToken, res.refreshToken);
       setScreen("dashboard");
     } else {
       alert(res.message || "Invalid email or password");
@@ -62,7 +92,7 @@ function App() {
 
   /* LOGOUT */
   const handleLogout = () => {
-    localStorage.removeItem("token");
+    clearSessionTokens();
     setScreen("login");
   };
 
@@ -249,6 +279,18 @@ function App() {
             <p>You are logged in successfully.</p>
             <button className="button" onClick={handleLogout}>
               Logout
+            </button>
+            <button
+              className="button"
+              style={{ marginTop: "10px", backgroundColor: "#374151" }}
+              onClick={async () => {
+                const res = await logoutAllApi();
+                alert(res.message || "Logged out from all devices");
+                clearSessionTokens();
+                setScreen("login");
+              }}
+            >
+              Logout From All Devices
             </button>
           </>
         )}
