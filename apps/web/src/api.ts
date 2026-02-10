@@ -1,4 +1,5 @@
-const API_URL = "http://localhost:4000/api/auth";
+const API_URL =
+  process.env.REACT_APP_API_URL?.trim() || "http://localhost:4000/api/auth";
 
 /* REGISTER */
 export async function registerApi(
@@ -31,15 +32,23 @@ export async function loginApi(
   return res.json();
 }
 
+/* FORGOT PASSWORD */
+export async function forgotPasswordApi(email: string) {
+  const res = await fetch(`${API_URL}/forgot-password`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+
+  return res.json();
+}
+
 /* RESET PASSWORD */
-export async function resetPasswordApi(
-  email: string,
-  newPassword: string
-) {
+export async function resetPasswordApi(token: string, newPassword: string) {
   const res = await fetch(`${API_URL}/reset-password`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, newPassword }),
+    body: JSON.stringify({ token, newPassword }),
   });
 
   return res.json();

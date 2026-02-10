@@ -1,15 +1,31 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import path from "path";
 import authRoutes from "./routes/auth.routes";
 
-dotenv.config({ path: "../../.env" });
+
+dotenv.config({ path: path.resolve(process.cwd(), ".env") });
+dotenv.config({ path: path.resolve(process.cwd(), "../../.env"), override: false });
 
 const app = express();
+const allowedOrigins = (
+  process.env.FRONTEND_ORIGINS ??
+  "http://localhost:3000,http://localhost:3001"
+)
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+        return;
+      }
+      callback(new Error("CORS blocked for this origin"));
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
@@ -23,7 +39,7 @@ app.get("/", (req, res) => {
   res.send("TestTrack Pro API is running 🚀");
 });
 
-const PORT = 4000;
+const PORT = Number(process.env.PORT) || 4000;
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
