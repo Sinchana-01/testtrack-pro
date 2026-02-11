@@ -1,22 +1,27 @@
 body {
   margin: 0;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-  background: #f4f6f8;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .container {
   min-height: 100vh;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
 }
 
 .card {
   background: #ffffff;
-  width: 360px;
-  padding: 30px;
-  border-radius: 8px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  width: min(960px, 95vw);
+  padding: 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  max-height: 92vh;
+  overflow: auto;
 }
 
 .card h2 {
@@ -32,25 +37,45 @@ body {
 
 .input {
   width: 100%;
-  padding: 10px;
-  margin-bottom: 12px;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-sizing: border-box;
+  font-family: inherit;
+  font-size: 14px;
+  background: #fff;
 }
 
 .button {
   width: 100%;
-  padding: 10px;
+  padding: 10px 12px;
   background-color: #2563eb;
   color: white;
   border: none;
-  border-radius: 4px;
-  font-size: 15px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .button:hover {
   background-color: #1e40af;
+}
+
+.button.small {
+  width: auto;
+  padding: 7px 10px;
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.button.danger {
+  background-color: #b91c1c;
+}
+
+.button.danger:hover {
+  background-color: #991b1b;
 }
 
 .link {
@@ -69,4 +94,156 @@ body {
   font-size: 12px;
   color: #6b7280;
   margin-bottom: 10px;
+}
+
+.fieldLabel {
+  display: block;
+  font-size: 12px;
+  color: #334155;
+  margin-bottom: 4px;
+}
+
+.dashboard {
+  display: grid;
+  gap: 16px;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.toolbarActions {
+  display: flex;
+  gap: 8px;
+}
+
+.dashboardGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.panel {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fff;
+}
+
+.panel h4 {
+  margin: 0 0 10px;
+  font-size: 15px;
+  color: #1e293b;
+}
+
+.panelHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.panel.fullWidth {
+  width: 100%;
+}
+
+.inlineGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.listCompact {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+  background: #f8fafc;
+}
+
+.row .title {
+  flex: 1;
+  font-size: 14px;
+}
+
+.row .meta {
+  font-size: 12px;
+  color: #6b7280;
+  min-width: 120px;
+  text-align: right;
+}
+
+.linkButton {
+  flex: 1;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.linkButton:hover {
+  text-decoration: underline;
+}
+
+.testCaseDetails {
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 10px;
+  margin: -4px 0 8px;
+  background: #ffffff;
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.modalCard {
+  width: min(640px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: #fff;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 12px 36px rgba(15, 23, 42, 0.24);
+  padding: 14px;
+}
+
+@media (max-width: 900px) {
+  .dashboardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
 }

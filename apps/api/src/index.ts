@@ -3,6 +3,9 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import authRoutes from "./routes/auth.routes";
+import testcaseRoutes from "./routes/testcase.routes";
+
+
 
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
@@ -34,6 +37,8 @@ app.use(
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
+app.use("/api", testcaseRoutes);
+
 
 app.get("/", (req, res) => {
   res.send("TestTrack Pro API is running 🚀");
