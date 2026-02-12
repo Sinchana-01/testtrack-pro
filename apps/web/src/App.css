@@ -16,7 +16,7 @@ body {
 
 .card {
   background: #ffffff;
-  width: min(960px, 95vw);
+  width: min(1240px, 96vw);
   padding: 24px;
   border-radius: 12px;
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
@@ -121,11 +121,13 @@ body {
 .toolbarActions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .dashboardGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
   gap: 12px;
 }
 
@@ -134,6 +136,7 @@ body {
   border-radius: 10px;
   padding: 12px;
   background: #fff;
+  min-height: 120px;
 }
 
 .panel h4 {
@@ -168,6 +171,7 @@ body {
 .row {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   border: 1px solid #e2e8f0;
   border-radius: 8px;
@@ -184,7 +188,7 @@ body {
 .row .meta {
   font-size: 12px;
   color: #6b7280;
-  min-width: 120px;
+  min-width: 180px;
   text-align: right;
 }
 

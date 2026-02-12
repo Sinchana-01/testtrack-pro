@@ -32,6 +32,7 @@ model User {
 
   createdTestCases    TestCase[]      @relation("CreatedTestCases")
   assignedTestCases   TestCase[]      @relation("AssignedTestCases")
+  modifiedTestCases   TestCase[]      @relation("ModifiedTestCases")
   createdSuites       TestSuite[]     @relation("CreatedSuites")
   executions          TestExecution[] @relation("ExecutedBy")
   uploadedAttachments Attachment[]    @relation("UploadedBy")
@@ -41,6 +42,7 @@ model User {
   auditLogs           AuditLog[]      @relation("AuditActor")
   createdProjects     Project[]       @relation("CreatedProjects")
   createdTemplates    TestCaseTemplate[] @relation("TemplateCreator")
+  testCaseVersions    TestCaseVersion[] @relation("TestCaseVersionEditor")
   importJobs          TestCaseImportJob[] @relation("Importer")
   backupJobs          BackupJob[]     @relation("BackupTriggeredBy")
   systemConfigUpdates SystemConfig[]  @relation("ConfigUpdatedBy")
@@ -51,15 +53,27 @@ model TestCase {
   testCaseCode String?        @unique
   title        String
   description  String
+  preConditions Json?
+  testDataRequirements Json?
+  environmentRequirements Json?
+  postConditions Json?
+  metadata     Json?
   module       String?
   priority     Priority
   severity     TestSeverity?
   type         TestCaseType?
   status       TestCaseStatus @default(DRAFT)
   steps        Json
+  version      Int            @default(1)
+  tags         String[]       @default([])
+  estimatedDurationMinutes Int?
+  automationStatus AutomationStatus @default(NOT_AUTOMATED)
+  automationScriptLink String?
 
   createdBy   String
   assignedTo  String?
+  lastModifiedBy String?
+  lastModifiedAt DateTime?
   projectId   String?
 
   isDeleted   Boolean     @default(false)
@@ -67,7 +81,9 @@ model TestCase {
 
   creator     User        @relation("CreatedTestCases", fields: [createdBy], references: [id])
   assignee    User?       @relation("AssignedTestCases", fields: [assignedTo], references: [id])
+  lastEditor  User?       @relation("ModifiedTestCases", fields: [lastModifiedBy], references: [id])
   project     Project?    @relation(fields: [projectId], references: [id])
+  versionHistory TestCaseVersion[]
 
   suiteLinks  TestSuiteCase[]
   executions  TestExecution[]
@@ -80,6 +96,23 @@ model TestCase {
   @@index([createdBy])
   @@index([assignedTo])
   @@index([projectId])
+  @@index([lastModifiedBy])
+}
+
+model TestCaseVersion {
+  id          String   @id @default(uuid())
+  testCaseId  String
+  version     Int
+  changedBy   String
+  changeSummary String
+  snapshot    Json
+  createdAt   DateTime @default(now())
+
+  testCase    TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  editor      User     @relation("TestCaseVersionEditor", fields: [changedBy], references: [id], onDelete: Cascade)
+
+  @@index([testCaseId])
+  @@index([changedBy])
 }
 
 model TestSuite {
@@ -206,11 +239,20 @@ model TestCaseTemplate {
   name        String
   category    String?
   description String?
+  preConditions Json?
+  testDataRequirements Json?
+  environmentRequirements Json?
+  postConditions Json?
+  metadata    Json?
   module      String?
   sourceTestCaseId String?
   severity    TestSeverity @default(MAJOR)
   type        TestCaseType @default(FUNCTIONAL)
   steps       Json
+  tags        String[] @default([])
+  estimatedDurationMinutes Int?
+  automationStatus AutomationStatus @default(NOT_AUTOMATED)
+  automationScriptLink String?
   priority    Priority @default(MEDIUM)
   status      TestCaseStatus @default(DRAFT)
   createdBy   String
@@ -305,6 +347,7 @@ enum TestCaseStatus {
   READY_FOR_REVIEW
   APPROVED
   DEPRECATED
+  ARCHIVED
 }
 
 enum TestSeverity {
@@ -365,4 +408,12 @@ enum BackupStatus {
 enum ImportSourceType {
   JSON
   CSV
+  EXCEL
+}
+
+enum AutomationStatus {
+  NOT_AUTOMATED
+  IN_PROGRESS
+  AUTOMATED
+  CANNOT_AUTOMATE
 }

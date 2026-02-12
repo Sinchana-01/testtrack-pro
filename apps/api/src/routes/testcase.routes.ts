@@ -1,9 +1,11 @@
 import {
+  AutomationStatus,
   AttachmentType,
   BackupStatus,
   ExecutionStatus,
   ImportSourceType,
   IssueStatus,
+  Prisma,
   Priority,
   Role,
   Severity,
@@ -20,6 +22,10 @@ import { authorizeRoles } from "../middleware/role.middleware";
 const router = Router();
 
 const asString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+const asStringArray = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => asString(item)).filter(Boolean);
+};
 
 const parseEnum = <T extends Record<string, string>>(enumType: T, value: unknown): T[keyof T] | null => {
   if (typeof value !== "string") {
@@ -29,8 +35,66 @@ const parseEnum = <T extends Record<string, string>>(enumType: T, value: unknown
   return (Object.values(enumType) as string[]).includes(value) ? (value as T[keyof T]) : null;
 };
 
+const parseJsonValue = (value: unknown, fallback: Prisma.InputJsonValue): Prisma.InputJsonValue => {
+  if (value === null || value === undefined) {
+    return fallback;
+  }
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as Prisma.InputJsonValue;
+    } catch {
+      return value as Prisma.InputJsonValue;
+    }
+  }
+  return value as Prisma.InputJsonValue;
+};
+
+const validateStepItems = (steps: unknown): string | null => {
+  if (!Array.isArray(steps) || steps.length === 0) {
+    return "steps must be a non-empty array";
+  }
+
+  for (let i = 0; i < steps.length; i += 1) {
+    const step = steps[i] as Record<string, unknown>;
+    if (!step || typeof step !== "object" || Array.isArray(step)) {
+      return `steps[${i}] must be an object`;
+    }
+    if (typeof step.stepNumber !== "number" || !Number.isFinite(step.stepNumber)) {
+      return `steps[${i}].stepNumber must be a number`;
+    }
+    if (!asString(step.action)) {
+      return `steps[${i}].action is required`;
+    }
+    if (step.testData === undefined) {
+      return `steps[${i}].testData is required`;
+    }
+    if (!asString(step.expectedResult)) {
+      return `steps[${i}].expectedResult is required`;
+    }
+  }
+
+  return null;
+};
+
 const isOwnerOrAssignee = (req: AuthRequest, createdBy: string, assignedTo: string | null): boolean =>
   req.user!.role === Role.ADMIN || req.user!.userId === createdBy || req.user!.userId === assignedTo;
+
+const ensureIssueAccess = async (req: AuthRequest, issueId: string): Promise<{ allowed: boolean; issue?: { id: string } }> => {
+  const issue = await prisma.issue.findUnique({
+    where: { id: issueId },
+    select: { id: true, assignedTo: true },
+  });
+  if (!issue) {
+    return { allowed: false };
+  }
+  if (req.user!.role === Role.ADMIN) {
+    return { allowed: true, issue: { id: issue.id } };
+  }
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return { allowed: false, issue: { id: issue.id } };
+  }
+  return { allowed: true, issue: { id: issue.id } };
+};
 
 const parseCsvLine = (line: string): string[] => {
   const cells: string[] = [];
@@ -98,6 +162,7 @@ router.get(
       include: {
         creator: { select: { id: true, name: true, email: true } },
         assignee: { select: { id: true, name: true, email: true } },
+        lastEditor: { select: { id: true, name: true, email: true } },
         project: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -113,6 +178,9 @@ router.get(
     const testCase = await prisma.testCase.findUnique({
       where: { id: req.params.id },
       include: {
+        creator: { select: { id: true, name: true, email: true } },
+        assignee: { select: { id: true, name: true, email: true } },
+        lastEditor: { select: { id: true, name: true, email: true } },
         attachments: true,
         executions: { orderBy: { executedAt: "desc" } },
         issues: { include: { comments: true } },
@@ -127,26 +195,51 @@ router.get(
   }
 );
 
-router.post("/testcases", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const title = asString(req.body.title);
   const description = asString(req.body.description);
+  const preConditions = parseJsonValue(req.body.preConditions, []);
+  const testDataRequirements = parseJsonValue(req.body.testDataRequirements, []);
+  const environmentRequirements = parseJsonValue(req.body.environmentRequirements, []);
+  const postConditions = parseJsonValue(req.body.postConditions, []);
+  const metadata = parseJsonValue(req.body.metadata, {});
   const moduleName = asString(req.body.module);
-  const steps = req.body.steps;
+  const steps = parseJsonValue(req.body.steps, []);
   const priority = parseEnum(Priority, req.body.priority) || Priority.MEDIUM;
   const severity = parseEnum(TestSeverity, req.body.severity) || TestSeverity.MAJOR;
   const type = parseEnum(TestCaseType, req.body.type) || TestCaseType.FUNCTIONAL;
   const status = parseEnum(TestCaseStatus, req.body.status) || TestCaseStatus.DRAFT;
+  const tags = asStringArray(req.body.tags);
+  const estimatedDurationMinutes =
+    typeof req.body.estimatedDurationMinutes === "number" ? req.body.estimatedDurationMinutes : null;
+  const automationStatus =
+    parseEnum(AutomationStatus, req.body.automationStatus) || AutomationStatus.NOT_AUTOMATED;
+  const automationScriptLink = asString(req.body.automationScriptLink) || null;
   const assignedTo = asString(req.body.assignedTo) || null;
   const projectId = asString(req.body.projectId) || null;
   const requestedCode = asString(req.body.testCaseCode);
 
-  if (!title || !description || !moduleName || !steps) {
+  if (
+    !title ||
+    !description ||
+    !moduleName ||
+    !steps ||
+    req.body.preConditions === undefined ||
+    req.body.testDataRequirements === undefined ||
+    req.body.environmentRequirements === undefined ||
+    req.body.postConditions === undefined
+  ) {
     return res.status(400).json({
-      message: "title, description, module, priority, severity, type, status, and steps are required",
+      message:
+        "title, description, preConditions, testDataRequirements, environmentRequirements, steps, postConditions, module, priority, severity, type, and status are required",
     });
   }
   if (title.length > 200) {
     return res.status(400).json({ message: "Title cannot exceed 200 characters" });
+  }
+  const stepsValidationError = validateStepItems(steps);
+  if (stepsValidationError) {
+    return res.status(400).json({ message: stepsValidationError });
   }
 
   const nextCode = requestedCode || (await generateTestCaseCode());
@@ -155,13 +248,24 @@ router.post("/testcases", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: A
       testCaseCode: nextCode,
       title,
       description,
+      preConditions,
+      testDataRequirements,
+      environmentRequirements,
+      postConditions,
+      metadata,
       module: moduleName,
       steps,
       priority,
       severity,
       type,
       status,
+      tags,
+      estimatedDurationMinutes,
+      automationStatus,
+      automationScriptLink,
       createdBy: req.user!.userId,
+      lastModifiedBy: req.user!.userId,
+      lastModifiedAt: new Date(),
       assignedTo,
       projectId,
     },
@@ -175,7 +279,7 @@ router.post("/testcases", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: A
   return res.status(201).json(created);
 });
 
-router.put("/testcases/:id", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.put("/testcases/:id", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
   if (!existing || existing.isDeleted) {
     return res.status(404).json({ message: "Test case not found" });
@@ -183,19 +287,62 @@ router.put("/testcases/:id", authorizeRoles(Role.TESTER, Role.ADMIN), async (req
   if (!isOwnerOrAssignee(req, existing.createdBy, existing.assignedTo)) {
     return res.status(403).json({ message: "You can edit only owned/assigned test cases" });
   }
+  const changeSummary = asString(req.body.changeSummary);
+  if (!changeSummary) {
+    return res.status(400).json({ message: "changeSummary is required for edit" });
+  }
+  if (req.body.steps !== undefined) {
+    const stepsValidationError = validateStepItems(parseJsonValue(req.body.steps, []));
+    if (stepsValidationError) {
+      return res.status(400).json({ message: stepsValidationError });
+    }
+  }
 
   const updated = await prisma.testCase.update({
     where: { id: req.params.id },
     data: {
       title: asString(req.body.title) || undefined,
       description: asString(req.body.description) || undefined,
+      preConditions:
+        req.body.preConditions !== undefined ? parseJsonValue(req.body.preConditions, []) : undefined,
+      testDataRequirements:
+        req.body.testDataRequirements !== undefined
+          ? parseJsonValue(req.body.testDataRequirements, [])
+          : undefined,
+      environmentRequirements:
+        req.body.environmentRequirements !== undefined
+          ? parseJsonValue(req.body.environmentRequirements, [])
+          : undefined,
+      postConditions:
+        req.body.postConditions !== undefined ? parseJsonValue(req.body.postConditions, []) : undefined,
+      metadata: req.body.metadata !== undefined ? parseJsonValue(req.body.metadata, {}) : undefined,
       module: asString(req.body.module) || undefined,
-      steps: req.body.steps ?? undefined,
+      steps: req.body.steps !== undefined ? parseJsonValue(req.body.steps, []) : undefined,
       status: parseEnum(TestCaseStatus, req.body.status) ?? undefined,
       priority: parseEnum(Priority, req.body.priority) ?? undefined,
       severity: parseEnum(TestSeverity, req.body.severity) ?? undefined,
       type: parseEnum(TestCaseType, req.body.type) ?? undefined,
+      tags: req.body.tags !== undefined ? asStringArray(req.body.tags) : undefined,
+      estimatedDurationMinutes:
+        typeof req.body.estimatedDurationMinutes === "number"
+          ? req.body.estimatedDurationMinutes
+          : undefined,
+      automationStatus: parseEnum(AutomationStatus, req.body.automationStatus) ?? undefined,
+      automationScriptLink: req.body.automationScriptLink !== undefined ? asString(req.body.automationScriptLink) || null : undefined,
+      version: { increment: 1 },
+      lastModifiedBy: req.user!.userId,
+      lastModifiedAt: new Date(),
       assignedTo: asString(req.body.assignedTo) || undefined,
+    },
+  });
+
+  await prisma.testCaseVersion.create({
+    data: {
+      testCaseId: updated.id,
+      version: updated.version,
+      changedBy: req.user!.userId,
+      changeSummary,
+      snapshot: JSON.parse(JSON.stringify(updated)) as Prisma.InputJsonValue,
     },
   });
 
@@ -205,7 +352,7 @@ router.put("/testcases/:id", authorizeRoles(Role.TESTER, Role.ADMIN), async (req
 
 router.delete(
   "/testcases/:id",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.isDeleted) {
@@ -226,8 +373,52 @@ router.delete(
 );
 
 router.post(
+  "/testcases/:id/restore",
+  authorizeRoles(Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
+    if (!existing || !existing.isDeleted) {
+      return res.status(404).json({ message: "Deleted test case not found" });
+    }
+    const restored = await prisma.testCase.update({
+      where: { id: req.params.id },
+      data: { isDeleted: false, deletedAt: null, lastModifiedBy: req.user!.userId, lastModifiedAt: new Date() },
+    });
+    await writeAuditLog(req.user!.userId, "RESTORE_TEST_CASE", "TestCase", restored.id);
+    return res.json(restored);
+  }
+);
+
+router.delete(
+  "/testcases/:id/permanent",
+  authorizeRoles(Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      return res.status(404).json({ message: "Test case not found" });
+    }
+    await prisma.testCase.delete({ where: { id: req.params.id } });
+    await writeAuditLog(req.user!.userId, "PERMANENT_DELETE_TEST_CASE", "TestCase", req.params.id);
+    return res.json({ message: "Test case permanently deleted" });
+  }
+);
+
+router.get(
+  "/testcases/:id/versions",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const versions = await prisma.testCaseVersion.findMany({
+      where: { testCaseId: req.params.id },
+      include: { editor: { select: { id: true, name: true, email: true } } },
+      orderBy: { version: "desc" },
+    });
+    return res.json(versions);
+  }
+);
+
+router.post(
   "/testcases/:id/clone",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.isDeleted) {
@@ -238,23 +429,50 @@ router.post(
     }
 
     const titleSuffix = asString(req.body.titleSuffix) || " (Clone)";
+    const includeAttachments = Boolean(req.body.includeAttachments);
     const nextCode = await generateTestCaseCode();
     const cloned = await prisma.testCase.create({
       data: {
         testCaseCode: nextCode,
         title: `${existing.title}${titleSuffix}`,
         description: existing.description,
+        preConditions: existing.preConditions ?? [],
+        testDataRequirements: existing.testDataRequirements ?? [],
+        environmentRequirements: existing.environmentRequirements ?? [],
+        postConditions: existing.postConditions ?? [],
+        metadata: existing.metadata ?? {},
         module: existing.module,
         steps: existing.steps as never,
         priority: existing.priority,
         severity: existing.severity,
         type: existing.type,
         status: TestCaseStatus.DRAFT,
+        tags: existing.tags,
+        estimatedDurationMinutes: existing.estimatedDurationMinutes,
+        automationStatus: existing.automationStatus,
+        automationScriptLink: existing.automationScriptLink,
+        version: 1,
         createdBy: req.user!.userId,
+        lastModifiedBy: req.user!.userId,
+        lastModifiedAt: new Date(),
         assignedTo: req.user!.userId,
         projectId: existing.projectId,
       },
     });
+    if (includeAttachments) {
+      const sourceAttachments = await prisma.attachment.findMany({ where: { testCaseId: existing.id } });
+      if (sourceAttachments.length > 0) {
+        await prisma.attachment.createMany({
+          data: sourceAttachments.map((item) => ({
+            testCaseId: cloned.id,
+            uploadedBy: req.user!.userId,
+            fileType: item.fileType,
+            fileUrl: item.fileUrl,
+            fileName: item.fileName,
+          })),
+        });
+      }
+    }
 
     await writeAuditLog(req.user!.userId, "CLONE_TEST_CASE", "TestCase", cloned.id, {
       sourceTestCaseId: existing.id,
@@ -265,18 +483,29 @@ router.post(
 
 router.post(
   "/testcase-templates",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const name = asString(req.body.name);
     const category = asString(req.body.category) || null;
     const description = asString(req.body.description) || null;
+    const preConditions = parseJsonValue(req.body.preConditions, []);
+    const testDataRequirements = parseJsonValue(req.body.testDataRequirements, []);
+    const environmentRequirements = parseJsonValue(req.body.environmentRequirements, []);
+    const postConditions = parseJsonValue(req.body.postConditions, []);
+    const metadata = parseJsonValue(req.body.metadata, {});
     const moduleName = asString(req.body.module) || null;
     const sourceTestCaseId = asString(req.body.sourceTestCaseId) || null;
-    let steps = req.body.steps;
+    let steps = parseJsonValue(req.body.steps, []);
     const priority = parseEnum(Priority, req.body.priority) || Priority.MEDIUM;
     const severity = parseEnum(TestSeverity, req.body.severity) || TestSeverity.MAJOR;
     const type = parseEnum(TestCaseType, req.body.type) || TestCaseType.FUNCTIONAL;
     const status = parseEnum(TestCaseStatus, req.body.status) || TestCaseStatus.DRAFT;
+    const tags = asStringArray(req.body.tags);
+    const estimatedDurationMinutes =
+      typeof req.body.estimatedDurationMinutes === "number" ? req.body.estimatedDurationMinutes : null;
+    const automationStatus =
+      parseEnum(AutomationStatus, req.body.automationStatus) || AutomationStatus.NOT_AUTOMATED;
+    const automationScriptLink = asString(req.body.automationScriptLink) || null;
 
     if (!name) {
       return res.status(400).json({ message: "name is required" });
@@ -287,13 +516,31 @@ router.post(
     let resolvedSeverity = severity;
     let resolvedType = type;
     let resolvedStatus = status;
+    let resolvedPreConditions = preConditions;
+    let resolvedTestDataRequirements = testDataRequirements;
+    let resolvedEnvironmentRequirements = environmentRequirements;
+    let resolvedPostConditions = postConditions;
+    let resolvedMetadata = metadata;
+    let resolvedTags = tags;
+    let resolvedEstimatedDurationMinutes = estimatedDurationMinutes;
+    let resolvedAutomationStatus = automationStatus;
+    let resolvedAutomationScriptLink = automationScriptLink;
 
     if (sourceTestCaseId) {
       const source = await prisma.testCase.findUnique({ where: { id: sourceTestCaseId } });
       if (!source || source.isDeleted) {
         return res.status(404).json({ message: "Source test case not found" });
       }
-      steps = source.steps;
+      steps = (source.steps ?? []) as Prisma.InputJsonValue;
+      resolvedPreConditions = source.preConditions ?? [];
+      resolvedTestDataRequirements = source.testDataRequirements ?? [];
+      resolvedEnvironmentRequirements = source.environmentRequirements ?? [];
+      resolvedPostConditions = source.postConditions ?? [];
+      resolvedMetadata = source.metadata ?? {};
+      resolvedTags = source.tags;
+      resolvedEstimatedDurationMinutes = source.estimatedDurationMinutes;
+      resolvedAutomationStatus = source.automationStatus;
+      resolvedAutomationScriptLink = source.automationScriptLink;
       resolvedModule = source.module;
       resolvedPriority = source.priority;
       resolvedSeverity = source.severity || severity;
@@ -304,12 +551,21 @@ router.post(
     if (!steps) {
       return res.status(400).json({ message: "name and steps are required" });
     }
+    const stepsValidationError = validateStepItems(steps);
+    if (stepsValidationError) {
+      return res.status(400).json({ message: stepsValidationError });
+    }
 
     const template = await prisma.testCaseTemplate.create({
       data: {
         name,
         category,
         description,
+        preConditions: resolvedPreConditions,
+        testDataRequirements: resolvedTestDataRequirements,
+        environmentRequirements: resolvedEnvironmentRequirements,
+        postConditions: resolvedPostConditions,
+        metadata: resolvedMetadata,
         module: resolvedModule,
         sourceTestCaseId,
         steps,
@@ -317,6 +573,10 @@ router.post(
         severity: resolvedSeverity,
         type: resolvedType,
         status: resolvedStatus,
+        tags: resolvedTags,
+        estimatedDurationMinutes: resolvedEstimatedDurationMinutes,
+        automationStatus: resolvedAutomationStatus,
+        automationScriptLink: resolvedAutomationScriptLink,
         createdBy: req.user!.userId,
       },
     });
@@ -327,7 +587,7 @@ router.post(
 
 router.post(
   "/testcase-templates/from-testcase/:id",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const source = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!source || source.isDeleted) {
@@ -339,6 +599,11 @@ router.post(
         name: asString(req.body.name) || `${source.title} Template`,
         category: asString(req.body.category) || null,
         description: asString(req.body.description) || source.description,
+        preConditions: source.preConditions ?? [],
+        testDataRequirements: source.testDataRequirements ?? [],
+        environmentRequirements: source.environmentRequirements ?? [],
+        postConditions: source.postConditions ?? [],
+        metadata: source.metadata ?? {},
         module: source.module,
         sourceTestCaseId: source.id,
         steps: source.steps as never,
@@ -346,6 +611,10 @@ router.post(
         severity: source.severity || TestSeverity.MAJOR,
         type: source.type || TestCaseType.FUNCTIONAL,
         status: source.status,
+        tags: source.tags,
+        estimatedDurationMinutes: source.estimatedDurationMinutes,
+        automationStatus: source.automationStatus,
+        automationScriptLink: source.automationScriptLink,
         createdBy: req.user!.userId,
       },
     });
@@ -370,7 +639,7 @@ router.get(
 
 router.post(
   "/testcases/from-template/:templateId",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.templateId } });
     if (!template) {
@@ -379,6 +648,17 @@ router.post(
 
     const title = asString(req.body.title) || template.name;
     const description = asString(req.body.description) || template.description || "Generated from template";
+    const preConditions = parseJsonValue(req.body.preConditions, template.preConditions ?? []);
+    const testDataRequirements = parseJsonValue(
+      req.body.testDataRequirements,
+      template.testDataRequirements ?? []
+    );
+    const environmentRequirements = parseJsonValue(
+      req.body.environmentRequirements,
+      template.environmentRequirements ?? []
+    );
+    const postConditions = parseJsonValue(req.body.postConditions, template.postConditions ?? []);
+    const metadata = parseJsonValue(req.body.metadata, template.metadata ?? {});
     const moduleName = asString(req.body.module) || template.module || "General";
     const assignedTo = asString(req.body.assignedTo) || null;
     const projectId = asString(req.body.projectId) || null;
@@ -389,13 +669,24 @@ router.post(
         testCaseCode: nextCode,
         title,
         description,
+        preConditions,
+        testDataRequirements,
+        environmentRequirements,
+        postConditions,
+        metadata,
         module: moduleName,
         steps: template.steps as never,
         priority: template.priority,
         severity: template.severity,
         type: template.type,
         status: template.status,
+        tags: template.tags,
+        estimatedDurationMinutes: template.estimatedDurationMinutes,
+        automationStatus: template.automationStatus,
+        automationScriptLink: template.automationScriptLink,
         createdBy: req.user!.userId,
+        lastModifiedBy: req.user!.userId,
+        lastModifiedAt: new Date(),
         assignedTo,
         projectId,
       },
@@ -409,7 +700,7 @@ router.post(
 
 router.post(
   "/testcases/bulk",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const operation = asString(req.body.operation).toUpperCase();
     const idsRaw = Array.isArray(req.body.ids) ? req.body.ids : [];
@@ -457,14 +748,95 @@ router.post(
         data: { status },
       });
       resultCount = result.count;
+    } else if (operation === "PRIORITY") {
+      const priority = parseEnum(Priority, req.body.priority);
+      if (!priority) {
+        return res.status(400).json({ message: "Valid priority is required for PRIORITY" });
+      }
+      const result = await prisma.testCase.updateMany({
+        where: { id: { in: allowedIds } },
+        data: { priority },
+      });
+      resultCount = result.count;
+    } else if (operation === "SEVERITY") {
+      const severity = parseEnum(TestSeverity, req.body.severity);
+      if (!severity) {
+        return res.status(400).json({ message: "Valid severity is required for SEVERITY" });
+      }
+      const result = await prisma.testCase.updateMany({
+        where: { id: { in: allowedIds } },
+        data: { severity },
+      });
+      resultCount = result.count;
+    } else if (operation === "MOVE_MODULE") {
+      const moduleName = asString(req.body.module);
+      if (!moduleName) {
+        return res.status(400).json({ message: "module is required for MOVE_MODULE" });
+      }
+      const result = await prisma.testCase.updateMany({
+        where: { id: { in: allowedIds } },
+        data: { module: moduleName },
+      });
+      resultCount = result.count;
+    } else if (operation === "MOVE_SUITE") {
+      const suiteId = asString(req.body.suiteId);
+      if (!suiteId) {
+        return res.status(400).json({ message: "suiteId is required for MOVE_SUITE" });
+      }
+      for (const testCaseId of allowedIds) {
+        await prisma.testSuiteCase.upsert({
+          where: { suiteId_testCaseId: { suiteId, testCaseId } },
+          create: { suiteId, testCaseId },
+          update: {},
+        });
+      }
+      resultCount = allowedIds.length;
+    } else if (operation === "EXPORT_CSV" || operation === "EXPORT_EXCEL") {
+      const rows = await prisma.testCase.findMany({
+        where: { id: { in: allowedIds } },
+        orderBy: { createdAt: "desc" },
+      });
+      const header =
+        "testCaseCode,title,description,module,priority,severity,type,status,version,tags,estimatedDurationMinutes,automationStatus,automationScriptLink";
+      const csvRows = rows.map((item) =>
+        [
+          item.testCaseCode || "",
+          item.title,
+          item.description,
+          item.module || "",
+          item.priority,
+          item.severity || "",
+          item.type || "",
+          item.status,
+          String(item.version),
+          item.tags.join("|"),
+          item.estimatedDurationMinutes ?? "",
+          item.automationStatus,
+          item.automationScriptLink || "",
+        ]
+          .map((value) => `"${String(value).replace(/\"/g, "\"\"")}"`)
+          .join(",")
+      );
+      return res.json({
+        operation,
+        format: operation === "EXPORT_EXCEL" ? "EXCEL_COMPATIBLE_CSV" : "CSV",
+        fileName: `testcases_${new Date().toISOString().slice(0, 10)}.csv`,
+        content: [header, ...csvRows].join("\n"),
+      });
     } else if (operation === "DELETE") {
+      if (!req.body.confirm) {
+        return res.status(400).json({ message: "confirm=true is required for DELETE" });
+      }
       const result = await prisma.testCase.updateMany({
         where: { id: { in: allowedIds } },
         data: { isDeleted: true, deletedAt: new Date() },
       });
       resultCount = result.count;
     } else {
-      return res.status(400).json({ message: "Unsupported operation. Use ASSIGN, STATUS, or DELETE." });
+      return res.status(400).json({
+        message:
+          "Unsupported operation. Use ASSIGN, STATUS, PRIORITY, SEVERITY, MOVE_MODULE, MOVE_SUITE, EXPORT_CSV, EXPORT_EXCEL, or DELETE.",
+      });
     }
 
     await writeAuditLog(req.user!.userId, "BULK_TEST_CASE_OPERATION", "TestCase", "bulk", {
@@ -478,12 +850,22 @@ router.post(
 
 router.post(
   "/testcases/import",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const sourceType = parseEnum(ImportSourceType, asString(req.body.sourceType).toUpperCase());
     if (!sourceType) {
-      return res.status(400).json({ message: "sourceType is required: JSON or CSV" });
+      return res.status(400).json({ message: "sourceType is required: JSON, CSV, or EXCEL" });
     }
+    const preview = Boolean(req.body.preview);
+    const confirmImport = Boolean(req.body.confirm);
+    if (!preview && !confirmImport) {
+      return res.status(400).json({ message: "confirm=true is required for final import" });
+    }
+    const fieldMapping =
+      req.body.fieldMapping && typeof req.body.fieldMapping === "object"
+        ? (req.body.fieldMapping as Record<string, string>)
+        : {};
+    const mapKey = (key: string): string => (fieldMapping[key] || key).toLowerCase();
 
     const projectId = asString(req.body.projectId) || null;
     const assignedTo = asString(req.body.assignedTo) || null;
@@ -493,30 +875,53 @@ router.post(
     let records: Array<{
       title: string;
       description: string;
+      preConditions: Prisma.InputJsonValue;
+      testDataRequirements: Prisma.InputJsonValue;
+      environmentRequirements: Prisma.InputJsonValue;
+      postConditions: Prisma.InputJsonValue;
+      metadata: Prisma.InputJsonValue;
       module: string;
-      steps: unknown;
+      steps: Prisma.InputJsonValue;
       priority?: Priority;
       severity?: TestSeverity;
       type?: TestCaseType;
       status?: TestCaseStatus;
+      tags?: string[];
+      estimatedDurationMinutes?: number | null;
+      automationStatus?: AutomationStatus;
+      automationScriptLink?: string | null;
     }> = [];
 
     if (sourceType === ImportSourceType.JSON) {
       const items = Array.isArray(req.body.items) ? req.body.items : [];
       records = items.map((item: unknown) => {
         const row = (item ?? {}) as Record<string, unknown>;
+        const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
         return {
-          title: asString(row.title),
-          description: asString(row.description),
-          module: asString(row.module) || "General",
-          steps: row.steps,
-          priority: parseEnum(Priority, row.priority) || Priority.MEDIUM,
-          severity: parseEnum(TestSeverity, row.severity) || TestSeverity.MAJOR,
-          type: parseEnum(TestCaseType, row.type) || TestCaseType.FUNCTIONAL,
-          status: parseEnum(TestCaseStatus, row.status) || TestCaseStatus.DRAFT,
+          title: asString(read("title")),
+          description: asString(read("description")),
+          preConditions: parseJsonValue(read("preConditions"), []),
+          testDataRequirements: parseJsonValue(read("testDataRequirements"), []),
+          environmentRequirements: parseJsonValue(read("environmentRequirements"), []),
+          postConditions: parseJsonValue(read("postConditions"), []),
+          metadata: parseJsonValue(read("metadata"), {}),
+          module: asString(read("module")) || "General",
+          steps: parseJsonValue(read("steps"), []),
+          priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
+          severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
+          type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
+          status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
+          tags: asStringArray(read("tags")),
+          estimatedDurationMinutes:
+            typeof read("estimatedDurationMinutes") === "number"
+              ? (read("estimatedDurationMinutes") as number)
+              : null,
+          automationStatus:
+            parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
+          automationScriptLink: asString(read("automationScriptLink")) || null,
         };
       });
-    } else {
+    } else if (sourceType === ImportSourceType.CSV) {
       const csvText = asString(req.body.csvText);
       if (!csvText) {
         return res.status(400).json({ message: "csvText is required for CSV import" });
@@ -535,36 +940,142 @@ router.post(
         headers.forEach((h, idx) => {
           map[h] = (cells[idx] || "").trim();
         });
-        let parsedSteps: unknown = [];
+        const read = (canonical: string): string => map[mapKey(canonical)] || "";
+        let parsedSteps: Prisma.InputJsonValue = [];
         try {
-          parsedSteps = map.steps ? JSON.parse(map.steps) : [];
+          parsedSteps = read("steps") ? (JSON.parse(read("steps")) as Prisma.InputJsonValue) : [];
         } catch {
-          parsedSteps = map.steps || [];
+          parsedSteps = (read("steps") || []) as Prisma.InputJsonValue;
         }
         return {
-          title: map.title || "",
-          description: map.description || "",
-          module: map.module || "General",
+          title: read("title"),
+          description: read("description"),
+          preConditions: read("preConditions") ? parseJsonValue(read("preConditions"), []) : [],
+          testDataRequirements: read("testDataRequirements")
+            ? parseJsonValue(read("testDataRequirements"), [])
+            : [],
+          environmentRequirements: read("environmentRequirements")
+            ? parseJsonValue(read("environmentRequirements"), [])
+            : [],
+          postConditions: read("postConditions") ? parseJsonValue(read("postConditions"), []) : [],
+          metadata: read("metadata") ? parseJsonValue(read("metadata"), {}) : {},
+          module: read("module") || "General",
           steps: parsedSteps,
-          priority: parseEnum(Priority, map.priority) || Priority.MEDIUM,
-          severity: parseEnum(TestSeverity, map.severity) || TestSeverity.MAJOR,
-          type: parseEnum(TestCaseType, map.type) || TestCaseType.FUNCTIONAL,
-          status: parseEnum(TestCaseStatus, map.status) || TestCaseStatus.DRAFT,
+          priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
+          severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
+          type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
+          status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
+          tags: read("tags")
+            ? read("tags")
+                .split("|")
+                .map((item) => item.trim())
+                .filter(Boolean)
+            : [],
+          estimatedDurationMinutes: read("estimatedDurationMinutes")
+            ? Number(read("estimatedDurationMinutes"))
+            : null,
+          automationStatus:
+            parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
+          automationScriptLink: read("automationScriptLink") || null,
+        };
+      });
+    } else {
+      const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+      records = rows.map((item: unknown) => {
+        const row = (item ?? {}) as Record<string, unknown>;
+        const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
+        return {
+          title: asString(read("title")),
+          description: asString(read("description")),
+          preConditions: parseJsonValue(read("preConditions"), []),
+          testDataRequirements: parseJsonValue(read("testDataRequirements"), []),
+          environmentRequirements: parseJsonValue(read("environmentRequirements"), []),
+          postConditions: parseJsonValue(read("postConditions"), []),
+          metadata: parseJsonValue(read("metadata"), {}),
+          module: asString(read("module")) || "General",
+          steps: parseJsonValue(read("steps"), []),
+          priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
+          severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
+          type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
+          status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
+          tags: asStringArray(read("tags")),
+          estimatedDurationMinutes:
+            typeof read("estimatedDurationMinutes") === "number"
+              ? (read("estimatedDurationMinutes") as number)
+              : null,
+          automationStatus:
+            parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
+          automationScriptLink: asString(read("automationScriptLink")) || null,
         };
       });
     }
 
     for (let idx = 0; idx < records.length; idx += 1) {
       const record = records[idx];
-      if (!record.title || !record.description || !record.module || record.steps === undefined) {
-        errors.push(`Row ${idx + 1}: title, description, module, and steps are required`);
+      if (
+        !record.title ||
+        !record.description ||
+        !record.module ||
+        record.steps === undefined ||
+        record.preConditions === undefined ||
+        record.testDataRequirements === undefined ||
+        record.environmentRequirements === undefined ||
+        record.postConditions === undefined
+      ) {
+        errors.push(
+          `Row ${idx + 1}: title, description, preConditions, testDataRequirements, environmentRequirements, module, steps, and postConditions are required`
+        );
         continue;
       }
       if (record.title.length > 200) {
         errors.push(`Row ${idx + 1}: title exceeds 200 characters`);
         continue;
       }
+      const stepsValidationError = validateStepItems(record.steps);
+      if (stepsValidationError) {
+        errors.push(`Row ${idx + 1}: ${stepsValidationError}`);
+        continue;
+      }
+      if (record.estimatedDurationMinutes !== null && Number.isNaN(record.estimatedDurationMinutes)) {
+        errors.push(`Row ${idx + 1}: estimatedDurationMinutes must be a number`);
+      }
+    }
 
+    if (preview) {
+      return res.json({
+        message: "Import preview generated",
+        total: records.length,
+        failed: errors.length,
+        success: records.length - errors.length,
+        errors,
+        preview: records.slice(0, 50),
+      });
+    }
+
+    for (let idx = 0; idx < records.length; idx += 1) {
+      const record = records[idx];
+      if (
+        !record.title ||
+        !record.description ||
+        !record.module ||
+        record.steps === undefined ||
+        record.preConditions === undefined ||
+        record.testDataRequirements === undefined ||
+        record.environmentRequirements === undefined ||
+        record.postConditions === undefined
+      ) {
+        continue;
+      }
+      if (record.title.length > 200) {
+        continue;
+      }
+      const stepsValidationError = validateStepItems(record.steps);
+      if (stepsValidationError) {
+        continue;
+      }
+      if (record.estimatedDurationMinutes !== null && Number.isNaN(record.estimatedDurationMinutes)) {
+        continue;
+      }
       try {
         const nextCode = await generateTestCaseCode();
         const created = await prisma.testCase.create({
@@ -572,13 +1083,24 @@ router.post(
             testCaseCode: nextCode,
             title: record.title,
             description: record.description,
+            preConditions: record.preConditions,
+            testDataRequirements: record.testDataRequirements,
+            environmentRequirements: record.environmentRequirements,
+            postConditions: record.postConditions,
+            metadata: record.metadata,
             module: record.module,
             steps: record.steps as never,
             priority: record.priority || Priority.MEDIUM,
             severity: record.severity || TestSeverity.MAJOR,
             type: record.type || TestCaseType.FUNCTIONAL,
             status: record.status || TestCaseStatus.DRAFT,
+            tags: record.tags || [],
+            estimatedDurationMinutes: record.estimatedDurationMinutes ?? null,
+            automationStatus: record.automationStatus || AutomationStatus.NOT_AUTOMATED,
+            automationScriptLink: record.automationScriptLink || null,
             createdBy: req.user!.userId,
+            lastModifiedBy: req.user!.userId,
+            lastModifiedAt: new Date(),
             assignedTo,
             projectId,
           },
@@ -621,7 +1143,7 @@ router.post(
 
 router.post(
   "/testcases/:id/execute",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.isDeleted) {
@@ -649,7 +1171,7 @@ router.post(
 
 router.post(
   "/testcases/:id/attachments",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.isDeleted) {
@@ -678,7 +1200,7 @@ router.post(
   }
 );
 
-router.post("/suites", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const name = asString(req.body.name);
   if (!name) {
     return res.status(400).json({ message: "Suite name is required" });
@@ -699,7 +1221,7 @@ router.post("/suites", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: Auth
 
 router.post(
   "/suites/:suiteId/testcases/:testCaseId",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const link = await prisma.testSuiteCase.upsert({
       where: {
@@ -722,7 +1244,7 @@ router.post(
 
 router.get(
   "/reports/test-executions",
-  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  authorizeRoles(Role.TESTER, Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
     const executions = await prisma.testExecution.findMany({
       include: {
@@ -749,7 +1271,7 @@ router.get(
 
 router.post(
   "/issues/from-executions/:executionId",
-  authorizeRoles(Role.TESTER, Role.ADMIN),
+  authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
     const execution = await prisma.testExecution.findUnique({
       where: { id: req.params.executionId },
@@ -783,7 +1305,7 @@ router.post(
   }
 );
 
-router.post("/issues/:id/assign", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post("/issues/:id/assign", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const developerId = asString(req.body.developerId);
   if (!developerId) {
     return res.status(400).json({ message: "developerId is required" });
@@ -805,11 +1327,20 @@ router.post("/issues/:id/assign", authorizeRoles(Role.TESTER, Role.ADMIN), async
 
 router.post(
   "/issues/:id/comments",
-  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  authorizeRoles(Role.TESTER, Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
     const comment = asString(req.body.comment);
     if (!comment) {
       return res.status(400).json({ message: "comment is required" });
+    }
+    if (req.user!.role === Role.DEVELOPER) {
+      const access = await ensureIssueAccess(req, req.params.id);
+      if (!access.issue) {
+        return res.status(404).json({ message: "Issue not found" });
+      }
+      if (!access.allowed) {
+        return res.status(403).json({ message: "You can comment only on issues assigned to you" });
+      }
     }
 
     const created = await prisma.issueComment.create({
@@ -828,7 +1359,7 @@ router.post(
 /* =========================
    DEVELOPER FLOWS
 ========================= */
-router.get("/developer/reports", authorizeRoles(Role.DEVELOPER, Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+router.get("/developer/reports", authorizeRoles(Role.DEVELOPER), async (_req: AuthRequest, res: Response) => {
   const [totalExecutions, failedExecutions, openIssues] = await Promise.all([
     prisma.testExecution.count(),
     prisma.testExecution.count({ where: { result: ExecutionStatus.FAILED } }),
@@ -839,7 +1370,7 @@ router.get("/developer/reports", authorizeRoles(Role.DEVELOPER, Role.ADMIN), asy
 
 router.get(
   "/developer/issues/assigned",
-  authorizeRoles(Role.DEVELOPER, Role.ADMIN),
+  authorizeRoles(Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
     const issues = await prisma.issue.findMany({
       where: req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId },
@@ -850,10 +1381,17 @@ router.get(
   }
 );
 
-router.patch("/issues/:id/status", authorizeRoles(Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.patch("/issues/:id/status", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
   const status = parseEnum(IssueStatus, req.body.status);
   if (!status) {
     return res.status(400).json({ message: "Valid issue status is required" });
+  }
+  const access = await ensureIssueAccess(req, req.params.id);
+  if (!access.issue) {
+    return res.status(404).json({ message: "Issue not found" });
+  }
+  if (!access.allowed) {
+    return res.status(403).json({ message: "You can update only issues assigned to you" });
   }
 
   const issue = await prisma.issue.update({
@@ -865,10 +1403,17 @@ router.patch("/issues/:id/status", authorizeRoles(Role.DEVELOPER, Role.ADMIN), a
   return res.json(issue);
 });
 
-router.patch("/issues/:id/fix-notes", authorizeRoles(Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.patch("/issues/:id/fix-notes", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
   const fixNotes = asString(req.body.fixNotes);
   if (!fixNotes) {
     return res.status(400).json({ message: "fixNotes is required" });
+  }
+  const access = await ensureIssueAccess(req, req.params.id);
+  if (!access.issue) {
+    return res.status(404).json({ message: "Issue not found" });
+  }
+  if (!access.allowed) {
+    return res.status(403).json({ message: "You can update only issues assigned to you" });
   }
 
   const issue = await prisma.issue.update({
@@ -879,10 +1424,17 @@ router.patch("/issues/:id/fix-notes", authorizeRoles(Role.DEVELOPER, Role.ADMIN)
   return res.json(issue);
 });
 
-router.patch("/issues/:id/link-commit", authorizeRoles(Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.patch("/issues/:id/link-commit", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
   const commitLink = asString(req.body.commitLink);
   if (!commitLink) {
     return res.status(400).json({ message: "commitLink is required" });
+  }
+  const access = await ensureIssueAccess(req, req.params.id);
+  if (!access.issue) {
+    return res.status(404).json({ message: "Issue not found" });
+  }
+  if (!access.allowed) {
+    return res.status(403).json({ message: "You can update only issues assigned to you" });
   }
 
   const issue = await prisma.issue.update({
@@ -895,8 +1447,15 @@ router.patch("/issues/:id/link-commit", authorizeRoles(Role.DEVELOPER, Role.ADMI
 
 router.post(
   "/issues/:id/request-retest",
-  authorizeRoles(Role.DEVELOPER, Role.ADMIN),
+  authorizeRoles(Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
+    const access = await ensureIssueAccess(req, req.params.id);
+    if (!access.issue) {
+      return res.status(404).json({ message: "Issue not found" });
+    }
+    if (!access.allowed) {
+      return res.status(403).json({ message: "You can update only issues assigned to you" });
+    }
     const issue = await prisma.issue.update({
       where: { id: req.params.id },
       data: {
@@ -909,7 +1468,7 @@ router.post(
   }
 );
 
-router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
   const where = req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId };
   const [assignedCount, fixedCount, openCount] = await Promise.all([
     prisma.issue.count({ where }),
@@ -922,7 +1481,7 @@ router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER, Role.ADMIN), a
 
 router.get(
   "/developer/reports/export",
-  authorizeRoles(Role.DEVELOPER, Role.ADMIN),
+  authorizeRoles(Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
     const issues = await prisma.issue.findMany({
       where: req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId },

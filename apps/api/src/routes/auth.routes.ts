@@ -537,11 +537,21 @@ router.post("/logout-all", authenticate, async (req: AuthRequest, res: Response)
 /* =========================
    READ ALL USERS
 ========================= */
-router.get("/users", authenticate, async (_req: Request, res: Response) => {
+router.get(
+  "/users",
+  authenticate,
+  authorizeRoles("ADMIN", "TESTER"),
+  async (req: AuthRequest, res: Response) => {
   try {
-    const users = await prisma.user.findMany({
-      select: { id: true, name: true, email: true, role: true },
-    });
+    const users =
+      req.user?.role === "ADMIN"
+        ? await prisma.user.findMany({
+            select: { id: true, name: true, email: true, role: true, isActive: true },
+          })
+        : await prisma.user.findMany({
+            where: { role: "DEVELOPER", isActive: true },
+            select: { id: true, name: true, email: true, role: true, isActive: true },
+          });
 
     return res.status(200).json(users);
   } catch (error) {
@@ -597,24 +607,6 @@ router.get(
       select: { id: true, name: true, email: true, role: true },
     });
     res.json(users);
-  }
-);
-
-router.post(
-  "/testcases",
-  authenticate,
-  authorizeRoles("DEVELOPER"),
-  async (_req: Request, res: Response) => {
-    res.json({ message: "Test case created" });
-  }
-);
-
-router.get(
-  "/reports",
-  authenticate,
-  authorizeRoles("ADMIN", "DEVELOPER"),
-  async (_req: Request, res: Response) => {
-    res.json({ message: "Reports data" });
   }
 );
 
