@@ -176,8 +176,17 @@ export async function getTestCasesApi() {
 export async function createTestCaseApi(payload: {
   title: string;
   description: string;
+  preConditions: unknown;
+  testDataRequirements: unknown;
+  environmentRequirements: unknown;
   module: string;
   steps: unknown;
+  postConditions: unknown;
+  metadata: Record<string, unknown>;
+  tags: string[];
+  estimatedDurationMinutes: number | null;
+  automationStatus: string;
+  automationScriptLink: string | null;
   priority: string;
   severity: string;
   type: string;
@@ -200,8 +209,12 @@ export async function updateTestCaseApi(id: string, payload: Record<string, unkn
   });
 }
 
-export async function cloneTestCaseApi(id: string) {
-  return authJson(`/testcases/${id}/clone`, { method: "POST" });
+export async function cloneTestCaseApi(id: string, payload?: Record<string, unknown>) {
+  return authJson(`/testcases/${id}/clone`, {
+    method: "POST",
+    headers: payload ? { "Content-Type": "application/json" } : undefined,
+    body: payload ? JSON.stringify(payload) : undefined,
+  });
 }
 
 export async function deleteTestCaseApi(id: string) {
