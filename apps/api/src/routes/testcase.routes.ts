@@ -12,6 +12,8 @@ import {
   TestCaseStatus,
   TestCaseType,
   TestSeverity,
+  TestRunCaseStatus,
+  TestRunStatus,
 } from "@prisma/client";
 import bcrypt from "bcrypt";
 import { Router, Response } from "express";
@@ -75,6 +77,130 @@ const validateStepItems = (steps: unknown): string | null => {
 
   return null;
 };
+
+type StepExecutionItem = {
+  stepNumber: number;
+  action: string;
+  expectedResult: string;
+  status: ExecutionStatus | "NOT_EXECUTED";
+  actualResult: string;
+  notes: string;
+};
+
+const toExecutionStepItems = (steps: unknown): StepExecutionItem[] => {
+  if (!Array.isArray(steps)) return [];
+  return steps
+    .filter((item) => item && typeof item === "object" && !Array.isArray(item))
+    .map((item, idx) => {
+      const step = item as Record<string, unknown>;
+      const rawStepNumber = step.stepNumber;
+      const stepNumber =
+        typeof rawStepNumber === "number" && Number.isFinite(rawStepNumber) ? rawStepNumber : idx + 1;
+      return {
+        stepNumber,
+        action: asString(step.action) || `Step ${stepNumber}`,
+        expectedResult: asString(step.expectedResult),
+        status: "NOT_EXECUTED" as const,
+        actualResult: "",
+        notes: "",
+      };
+    })
+    .sort((a, b) => a.stepNumber - b.stepNumber);
+};
+
+const parseStoredStepResults = (value: unknown): StepExecutionItem[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value as StepExecutionItem[];
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as StepExecutionItem[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const deriveOverallResultFromSteps = (stepResults: StepExecutionItem[]): ExecutionStatus => {
+  const executed = stepResults.filter((item) => item.status !== "NOT_EXECUTED");
+  if (executed.some((item) => item.status === "FAILED")) return ExecutionStatus.FAILED;
+  if (executed.some((item) => item.status === "BLOCKED")) return ExecutionStatus.BLOCKED;
+  if (executed.length > 0 && executed.every((item) => item.status === "SKIPPED")) return ExecutionStatus.SKIPPED;
+  if (executed.length > 0 && executed.every((item) => item.status === "PASSED")) return ExecutionStatus.PASSED;
+  if (executed.some((item) => item.status === "PASSED")) return ExecutionStatus.PASSED;
+  return ExecutionStatus.SKIPPED;
+};
+
+const deriveRunCaseStatus = (result: ExecutionStatus): TestRunCaseStatus => {
+  switch (result) {
+    case ExecutionStatus.PASSED:
+      return TestRunCaseStatus.PASSED;
+    case ExecutionStatus.FAILED:
+      return TestRunCaseStatus.FAILED;
+    case ExecutionStatus.BLOCKED:
+      return TestRunCaseStatus.BLOCKED;
+    case ExecutionStatus.SKIPPED:
+      return TestRunCaseStatus.SKIPPED;
+    default:
+      return TestRunCaseStatus.NOT_RUN;
+  }
+};
+
+const canManageExecution = (req: AuthRequest, executionUserId: string): boolean =>
+  req.user!.role === Role.ADMIN || req.user!.userId === executionUserId;
+
+const computeDurationSeconds = (start: Date, end: Date): number => {
+  const diffMs = end.getTime() - start.getTime();
+  return diffMs <= 0 ? 0 : Math.floor(diffMs / 1000);
+};
+
+type ExecutionMeta = {
+  timerStartAt?: string;
+  timerStopAt?: string;
+  durationSeconds?: number;
+  reexecutionOfId?: string;
+};
+
+const META_PREFIX = "[META]";
+const META_SUFFIX = "[/META]";
+
+const parseExecutionNotes = (notes: string | null): { userNotes: string; meta: ExecutionMeta } => {
+  if (!notes) {
+    return { userNotes: "", meta: {} };
+  }
+  const trimmed = notes.trim();
+  if (!trimmed.startsWith(META_PREFIX)) {
+    return { userNotes: notes, meta: {} };
+  }
+  const suffixIdx = trimmed.indexOf(META_SUFFIX);
+  if (suffixIdx === -1) {
+    return { userNotes: notes, meta: {} };
+  }
+  const jsonPart = trimmed.slice(META_PREFIX.length, suffixIdx);
+  const textPart = trimmed.slice(suffixIdx + META_SUFFIX.length).trimStart();
+  try {
+    const parsed = JSON.parse(jsonPart) as ExecutionMeta;
+    return { userNotes: textPart, meta: parsed ?? {} };
+  } catch {
+    return { userNotes: notes, meta: {} };
+  }
+};
+
+const mergeExecutionNotes = (
+  existingNotes: string | null,
+  userNotes: string | null | undefined,
+  metaPatch: Partial<ExecutionMeta>
+): string => {
+  const parsed = parseExecutionNotes(existingNotes);
+  const mergedMeta: ExecutionMeta = { ...parsed.meta, ...metaPatch };
+  const nextUserNotes = userNotes !== undefined && userNotes !== null ? userNotes : parsed.userNotes;
+  return `${META_PREFIX}${JSON.stringify(mergedMeta)}${META_SUFFIX}\n${nextUserNotes ?? ""}`.trim();
+};
+
+const executionEvidencePrefix = (executionId: string): string => `EXEVID::${executionId}::`;
 
 const isOwnerOrAssignee = (req: AuthRequest, createdBy: string, assignedTo: string | null): boolean =>
   req.user!.role === Role.ADMIN || req.user!.userId === createdBy || req.user!.userId === assignedTo;
@@ -893,7 +1019,13 @@ router.post(
     }> = [];
 
     if (sourceType === ImportSourceType.JSON) {
-      const items = Array.isArray(req.body.items) ? req.body.items : [];
+      const rawItems = req.body.items;
+      const items =
+        Array.isArray(rawItems)
+          ? rawItems
+          : rawItems && typeof rawItems === "object"
+          ? [rawItems]
+          : [];
       records = items.map((item: unknown) => {
         const row = (item ?? {}) as Record<string, unknown>;
         const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
@@ -1007,6 +1139,13 @@ router.post(
             parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
           automationScriptLink: asString(read("automationScriptLink")) || null,
         };
+      });
+    }
+
+    if (records.length === 0) {
+      return res.status(400).json({
+        message:
+          "No import rows found. Provide at least one row/item for the selected source type before preview/confirm.",
       });
     }
 
@@ -1141,9 +1280,491 @@ router.post(
   }
 );
 
+router.get(
+  "/executions/testcases/:id/open",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
+    if (!existing || existing.isDeleted) {
+      return res.status(404).json({ message: "Test case not found" });
+    }
+
+    const testRunId = asString(req.query.testRunId);
+    if (testRunId) {
+      const run = await prisma.testRun.findUnique({
+        where: { id: testRunId },
+        include: { assignments: true, testCases: true },
+      });
+      if (!run) {
+        return res.status(404).json({ message: "Test run not found" });
+      }
+      const assigned = run.assignments.some((item: { testerId: string }) => item.testerId === req.user!.userId);
+      const included = run.testCases.some((item: { testCaseId: string }) => item.testCaseId === existing.id);
+      if (req.user!.role !== Role.ADMIN && (!assigned || !included)) {
+        return res.status(403).json({ message: "You are not assigned to execute this test case in the selected run" });
+      }
+    }
+
+    const latestDraft = await prisma.testExecution.findFirst({
+      where: {
+        testCaseId: existing.id,
+        executedBy: req.user!.userId,
+        testRunId: testRunId || null,
+        isDraft: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    const defaultSteps = toExecutionStepItems(existing.steps);
+    const storedSteps = latestDraft?.stepResults ? parseStoredStepResults(latestDraft.stepResults) : [];
+
+    const mergedSteps =
+      storedSteps.length > 0
+        ? defaultSteps.map((step) => {
+            const found = storedSteps.find((item) => item.stepNumber === step.stepNumber);
+            return found ? { ...step, ...found } : step;
+          })
+        : defaultSteps;
+
+    const parsedDraft = parseExecutionNotes(latestDraft?.notes ?? null);
+    const evidence =
+      latestDraft
+        ? await prisma.attachment.findMany({
+            where: {
+              testCaseId: existing.id,
+              fileName: {
+                startsWith: executionEvidencePrefix(latestDraft.id),
+              },
+            },
+            orderBy: { createdAt: "desc" },
+          })
+        : [];
+
+    return res.json({
+      testCase: existing,
+      draftExecution: latestDraft
+        ? {
+            id: latestDraft.id,
+            progressPercent: latestDraft.progressPercent,
+            notes: parsedDraft.userNotes,
+            startedAt: parsedDraft.meta.timerStartAt || null,
+            completedAt: parsedDraft.meta.timerStopAt || null,
+            durationSeconds:
+              typeof parsedDraft.meta.durationSeconds === "number" ? parsedDraft.meta.durationSeconds : null,
+            reexecutionOfId: parsedDraft.meta.reexecutionOfId || null,
+            evidence,
+            stepResults: mergedSteps,
+          }
+        : null,
+      stepResults: mergedSteps,
+    });
+  }
+);
+
+router.post(
+  "/executions/testcases/:id/start",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
+    if (!existing || existing.isDeleted) {
+      return res.status(404).json({ message: "Test case not found" });
+    }
+
+    const testRunId = asString(req.body.testRunId) || null;
+    if (testRunId) {
+      const run = await prisma.testRun.findUnique({
+        where: { id: testRunId },
+        include: { assignments: true, testCases: true },
+      });
+      if (!run) {
+        return res.status(404).json({ message: "Test run not found" });
+      }
+      const assigned = run.assignments.some((item: { testerId: string }) => item.testerId === req.user!.userId);
+      const included = run.testCases.some((item: { testCaseId: string }) => item.testCaseId === existing.id);
+      if (req.user!.role !== Role.ADMIN && (!assigned || !included)) {
+        return res.status(403).json({ message: "You are not assigned to this test run/test case" });
+      }
+    }
+
+    const execution = await prisma.testExecution.create({
+      data: {
+        testCaseId: existing.id,
+        executedBy: req.user!.userId,
+        testRunId,
+        result: ExecutionStatus.SKIPPED,
+        notes: mergeExecutionNotes(null, asString(req.body.notes) || "", {
+          timerStartAt: new Date().toISOString(),
+        }),
+        stepResults: toExecutionStepItems(existing.steps) as never,
+        progressPercent: 0,
+        isDraft: true,
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "START_TEST_EXECUTION", "TestExecution", execution.id, {
+      testCaseId: existing.id,
+      testRunId,
+    });
+    return res.status(201).json(execution);
+  }
+);
+
+router.post(
+  "/executions/:executionId/steps/:stepNumber",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({
+      where: { id: req.params.executionId },
+      include: { testCase: true },
+    });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (req.user!.role !== Role.ADMIN && execution.executedBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can update only your own execution" });
+    }
+    if (!execution.isDraft) {
+      return res.status(400).json({ message: "Execution is already finalized" });
+    }
+
+    const stepNumber = Number(req.params.stepNumber);
+    if (!Number.isFinite(stepNumber) || stepNumber <= 0) {
+      return res.status(400).json({ message: "Valid step number is required" });
+    }
+    const stepStatus = parseEnum(ExecutionStatus, req.body.status);
+    if (!stepStatus) {
+      return res.status(400).json({ message: "Valid step status is required" });
+    }
+
+    const storedSteps = parseStoredStepResults(execution.stepResults);
+    const fallbackSteps = toExecutionStepItems(execution.testCase.steps);
+    const baseSteps = storedSteps.length > 0 ? storedSteps : fallbackSteps;
+    const idx = baseSteps.findIndex((item) => item.stepNumber === stepNumber);
+    if (idx < 0) {
+      return res.status(404).json({ message: "Step not found in test case definition" });
+    }
+
+    baseSteps[idx] = {
+      ...baseSteps[idx],
+      status: stepStatus,
+      actualResult: asString(req.body.actualResult),
+      notes: asString(req.body.notes),
+    };
+
+    const executedCount = baseSteps.filter((item) => item.status !== "NOT_EXECUTED").length;
+    const progressPercent =
+      baseSteps.length === 0 ? 0 : Math.round((executedCount / baseSteps.length) * 100);
+
+    const updated = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        stepResults: baseSteps as never,
+        progressPercent,
+        notes: mergeExecutionNotes(
+          execution.notes,
+          asString(req.body.executionNotes) || parseExecutionNotes(execution.notes).userNotes,
+          {}
+        ),
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "AUTO_SAVE_TEST_EXECUTION_STEP", "TestExecution", updated.id, {
+      stepNumber,
+      stepStatus,
+      progressPercent,
+    });
+    return res.json({
+      id: updated.id,
+      progressPercent: updated.progressPercent,
+      stepResults: baseSteps,
+    });
+  }
+);
+
+router.post(
+  "/executions/:executionId/timer/start",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can start timer only for your own execution" });
+    }
+    if (!execution.isDraft) {
+      return res.status(400).json({ message: "Execution already finalized" });
+    }
+
+    const parsed = parseExecutionNotes(execution.notes);
+    const startedAt = parsed.meta.timerStartAt || new Date().toISOString();
+    const updated = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
+          timerStartAt: startedAt,
+          timerStopAt: undefined,
+        }),
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "START_EXECUTION_TIMER", "TestExecution", updated.id, {
+      startedAt,
+    });
+    return res.json({
+      id: updated.id,
+      startedAt,
+      completedAt: null,
+      durationSeconds: null,
+    });
+  }
+);
+
+router.post(
+  "/executions/:executionId/timer/stop",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can stop timer only for your own execution" });
+    }
+
+    const parsed = parseExecutionNotes(execution.notes);
+    const start = parsed.meta.timerStartAt ? new Date(parsed.meta.timerStartAt) : execution.executedAt;
+    const end = new Date();
+    const durationSeconds = computeDurationSeconds(start, end);
+    const updated = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
+          timerStartAt: start.toISOString(),
+          timerStopAt: end.toISOString(),
+          durationSeconds,
+        }),
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "STOP_EXECUTION_TIMER", "TestExecution", updated.id, {
+      completedAt: end.toISOString(),
+      durationSeconds,
+    });
+    return res.json({
+      id: updated.id,
+      startedAt: start.toISOString(),
+      completedAt: end.toISOString(),
+      durationSeconds,
+    });
+  }
+);
+
+router.get(
+  "/executions/:executionId/evidence",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can view evidence only for your own execution" });
+    }
+    const evidence = await prisma.attachment.findMany({
+      where: {
+        testCaseId: execution.testCaseId,
+        fileName: {
+          startsWith: executionEvidencePrefix(execution.id),
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    return res.json(
+      evidence.map((item) => ({
+        ...item,
+        displayName: item.fileName.replace(executionEvidencePrefix(execution.id), ""),
+      }))
+    );
+  }
+);
+
+router.post(
+  "/executions/:executionId/evidence",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can upload evidence only for your own execution" });
+    }
+
+    const fileType = parseEnum(AttachmentType, req.body.fileType);
+    const fileUrl = asString(req.body.fileUrl);
+    const fileName = asString(req.body.fileName);
+    if (!fileType || !fileUrl || !fileName) {
+      return res.status(400).json({ message: "fileType, fileUrl, and fileName are required" });
+    }
+
+    const created = await prisma.attachment.create({
+      data: {
+        testCaseId: execution.testCaseId,
+        uploadedBy: req.user!.userId,
+        fileType,
+        fileUrl,
+        fileName: `${executionEvidencePrefix(execution.id)}${fileName}`,
+      },
+    });
+    await writeAuditLog(req.user!.userId, "UPLOAD_EXECUTION_EVIDENCE", "Attachment", created.id, {
+      executionId: execution.id,
+      fileType,
+      notes: asString(req.body.notes) || null,
+    });
+    return res.status(201).json({
+      ...created,
+      displayName: fileName,
+    });
+  }
+);
+
+router.delete(
+  "/executions/:executionId/evidence/:evidenceId",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can delete evidence only for your own execution" });
+    }
+
+    const evidence = await prisma.attachment.findUnique({ where: { id: req.params.evidenceId } });
+    if (
+      !evidence ||
+      evidence.testCaseId !== execution.testCaseId ||
+      !evidence.fileName.startsWith(executionEvidencePrefix(execution.id))
+    ) {
+      return res.status(404).json({ message: "Evidence not found" });
+    }
+    await prisma.attachment.delete({ where: { id: evidence.id } });
+    await writeAuditLog(req.user!.userId, "DELETE_EXECUTION_EVIDENCE", "Attachment", evidence.id, {
+      executionId: execution.id,
+    });
+    return res.json({ message: "Evidence deleted" });
+  }
+);
+
+router.post(
+  "/executions/:executionId/reexecute",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const original = await prisma.testExecution.findUnique({
+      where: { id: req.params.executionId },
+      include: { testCase: true },
+    });
+    if (!original) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, original.executedBy)) {
+      return res.status(403).json({ message: "You can re-execute only your own execution" });
+    }
+
+    const restarted = await prisma.testExecution.create({
+      data: {
+        testCaseId: original.testCaseId,
+        executedBy: req.user!.userId,
+        testRunId: original.testRunId,
+        result: ExecutionStatus.SKIPPED,
+        notes: mergeExecutionNotes(null, asString(req.body.notes) || "Re-execution initiated", {
+          timerStartAt: new Date().toISOString(),
+          reexecutionOfId: original.id,
+        }),
+        stepResults: toExecutionStepItems(original.testCase.steps) as never,
+        progressPercent: 0,
+        isDraft: true,
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "REEXECUTE_TEST_CASE", "TestExecution", restarted.id, {
+      originalExecutionId: original.id,
+    });
+    return res.status(201).json(restarted);
+  }
+);
+
+router.post(
+  "/executions/:executionId/finalize",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({
+      where: { id: req.params.executionId },
+      include: { testCase: true },
+    });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (req.user!.role !== Role.ADMIN && execution.executedBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can finalize only your own execution" });
+    }
+
+    const stepResults = parseStoredStepResults(execution.stepResults);
+    const explicitResult = parseEnum(ExecutionStatus, req.body.result);
+    const finalResult = explicitResult || deriveOverallResultFromSteps(stepResults);
+    const parsed = parseExecutionNotes(execution.notes);
+    const finalUserNotes = asString(req.body.notes) || parsed.userNotes;
+    const completedAt = new Date();
+    const timerStart = parsed.meta.timerStartAt ? new Date(parsed.meta.timerStartAt) : execution.executedAt;
+    const durationSeconds = computeDurationSeconds(timerStart, completedAt);
+    const finalNotes = mergeExecutionNotes(execution.notes, finalUserNotes, {
+      timerStartAt: timerStart.toISOString(),
+      timerStopAt: completedAt.toISOString(),
+      durationSeconds,
+    });
+
+    const finalized = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        result: finalResult,
+        notes: finalNotes,
+        isDraft: false,
+        progressPercent: 100,
+      },
+    });
+
+    if (finalized.testRunId) {
+      await prisma.testRunCase.updateMany({
+        where: {
+          testRunId: finalized.testRunId,
+          testCaseId: finalized.testCaseId,
+        },
+        data: {
+          status: deriveRunCaseStatus(finalResult),
+          lastExecutionId: finalized.id,
+        },
+      });
+    }
+
+    await writeAuditLog(req.user!.userId, "FINALIZE_TEST_EXECUTION", "TestExecution", finalized.id, {
+      finalResult,
+      testRunId: finalized.testRunId,
+    });
+    return res.json({
+      ...finalized,
+      notes: finalUserNotes,
+      startedAt: timerStart.toISOString(),
+      completedAt: completedAt.toISOString(),
+      durationSeconds,
+      reexecutionOfId: parsed.meta.reexecutionOfId || null,
+    });
+  }
+);
+
 router.post(
   "/testcases/:id/execute",
-  authorizeRoles(Role.TESTER),
+  authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.isDeleted) {
@@ -1159,13 +1780,302 @@ router.post(
       data: {
         testCaseId: existing.id,
         executedBy: req.user!.userId,
+        testRunId: asString(req.body.testRunId) || null,
         result,
-        notes: asString(req.body.notes) || null,
+        notes: mergeExecutionNotes(null, asString(req.body.notes) || "", {
+          timerStartAt: new Date().toISOString(),
+          timerStopAt: new Date().toISOString(),
+          durationSeconds: 0,
+        }),
+        stepResults: parseJsonValue(req.body.stepResults, []) as never,
+        progressPercent: 100,
+        isDraft: false,
       },
     });
 
+    if (execution.testRunId) {
+      await prisma.testRunCase.updateMany({
+        where: {
+          testRunId: execution.testRunId,
+          testCaseId: execution.testCaseId,
+        },
+        data: {
+          status: deriveRunCaseStatus(result),
+          lastExecutionId: execution.id,
+        },
+      });
+    }
+
     await writeAuditLog(req.user!.userId, "EXECUTE_TEST_CASE", "TestExecution", execution.id, { result });
     return res.status(201).json(execution);
+  }
+);
+
+router.post(
+  "/test-runs",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const name = asString(req.body.name);
+    const description = asString(req.body.description) || null;
+    const targetStartDate = req.body.targetStartDate ? new Date(req.body.targetStartDate) : null;
+    const targetEndDate = req.body.targetEndDate ? new Date(req.body.targetEndDate) : null;
+    const testerIds = Array.isArray(req.body.testerIds) ? asStringArray(req.body.testerIds) : [];
+    const testCaseIds = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
+
+    if (!name) {
+      return res.status(400).json({ message: "name is required" });
+    }
+    if (testCaseIds.length === 0) {
+      return res.status(400).json({ message: "At least one testCaseId is required" });
+    }
+    if (targetStartDate && Number.isNaN(targetStartDate.getTime())) {
+      return res.status(400).json({ message: "targetStartDate is invalid" });
+    }
+    if (targetEndDate && Number.isNaN(targetEndDate.getTime())) {
+      return res.status(400).json({ message: "targetEndDate is invalid" });
+    }
+    if (targetStartDate && targetEndDate && targetEndDate < targetStartDate) {
+      return res.status(400).json({ message: "targetEndDate cannot be earlier than targetStartDate" });
+    }
+
+    const distinctCaseIds = [...new Set(testCaseIds)];
+    const distinctTesterIds = [...new Set(testerIds)];
+    const foundCases = await prisma.testCase.findMany({
+      where: { id: { in: distinctCaseIds }, isDeleted: false },
+      select: { id: true },
+    });
+    if (foundCases.length !== distinctCaseIds.length) {
+      return res.status(400).json({ message: "One or more testCaseIds are invalid or deleted" });
+    }
+
+    if (distinctTesterIds.length > 0) {
+      const testers = await prisma.user.findMany({
+        where: { id: { in: distinctTesterIds }, role: Role.TESTER, isActive: true },
+        select: { id: true },
+      });
+      if (testers.length !== distinctTesterIds.length) {
+        return res.status(400).json({ message: "One or more testerIds are invalid/inactive/non-tester users" });
+      }
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const run = await tx.testRun.create({
+        data: {
+          name,
+          description,
+          createdBy: req.user!.userId,
+          targetStartDate,
+          targetEndDate,
+          status: TestRunStatus.PLANNED,
+        },
+      });
+      if (distinctCaseIds.length > 0) {
+        await tx.testRunCase.createMany({
+          data: distinctCaseIds.map((testCaseId) => ({
+            testRunId: run.id,
+            testCaseId,
+            status: TestRunCaseStatus.NOT_RUN,
+          })),
+        });
+      }
+      if (distinctTesterIds.length > 0) {
+        await tx.testRunAssignment.createMany({
+          data: distinctTesterIds.map((testerId) => ({
+            testRunId: run.id,
+            testerId,
+          })),
+        });
+      }
+      return run;
+    });
+
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_RUN", "TestRun", created.id, {
+      testCaseCount: distinctCaseIds.length,
+      testerCount: distinctTesterIds.length,
+    });
+
+    return res.status(201).json(created);
+  }
+);
+
+router.get(
+  "/test-runs",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const where: Prisma.TestRunWhereInput =
+      req.user!.role === Role.ADMIN
+        ? {}
+        : {
+            OR: [
+              { createdBy: req.user!.userId },
+              { assignments: { some: { testerId: req.user!.userId } } },
+            ],
+          };
+
+    const runs = await prisma.testRun.findMany({
+      where,
+      include: {
+        creator: { select: { id: true, name: true, email: true } },
+        assignments: { include: { tester: { select: { id: true, name: true, email: true } } } },
+        testCases: { include: { testCase: { select: { id: true, title: true, testCaseCode: true } } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const withProgress = runs.map((run: any) => {
+      const total = run.testCases.length;
+      const completed = run.testCases.filter((item: any) => item.status !== TestRunCaseStatus.NOT_RUN).length;
+      return {
+        ...run,
+        progress: {
+          total,
+          completed,
+          percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+        },
+      };
+    });
+    return res.json(withProgress);
+  }
+);
+
+router.get(
+  "/test-runs/:id",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const run = await prisma.testRun.findUnique({
+      where: { id: req.params.id },
+      include: {
+        creator: { select: { id: true, name: true, email: true } },
+        assignments: { include: { tester: { select: { id: true, name: true, email: true } } } },
+        testCases: {
+          include: {
+            testCase: { select: { id: true, title: true, testCaseCode: true, module: true } },
+            lastExecution: { select: { id: true, result: true, executedAt: true, executedBy: true } },
+          },
+        },
+      },
+    });
+    if (!run) {
+      return res.status(404).json({ message: "Test run not found" });
+    }
+    const assigned = run.assignments.some((item: any) => item.testerId === req.user!.userId);
+    if (req.user!.role !== Role.ADMIN && run.createdBy !== req.user!.userId && !assigned) {
+      return res.status(403).json({ message: "You are not allowed to view this test run" });
+    }
+    const total = run.testCases.length;
+    const completed = run.testCases.filter((item: any) => item.status !== TestRunCaseStatus.NOT_RUN).length;
+    return res.json({
+      ...run,
+      progress: {
+        total,
+        completed,
+        percent: total > 0 ? Math.round((completed / total) * 100) : 0,
+      },
+    });
+  }
+);
+
+router.patch(
+  "/test-runs/:id",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const run = await prisma.testRun.findUnique({ where: { id: req.params.id } });
+    if (!run) {
+      return res.status(404).json({ message: "Test run not found" });
+    }
+    if (req.user!.role !== Role.ADMIN && run.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "Only creator/admin can update this test run" });
+    }
+    const nextStatus = parseEnum(TestRunStatus, req.body.status);
+    const updated = await prisma.testRun.update({
+      where: { id: req.params.id },
+      data: {
+        name: asString(req.body.name) || undefined,
+        description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
+        targetStartDate: req.body.targetStartDate ? new Date(req.body.targetStartDate) : undefined,
+        targetEndDate: req.body.targetEndDate ? new Date(req.body.targetEndDate) : undefined,
+        status: nextStatus ?? undefined,
+      },
+    });
+    await writeAuditLog(req.user!.userId, "UPDATE_TEST_RUN", "TestRun", updated.id, {
+      status: updated.status,
+    });
+    return res.json(updated);
+  }
+);
+
+router.post(
+  "/test-runs/:id/assign",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const testerId = asString(req.body.testerId);
+    if (!testerId) {
+      return res.status(400).json({ message: "testerId is required" });
+    }
+    const run = await prisma.testRun.findUnique({ where: { id: req.params.id } });
+    if (!run) {
+      return res.status(404).json({ message: "Test run not found" });
+    }
+    if (req.user!.role !== Role.ADMIN && run.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "Only creator/admin can assign testers" });
+    }
+    const tester = await prisma.user.findUnique({ where: { id: testerId } });
+    if (!tester || tester.role !== Role.TESTER || !tester.isActive) {
+      return res.status(400).json({ message: "Valid active tester is required" });
+    }
+
+    const assignment = await prisma.testRunAssignment.upsert({
+      where: { testRunId_testerId: { testRunId: run.id, testerId } },
+      create: {
+        testRunId: run.id,
+        testerId,
+      },
+      update: {},
+    });
+
+    await writeAuditLog(req.user!.userId, "ASSIGN_TEST_RUN", "TestRunAssignment", assignment.id, {
+      testerId,
+      testRunId: run.id,
+    });
+    return res.status(201).json(assignment);
+  }
+);
+
+router.post(
+  "/test-runs/:id/testcases",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const testCaseId = asString(req.body.testCaseId);
+    if (!testCaseId) {
+      return res.status(400).json({ message: "testCaseId is required" });
+    }
+    const run = await prisma.testRun.findUnique({ where: { id: req.params.id } });
+    if (!run) {
+      return res.status(404).json({ message: "Test run not found" });
+    }
+    if (req.user!.role !== Role.ADMIN && run.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "Only creator/admin can add test cases to run" });
+    }
+    const testCase = await prisma.testCase.findUnique({ where: { id: testCaseId } });
+    if (!testCase || testCase.isDeleted) {
+      return res.status(404).json({ message: "Test case not found" });
+    }
+
+    const linked = await prisma.testRunCase.upsert({
+      where: { testRunId_testCaseId: { testRunId: run.id, testCaseId } },
+      create: {
+        testRunId: run.id,
+        testCaseId,
+        status: TestRunCaseStatus.NOT_RUN,
+      },
+      update: {},
+    });
+
+    await writeAuditLog(req.user!.userId, "ADD_TEST_CASE_TO_RUN", "TestRunCase", linked.id, {
+      testRunId: run.id,
+      testCaseId,
+    });
+    return res.status(201).json(linked);
   }
 );
 
@@ -1247,6 +2157,7 @@ router.get(
   authorizeRoles(Role.TESTER, Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
     const executions = await prisma.testExecution.findMany({
+      where: { isDraft: false },
       include: {
         testCase: { select: { id: true, title: true } },
         executor: { select: { id: true, name: true, email: true } },
@@ -1254,10 +2165,43 @@ router.get(
       orderBy: { executedAt: "desc" },
     });
 
+    const enriched = await Promise.all(
+      executions.map(async (item) => {
+        const parsed = parseExecutionNotes(item.notes);
+        const evidenceCount = await prisma.attachment.count({
+          where: {
+            testCaseId: item.testCaseId,
+            fileName: {
+              startsWith: executionEvidencePrefix(item.id),
+            },
+          },
+        });
+        return {
+          ...item,
+          notes: parsed.userNotes,
+          timerStartAt: parsed.meta.timerStartAt || null,
+          timerStopAt: parsed.meta.timerStopAt || null,
+          durationSeconds:
+            typeof parsed.meta.durationSeconds === "number" ? parsed.meta.durationSeconds : null,
+          reexecutionOfId: parsed.meta.reexecutionOfId || null,
+          evidenceCount,
+        };
+      })
+    );
+
     if (req.query.export === "csv") {
-      const header = "executionId,testCaseId,testCaseTitle,result,executor,executedAt";
-      const rows = executions.map((item) =>
-        [item.id, item.testCaseId, item.testCase.title, item.result, item.executor.email, item.executedAt.toISOString()]
+      const header = "executionId,testCaseId,testCaseTitle,result,executor,evidenceCount,durationSeconds,executedAt";
+      const rows = enriched.map((item) =>
+        [
+          item.id,
+          item.testCaseId,
+          item.testCase.title,
+          item.result,
+          item.executor.email,
+          item.evidenceCount,
+          item.durationSeconds ?? "",
+          item.executedAt.toISOString(),
+        ]
           .map((value) => `"${String(value).replace(/\"/g, "\"\"")}"`)
           .join(",")
       );
@@ -1265,7 +2209,7 @@ router.get(
       return res.send([header, ...rows].join("\n"));
     }
 
-    return res.json(executions);
+    return res.json(enriched);
   }
 );
 
@@ -1361,8 +2305,8 @@ router.post(
 ========================= */
 router.get("/developer/reports", authorizeRoles(Role.DEVELOPER), async (_req: AuthRequest, res: Response) => {
   const [totalExecutions, failedExecutions, openIssues] = await Promise.all([
-    prisma.testExecution.count(),
-    prisma.testExecution.count({ where: { result: ExecutionStatus.FAILED } }),
+    prisma.testExecution.count({ where: { isDraft: false } }),
+    prisma.testExecution.count({ where: { isDraft: false, result: ExecutionStatus.FAILED } }),
     prisma.issue.count({ where: { status: { in: [IssueStatus.OPEN, IssueStatus.IN_PROGRESS] } } }),
   ]);
   return res.json({ totalExecutions, failedExecutions, openIssues });
