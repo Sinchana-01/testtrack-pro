@@ -3,21 +3,36 @@ import {
   bulkTestCaseOperationApi,
   clearSessionTokens,
   cloneTestCaseApi,
+  createBugFromExecutionApi,
+  createTestRunApi,
+  deleteExecutionEvidenceApi,
   createFromTemplateApi,
   createTemplateApi,
   createTestCaseApi,
   deleteTestCaseApi,
+  finalizeExecutionApi,
   forgotPasswordApi,
+  getTestRunApi,
   getRefreshToken,
+  listExecutionEvidenceApi,
+  listExecutionReportsApi,
   getTestCasesApi,
   importTestCasesApi,
   listTemplatesApi,
+  listTestRunsApi,
   loginApi,
   logoutAllApi,
+  openExecutionApi,
+  reexecuteExecutionApi,
   refreshTokenApi,
   registerApi,
   resetPasswordApi,
+  saveExecutionStepApi,
   setSessionTokens,
+  startExecutionTimerApi,
+  startExecutionApi,
+  stopExecutionTimerApi,
+  uploadExecutionEvidenceApi,
   updateTestCaseApi,
 } from "./api";
 import "./App.css";
@@ -99,6 +114,37 @@ function App() {
   const [editStatus, setEditStatus] = useState("DRAFT");
   const [showTestCaseList, setShowTestCaseList] = useState(false);
   const [expandedTestCaseId, setExpandedTestCaseId] = useState("");
+  const [testRuns, setTestRuns] = useState<any[]>([]);
+  const [runName, setRunName] = useState("");
+  const [runDescription, setRunDescription] = useState("");
+  const [runStartDate, setRunStartDate] = useState("");
+  const [runEndDate, setRunEndDate] = useState("");
+  const [runTesterIdsText, setRunTesterIdsText] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState("");
+  const [runDetails, setRunDetails] = useState<any>(null);
+  const [executionCaseId, setExecutionCaseId] = useState("");
+  const [executionRunId, setExecutionRunId] = useState("");
+  const [executionId, setExecutionId] = useState("");
+  const [executionSteps, setExecutionSteps] = useState<any[]>([]);
+  const [executionNotes, setExecutionNotes] = useState("");
+  const [executionSelectedStepNumber, setExecutionSelectedStepNumber] = useState("");
+  const [executionStepStatus, setExecutionStepStatus] = useState("PASSED");
+  const [executionActualResult, setExecutionActualResult] = useState("");
+  const [executionStepNotes, setExecutionStepNotes] = useState("");
+  const [executionProgress, setExecutionProgress] = useState(0);
+  const [executionStartedAt, setExecutionStartedAt] = useState("");
+  const [executionCompletedAt, setExecutionCompletedAt] = useState("");
+  const [executionDurationSeconds, setExecutionDurationSeconds] = useState<number | null>(null);
+  const [executionEvidence, setExecutionEvidence] = useState<any[]>([]);
+  const [evidenceType, setEvidenceType] = useState("IMAGE");
+  const [evidenceUrl, setEvidenceUrl] = useState("");
+  const [evidenceName, setEvidenceName] = useState("");
+  const [evidenceNotes, setEvidenceNotes] = useState("");
+  const [executionReports, setExecutionReports] = useState<any[]>([]);
+  const [selectedExecutionReportId, setSelectedExecutionReportId] = useState("");
+  const [quickBugTitle, setQuickBugTitle] = useState("");
+  const [quickBugDescription, setQuickBugDescription] = useState("");
+  const [quickBugSeverity, setQuickBugSeverity] = useState("MEDIUM");
   const roleName = currentRole.toUpperCase();
   const isTester = roleName === "TESTER";
   const isDeveloper = roleName === "DEVELOPER";
@@ -108,6 +154,8 @@ function App() {
   const canRunBulkOps = isTester;
   const canImportTestCases = isTester;
   const canSeeSelectionControls = isTester;
+  const canExecuteTests = isTester || isAdmin;
+  const canManageTestRuns = isTester || isAdmin;
 
   const parseSteps = (raw: string): unknown => {
     const value = raw.trim();
@@ -270,12 +318,44 @@ function App() {
 
   const loadTestCaseData = async () => {
     setIsRefreshing(true);
-    const [caseRows, templateRows] = await Promise.all([getTestCasesApi(), listTemplatesApi()]);
+    const [caseRows, templateRows, runRows, executionRows] = await Promise.all([
+      getTestCasesApi(),
+      listTemplatesApi(),
+      canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
+      canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
+    ]);
     const rows = Array.isArray(caseRows) ? caseRows : [];
     setTestCases(rows);
     setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
     setTemplates(Array.isArray(templateRows) ? templateRows : []);
+    setTestRuns(Array.isArray(runRows) ? runRows : []);
+    setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
     setIsRefreshing(false);
+  };
+
+  const resetExecutionPanel = () => {
+    setExecutionCaseId("");
+    setExecutionRunId("");
+    setExecutionId("");
+    setExecutionSteps([]);
+    setExecutionNotes("");
+    setExecutionSelectedStepNumber("");
+    setExecutionStepStatus("PASSED");
+    setExecutionActualResult("");
+    setExecutionStepNotes("");
+    setExecutionProgress(0);
+    setExecutionStartedAt("");
+    setExecutionCompletedAt("");
+    setExecutionDurationSeconds(null);
+    setExecutionEvidence([]);
+    setEvidenceType("IMAGE");
+    setEvidenceUrl("");
+    setEvidenceName("");
+    setEvidenceNotes("");
+    setSelectedExecutionReportId("");
+    setQuickBugTitle("");
+    setQuickBugDescription("");
+    setQuickBugSeverity("MEDIUM");
   };
 
   const resetEntryFields = () => {
@@ -317,6 +397,14 @@ function App() {
     setImportPayload(
       '[{"title":"Imported Case","description":"From JSON","preConditions":["User exists"],"testDataRequirements":["Valid email: test@example.com"],"environmentRequirements":["Chrome 120+"],"module":"Authentication","steps":[{"stepNumber":1,"action":"Open login","testData":"N/A","expectedResult":"Login page opens"}],"postConditions":["User is logged in"],"metadata":{"owner":"QA"},"priority":"MEDIUM","severity":"MAJOR","type":"FUNCTIONAL","status":"DRAFT"}]'
     );
+    setRunName("");
+    setRunDescription("");
+    setRunStartDate("");
+    setRunEndDate("");
+    setRunTesterIdsText("");
+    setSelectedRunId("");
+    setRunDetails(null);
+    resetExecutionPanel();
   };
 
   const startEditCase = (tc: any) => {
@@ -384,6 +472,12 @@ function App() {
     }
   };
 
+  const parseIdsFromText = (raw: string): string[] =>
+    raw
+      .split(/[\n,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
   /* PASSWORD RULES */
   const isValidPassword = (pwd: string) =>
     pwd.length >= 8 &&
@@ -436,6 +530,10 @@ function App() {
       setExpandedTestCaseId("");
       setSelectedIds([]);
       setEditingId("");
+      setTestRuns([]);
+      setSelectedRunId("");
+      setRunDetails(null);
+      resetExecutionPanel();
     }
   }, [screen, currentRole]);
 
@@ -1050,6 +1148,10 @@ function App() {
                         alert("Please run Preview Import before final import");
                         return;
                       }
+                      if (importPreview.length === 0) {
+                        alert("Preview has 0 rows. Please provide valid import data first.");
+                        return;
+                      }
                       const fieldMapping = parseFieldMapping();
                       const excelRows =
                         importType === "EXCEL"
@@ -1081,6 +1183,491 @@ function App() {
                     {importPreviewErrors.slice(0, 5).join(" | ")}
                   </div>
                 )}
+              </section>
+              )}
+
+              {canManageTestRuns && (
+              <section className="panel">
+                <h4>Test Run / Cycle Management</h4>
+                <input
+                  className="input"
+                  placeholder="Run Name (e.g., Sprint 5 Regression)"
+                  value={runName}
+                  onChange={(e) => setRunName(e.target.value)}
+                />
+                <input
+                  className="input"
+                  placeholder="Description"
+                  value={runDescription}
+                  onChange={(e) => setRunDescription(e.target.value)}
+                />
+                <label className="fieldLabel">Target Start Date</label>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={runStartDate}
+                  onChange={(e) => setRunStartDate(e.target.value)}
+                />
+                <label className="fieldLabel">Target End Date</label>
+                <input
+                  className="input"
+                  type="datetime-local"
+                  value={runEndDate}
+                  onChange={(e) => setRunEndDate(e.target.value)}
+                />
+                <textarea
+                  className="input"
+                  rows={3}
+                  placeholder="Tester IDs (comma or newline separated)"
+                  value={runTesterIdsText}
+                  onChange={(e) => setRunTesterIdsText(e.target.value)}
+                />
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!runName.trim()) {
+                        alert("Run name is required");
+                        return;
+                      }
+                      if (selectedIds.length === 0) {
+                        alert("Select at least one test case from the list section");
+                        return;
+                      }
+                      await createTestRunApi({
+                        name: runName,
+                        description: runDescription || undefined,
+                        targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
+                        targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
+                        testCaseIds: selectedIds,
+                        testerIds: parseIdsFromText(runTesterIdsText),
+                      });
+                      await loadTestCaseData();
+                      alert("Test run created");
+                    } catch (error: any) {
+                      alert(error?.message || "Create test run failed");
+                    }
+                  }}
+                >
+                  Create Test Run
+                </button>
+                <select
+                  className="input"
+                  value={selectedRunId}
+                  onChange={(e) => setSelectedRunId(e.target.value)}
+                >
+                  <option value="">Select Test Run</option>
+                  {testRuns.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {run.name} ({run.progress?.completed || 0}/{run.progress?.total || 0})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!selectedRunId) {
+                        alert("Select a test run");
+                        return;
+                      }
+                      const detail = await getTestRunApi(selectedRunId);
+                      setRunDetails(detail);
+                    } catch (error: any) {
+                      alert(error?.message || "Load test run failed");
+                    }
+                  }}
+                >
+                  View Run Progress
+                </button>
+                {runDetails && (
+                  <div className="testCaseDetails">
+                    <div><strong>Run:</strong> {runDetails.name}</div>
+                    <div><strong>Status:</strong> {runDetails.status}</div>
+                    <div>
+                      <strong>Progress:</strong> {runDetails.progress?.completed || 0}/
+                      {runDetails.progress?.total || 0} ({runDetails.progress?.percent || 0}%)
+                    </div>
+                  </div>
+                )}
+              </section>
+              )}
+
+              {canExecuteTests && (
+              <section className="panel">
+                <h4>Execute Test Case</h4>
+                <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
+                  <option value="">Select Test Case</option>
+                  {testCases.map((tc) => (
+                    <option key={tc.id} value={tc.id}>
+                      {tc.testCaseCode || tc.id} - {tc.title}
+                    </option>
+                  ))}
+                </select>
+                <select className="input" value={executionRunId} onChange={(e) => setExecutionRunId(e.target.value)}>
+                  <option value="">Optional: Link to Test Run</option>
+                  {testRuns.map((run) => (
+                    <option key={run.id} value={run.id}>
+                      {run.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!executionCaseId) {
+                        alert("Select a test case");
+                        return;
+                      }
+                      const opened = await openExecutionApi(executionCaseId, executionRunId || undefined);
+                      const currentSteps = Array.isArray(opened?.stepResults) ? opened.stepResults : [];
+                      setExecutionSteps(currentSteps);
+                      setExecutionProgress(opened?.draftExecution?.progressPercent || 0);
+                      setExecutionNotes(opened?.draftExecution?.notes || "");
+                      setExecutionStartedAt(opened?.draftExecution?.startedAt || "");
+                      setExecutionCompletedAt(opened?.draftExecution?.completedAt || "");
+                      setExecutionDurationSeconds(
+                        typeof opened?.draftExecution?.durationSeconds === "number"
+                          ? opened.draftExecution.durationSeconds
+                          : null
+                      );
+                      setExecutionEvidence(Array.isArray(opened?.draftExecution?.evidence) ? opened.draftExecution.evidence : []);
+                      if (opened?.draftExecution?.id) {
+                        setExecutionId(opened.draftExecution.id);
+                      } else {
+                        const started = await startExecutionApi({
+                          testCaseId: executionCaseId,
+                          testRunId: executionRunId || null,
+                        });
+                        setExecutionId(started.id);
+                        setExecutionStartedAt(started?.startedAt || "");
+                        setExecutionCompletedAt("");
+                        setExecutionDurationSeconds(null);
+                        setExecutionEvidence([]);
+                      }
+                      if (currentSteps.length > 0) {
+                        setExecutionSelectedStepNumber(String(currentSteps[0].stepNumber));
+                      }
+                    } catch (error: any) {
+                      alert(error?.message || "Open execution failed");
+                    }
+                  }}
+                >
+                  Open Execution Mode
+                </button>
+                {executionId && executionSteps.length > 0 && (
+                  <>
+                    <div className="note">Progress: {executionProgress}% (auto-saved)</div>
+                    <div className="inlineGrid">
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            const timer = await startExecutionTimerApi(executionId);
+                            setExecutionStartedAt(timer?.startedAt || executionStartedAt);
+                          } catch (error: any) {
+                            alert(error?.message || "Failed to start timer");
+                          }
+                        }}
+                      >
+                        Start Timer
+                      </button>
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            const timer = await stopExecutionTimerApi(executionId);
+                            setExecutionStartedAt(timer?.startedAt || executionStartedAt);
+                            setExecutionCompletedAt(timer?.completedAt || "");
+                            setExecutionDurationSeconds(
+                              typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
+                            );
+                          } catch (error: any) {
+                            alert(error?.message || "Failed to stop timer");
+                          }
+                        }}
+                      >
+                        Stop Timer
+                      </button>
+                    </div>
+                    <div className="note">
+                      Started: {executionStartedAt ? new Date(executionStartedAt).toLocaleString() : "N/A"} | Completed:{" "}
+                      {executionCompletedAt ? new Date(executionCompletedAt).toLocaleString() : "N/A"} | Duration:{" "}
+                      {typeof executionDurationSeconds === "number" ? `${executionDurationSeconds}s` : "N/A"}
+                    </div>
+                    <select
+                      className="input"
+                      value={executionSelectedStepNumber}
+                      onChange={(e) => setExecutionSelectedStepNumber(e.target.value)}
+                    >
+                      {executionSteps.map((step) => (
+                        <option key={step.stepNumber} value={step.stepNumber}>
+                          Step {step.stepNumber}: {step.action} [{step.status}]
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="input"
+                      value={executionStepStatus}
+                      onChange={(e) => setExecutionStepStatus(e.target.value)}
+                    >
+                      <option value="PASSED">PASSED</option>
+                      <option value="FAILED">FAILED</option>
+                      <option value="BLOCKED">BLOCKED</option>
+                      <option value="SKIPPED">SKIPPED</option>
+                    </select>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Actual result for selected step"
+                      value={executionActualResult}
+                      onChange={(e) => setExecutionActualResult(e.target.value)}
+                    />
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Step notes"
+                      value={executionStepNotes}
+                      onChange={(e) => setExecutionStepNotes(e.target.value)}
+                    />
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Execution notes"
+                      value={executionNotes}
+                      onChange={(e) => setExecutionNotes(e.target.value)}
+                    />
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          const stepNumber = Number(executionSelectedStepNumber);
+                          if (!Number.isFinite(stepNumber)) {
+                            alert("Select a valid step");
+                            return;
+                          }
+                          const saved = await saveExecutionStepApi(executionId, stepNumber, {
+                            status: executionStepStatus,
+                            actualResult: executionActualResult,
+                            notes: executionStepNotes,
+                            executionNotes,
+                          });
+                          const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
+                          setExecutionSteps(nextSteps);
+                          setExecutionProgress(saved?.progressPercent || 0);
+                          setExecutionActualResult("");
+                          setExecutionStepNotes("");
+                        } catch (error: any) {
+                          alert(error?.message || "Auto-save failed");
+                        }
+                      }}
+                    >
+                      Save Step (Auto-save)
+                    </button>
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          const final = await finalizeExecutionApi(executionId, {
+                            notes: executionNotes,
+                          });
+                          await loadTestCaseData();
+                          setSelectedExecutionReportId(final.id);
+                          setExecutionCompletedAt(final?.completedAt || executionCompletedAt);
+                          setExecutionDurationSeconds(
+                            typeof final?.durationSeconds === "number" ? final.durationSeconds : executionDurationSeconds
+                          );
+                          alert(`Execution finalized: ${final.result}`);
+                        } catch (error: any) {
+                          alert(error?.message || "Finalize failed");
+                        }
+                      }}
+                    >
+                      Finalize Execution
+                    </button>
+                    <h4>Execution Evidence</h4>
+                    <div className="inlineGrid">
+                      <select className="input" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
+                        <option value="IMAGE">IMAGE</option>
+                        <option value="VIDEO">VIDEO</option>
+                        <option value="LOG">LOG</option>
+                        <option value="DOCUMENT">DOCUMENT</option>
+                      </select>
+                      <input
+                        className="input"
+                        placeholder="Evidence file name"
+                        value={evidenceName}
+                        onChange={(e) => setEvidenceName(e.target.value)}
+                      />
+                    </div>
+                    <input
+                      className="input"
+                      placeholder="Evidence URL (storage link)"
+                      value={evidenceUrl}
+                      onChange={(e) => setEvidenceUrl(e.target.value)}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Evidence notes (optional)"
+                      value={evidenceNotes}
+                      onChange={(e) => setEvidenceNotes(e.target.value)}
+                    />
+                    <div className="inlineGrid">
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            if (!evidenceUrl.trim() || !evidenceName.trim()) {
+                              alert("Evidence URL and name are required");
+                              return;
+                            }
+                            const created = await uploadExecutionEvidenceApi(executionId, {
+                              fileType: evidenceType,
+                              fileUrl: evidenceUrl,
+                              fileName: evidenceName,
+                              notes: evidenceNotes,
+                            });
+                            setExecutionEvidence((prev) => [created, ...prev]);
+                            setEvidenceUrl("");
+                            setEvidenceName("");
+                            setEvidenceNotes("");
+                          } catch (error: any) {
+                            alert(error?.message || "Evidence upload failed");
+                          }
+                        }}
+                      >
+                        Add Evidence
+                      </button>
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            const rows = await listExecutionEvidenceApi(executionId);
+                            setExecutionEvidence(Array.isArray(rows) ? rows : []);
+                          } catch (error: any) {
+                            alert(error?.message || "Failed to refresh evidence");
+                          }
+                        }}
+                      >
+                        Refresh Evidence
+                      </button>
+                    </div>
+                    {executionEvidence.length > 0 && (
+                      <div className="listCompact">
+                        {executionEvidence.map((item) => (
+                          <div className="row" key={item.id}>
+                            <span className="title">{item.fileName}</span>
+                            <span className="meta">{item.fileType}</span>
+                            <button
+                              className="button small danger"
+                              onClick={async () => {
+                                try {
+                                  await deleteExecutionEvidenceApi(executionId, item.id);
+                                  setExecutionEvidence((prev) => prev.filter((row) => row.id !== item.id));
+                                } catch (error: any) {
+                                  alert(error?.message || "Delete evidence failed");
+                                }
+                              }}
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+                <h4>Quick Bug / Re-execution</h4>
+                <select
+                  className="input"
+                  value={selectedExecutionReportId}
+                  onChange={(e) => setSelectedExecutionReportId(e.target.value)}
+                >
+                  <option value="">Select execution report</option>
+                  {executionReports
+                    .filter((item) => !executionCaseId || item.testCaseId === executionCaseId)
+                    .map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.testCase?.title || item.testCaseId} | {item.result} | {new Date(item.executedAt).toLocaleString()}
+                      </option>
+                    ))}
+                </select>
+                <input
+                  className="input"
+                  placeholder="Bug title (optional)"
+                  value={quickBugTitle}
+                  onChange={(e) => setQuickBugTitle(e.target.value)}
+                />
+                <input
+                  className="input"
+                  placeholder="Bug description (optional)"
+                  value={quickBugDescription}
+                  onChange={(e) => setQuickBugDescription(e.target.value)}
+                />
+                <select className="input" value={quickBugSeverity} onChange={(e) => setQuickBugSeverity(e.target.value)}>
+                  <option value="LOW">LOW</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="HIGH">HIGH</option>
+                  <option value="CRITICAL">CRITICAL</option>
+                </select>
+                <div className="inlineGrid">
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        if (!selectedExecutionReportId) {
+                          alert("Select an execution report");
+                          return;
+                        }
+                        const issue = await createBugFromExecutionApi(selectedExecutionReportId, {
+                          title: quickBugTitle || undefined,
+                          description: quickBugDescription || undefined,
+                          severity: quickBugSeverity,
+                        });
+                        alert(`Bug created: ${issue.id}`);
+                      } catch (error: any) {
+                        alert(error?.message || "Quick bug creation failed");
+                      }
+                    }}
+                  >
+                    Create Quick Bug
+                  </button>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        if (!selectedExecutionReportId) {
+                          alert("Select an execution report");
+                          return;
+                        }
+                        const restarted = await reexecuteExecutionApi(selectedExecutionReportId, {
+                          notes: "Re-execution requested",
+                        });
+                        setExecutionId(restarted.id);
+                        setExecutionCaseId(restarted.testCaseId);
+                        setExecutionRunId(restarted.testRunId || "");
+                        setExecutionSteps(Array.isArray(restarted.stepResults) ? restarted.stepResults : []);
+                        setExecutionSelectedStepNumber(
+                          Array.isArray(restarted.stepResults) && restarted.stepResults.length > 0
+                            ? String(restarted.stepResults[0].stepNumber)
+                            : ""
+                        );
+                        setExecutionProgress(restarted.progressPercent || 0);
+                        setExecutionNotes(restarted.notes || "");
+                        setExecutionStartedAt(restarted.startedAt || "");
+                        setExecutionCompletedAt("");
+                        setExecutionDurationSeconds(null);
+                        setExecutionEvidence([]);
+                        alert("Re-execution draft created");
+                      } catch (error: any) {
+                        alert(error?.message || "Re-execution failed");
+                      }
+                    }}
+                  >
+                    Re-execute
+                  </button>
+                </div>
               </section>
               )}
             </div>

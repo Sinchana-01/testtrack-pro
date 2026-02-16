@@ -46,6 +46,8 @@ model User {
   importJobs          TestCaseImportJob[] @relation("Importer")
   backupJobs          BackupJob[]     @relation("BackupTriggeredBy")
   systemConfigUpdates SystemConfig[]  @relation("ConfigUpdatedBy")
+  createdTestRuns     TestRun[]       @relation("CreatedTestRuns")
+  testRunAssignments  TestRunAssignment[] @relation("AssignedTestRuns")
 }
 
 model TestCase {
@@ -89,6 +91,7 @@ model TestCase {
   executions  TestExecution[]
   attachments Attachment[]
   issues      Issue[]
+  testRunCases TestRunCase[]
 
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
@@ -113,6 +116,58 @@ model TestCaseVersion {
 
   @@index([testCaseId])
   @@index([changedBy])
+}
+
+model TestRun {
+  id              String            @id @default(uuid())
+  name            String
+  description     String?
+  createdBy       String
+  targetStartDate DateTime?
+  targetEndDate   DateTime?
+  status          TestRunStatus     @default(PLANNED)
+
+  creator         User              @relation("CreatedTestRuns", fields: [createdBy], references: [id], onDelete: Cascade)
+  assignments     TestRunAssignment[]
+  testCases       TestRunCase[]
+  executions      TestExecution[]
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([createdBy])
+  @@index([status])
+}
+
+model TestRunAssignment {
+  id         String   @id @default(uuid())
+  testRunId  String
+  testerId   String
+  assignedAt DateTime @default(now())
+
+  testRun    TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  tester     User     @relation("AssignedTestRuns", fields: [testerId], references: [id], onDelete: Cascade)
+
+  @@unique([testRunId, testerId])
+  @@index([testerId])
+}
+
+model TestRunCase {
+  id              String            @id @default(uuid())
+  testRunId       String
+  testCaseId      String
+  status          TestRunCaseStatus @default(NOT_RUN)
+  lastExecutionId String?
+
+  testRun         TestRun           @relation(fields: [testRunId], references: [id], onDelete: Cascade)
+  testCase        TestCase          @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  lastExecution   TestExecution?    @relation("RunCaseLastExecution", fields: [lastExecutionId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@unique([testRunId, testCaseId])
+  @@index([testCaseId])
 }
 
 model TestSuite {
@@ -150,17 +205,25 @@ model TestExecution {
   id          String          @id @default(uuid())
   testCaseId  String
   executedBy  String
+  testRunId   String?
   result      ExecutionStatus
   notes       String?
+  stepResults Json?
+  progressPercent Int         @default(0)
+  isDraft     Boolean         @default(false)
 
   testCase    TestCase        @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
   executor    User            @relation("ExecutedBy", fields: [executedBy], references: [id])
+  testRun     TestRun?        @relation(fields: [testRunId], references: [id], onDelete: SetNull)
   issues      Issue[]
+  runCaseRefs TestRunCase[]   @relation("RunCaseLastExecution")
 
   executedAt  DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
 
   @@index([testCaseId])
   @@index([executedBy])
+  @@index([testRunId])
 }
 
 model Attachment {
@@ -370,6 +433,21 @@ enum TestCaseType {
 }
 
 enum ExecutionStatus {
+  PASSED
+  FAILED
+  BLOCKED
+  SKIPPED
+}
+
+enum TestRunStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TestRunCaseStatus {
+  NOT_RUN
   PASSED
   FAILED
   BLOCKED
