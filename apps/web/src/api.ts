@@ -113,9 +113,27 @@ export async function logoutAllApi() {
 
 /* AUTH FETCH WITH AUTO REFRESH */
 export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const fetchWithRetry = async (
+    target: RequestInfo | URL,
+    requestInit: RequestInit | undefined,
+    retries = 1
+  ): Promise<Response> => {
+    try {
+      return await fetch(target, requestInit);
+    } catch (error: any) {
+      if (retries > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return fetchWithRetry(target, requestInit, retries - 1);
+      }
+      throw new Error(
+        `Unable to reach API server at ${TEST_API_URL}. Ensure backend is running on port 4000.`
+      );
+    }
+  };
+
   let accessToken = getAccessToken();
   const usingSessionStorage = Boolean(sessionStorage.getItem(REFRESH_TOKEN_KEY));
-  let response = await fetch(input, {
+  let response = await fetchWithRetry(input, {
     ...init,
     headers: {
       ...(init?.headers || {}),
@@ -141,7 +159,7 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
   setSessionTokens(refreshed.accessToken, refreshed.refreshToken, !usingSessionStorage);
   accessToken = refreshed.accessToken;
 
-  return fetch(input, {
+  return fetchWithRetry(input, {
     ...init,
     headers: {
       ...(init?.headers || {}),
@@ -364,4 +382,78 @@ export async function reexecuteExecutionApi(executionId: string, payload?: { not
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
+}
+
+export async function createBugApi(payload: Record<string, unknown>) {
+  return authJson("/bugs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listBugsApi(params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/bugs${query}`);
+}
+
+export async function getBugApi(id: string) {
+  return authJson(`/bugs/${id}`);
+}
+
+export async function updateBugWorkflowApi(id: string, payload: Record<string, unknown>) {
+  return authJson(`/bugs/${id}/workflow`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function resolveBugApi(id: string, payload: Record<string, unknown>) {
+  return authJson(`/bugs/${id}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listDeveloperBugsApi(params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/developer/bugs${query}`);
+}
+
+export async function quickUpdateDeveloperBugStatusApi(id: string, status: string) {
+  return authJson(`/developer/bugs/${id}/quick-status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function createBugCommentApi(id: string, payload: { comment: string; parentCommentId?: string }) {
+  return authJson(`/bugs/${id}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listBugCommentsApi(id: string) {
+  return authJson(`/bugs/${id}/comments`);
+}
+
+export async function editBugCommentApi(commentId: string, comment: string) {
+  return authJson(`/bugs/comments/${commentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+}
+
+export async function deleteBugCommentApi(commentId: string) {
+  return authJson(`/bugs/comments/${commentId}`, { method: "DELETE" });
 }

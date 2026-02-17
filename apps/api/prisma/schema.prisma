@@ -36,6 +36,7 @@ model User {
   createdSuites       TestSuite[]     @relation("CreatedSuites")
   executions          TestExecution[] @relation("ExecutedBy")
   uploadedAttachments Attachment[]    @relation("UploadedBy")
+  uploadedBugAttachments BugAttachment[] @relation("BugAttachmentUploadedBy")
   reportedIssues      Issue[]         @relation("ReportedIssues")
   assignedIssues      Issue[]         @relation("AssignedIssues")
   issueComments       IssueComment[]  @relation("IssueComments")
@@ -244,10 +245,19 @@ model Attachment {
 
 model Issue {
   id              String         @id @default(uuid())
+  bugCode         String?        @unique
   title           String
   description     String
+  stepsToReproduce String?
+  expectedBehavior String?
+  actualBehavior   String?
+  bugPriority      BugPriority   @default(P3_MEDIUM)
+  workflowStatus   BugWorkflowStatus @default(NEW)
   status          IssueStatus    @default(OPEN)
   severity        Severity       @default(MEDIUM)
+  environment     String?
+  affectedVersion String?
+  dueDate         DateTime?
   testCaseId      String?
   executionId     String?
   reportedBy      String
@@ -261,6 +271,7 @@ model Issue {
   reporter        User           @relation("ReportedIssues", fields: [reportedBy], references: [id])
   assignee        User?          @relation("AssignedIssues", fields: [assignedTo], references: [id])
   comments        IssueComment[]
+  attachments     BugAttachment[]
 
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
@@ -439,6 +450,23 @@ enum ExecutionStatus {
   SKIPPED
 }
 
+model BugAttachment {
+  id         String         @id @default(uuid())
+  issueId    String
+  uploadedBy String
+  fileType   AttachmentType
+  fileUrl    String
+  fileName   String
+  notes      String?
+  createdAt  DateTime       @default(now())
+
+  issue      Issue          @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  uploader   User           @relation("BugAttachmentUploadedBy", fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  @@index([issueId])
+  @@index([uploadedBy])
+}
+
 enum TestRunStatus {
   PLANNED
   IN_PROGRESS
@@ -452,6 +480,25 @@ enum TestRunCaseStatus {
   FAILED
   BLOCKED
   SKIPPED
+}
+
+enum BugPriority {
+  P1_URGENT
+  P2_HIGH
+  P3_MEDIUM
+  P4_LOW
+}
+
+enum BugWorkflowStatus {
+  NEW
+  OPEN
+  IN_PROGRESS
+  FIXED
+  VERIFIED
+  CLOSED
+  REOPENED
+  WONT_FIX
+  DUPLICATE
 }
 
 enum AttachmentType {
