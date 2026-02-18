@@ -433,6 +433,12 @@ const generateBugCode = async (): Promise<string> => {
 };
 
 router.use(authenticate);
+router.use((req: AuthRequest, res: Response, next) => {
+  if (req.user?.role === Role.ADMIN && !req.path.startsWith("/admin")) {
+    return res.status(403).json({ message: "Admins can only access admin module endpoints." });
+  }
+  return next();
+});
 
 /* =========================
    TESTER/SHARED TEST CASE FLOWS
@@ -3131,6 +3137,13 @@ router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthReque
   return res.status(201).json(project);
 });
 
+router.get("/admin/projects", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const projects = await prisma.project.findMany({
+    orderBy: { updatedAt: "desc" },
+  });
+  return res.json(projects);
+});
+
 router.patch("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const project = await prisma.project.update({
     where: { id: req.params.id },
@@ -3180,6 +3193,16 @@ router.post("/admin/system-config", authorizeRoles(Role.ADMIN), async (req: Auth
   return res.json(config);
 });
 
+router.get("/admin/system-config", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const configs = await prisma.systemConfig.findMany({
+    orderBy: { key: "asc" },
+    include: {
+      updater: { select: { id: true, name: true, email: true, role: true } },
+    },
+  });
+  return res.json(configs);
+});
+
 router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const backup = await prisma.backupJob.create({
     data: {
@@ -3199,6 +3222,17 @@ router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthReques
 
   await writeAuditLog(req.user!.userId, "ADMIN_TRIGGER_BACKUP", "BackupJob", completed.id);
   return res.status(201).json(completed);
+});
+
+router.get("/admin/backups", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const backups = await prisma.backupJob.findMany({
+    orderBy: { startedAt: "desc" },
+    include: {
+      triggerUser: { select: { id: true, name: true, email: true, role: true } },
+    },
+    take: 100,
+  });
+  return res.json(backups);
 });
 
 export default router;
