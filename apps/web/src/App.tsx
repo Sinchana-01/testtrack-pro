@@ -9,6 +9,7 @@ import {
   createTestRunApi,
   deleteExecutionEvidenceApi,
   deleteBugCommentApi,
+  deleteTemplateApi,
   createFromTemplateApi,
   createTemplateApi,
   createTestCaseApi,
@@ -1881,22 +1882,20 @@ function App() {
                       await createTemplateApi({
                         name: templateName,
                         category: templateCategory,
-                        preConditions: parseSection(tcPreConditionsText),
-                        testDataRequirements: parseSection(tcTestDataRequirementsText),
-                        environmentRequirements: parseSection(tcEnvironmentRequirementsText),
-                        module: tcModule,
+                        preConditions: [],
+                        testDataRequirements: [],
+                        environmentRequirements: [],
+                        module: templateCategory || "General",
                         steps: parseSteps(templateSteps),
-                        postConditions: parseSection(tcPostConditionsText),
-                        metadata: parseMetadata(tcMetadataText),
-                        tags: parseTags(tcTagsText),
-                        estimatedDurationMinutes: tcEstimatedDurationMinutes
-                          ? Number(tcEstimatedDurationMinutes)
-                          : null,
-                        automationStatus: tcAutomationStatus,
-                        automationScriptLink: tcAutomationScriptLink || null,
-                        priority: tcPriority,
-                        severity: tcSeverity,
-                        type: tcType,
+                        postConditions: [],
+                        metadata: {},
+                        tags: [],
+                        estimatedDurationMinutes: null,
+                        automationStatus: "NOT_AUTOMATED",
+                        automationScriptLink: null,
+                        priority: "MEDIUM",
+                        severity: "MAJOR",
+                        type: "FUNCTIONAL",
                         status: "DRAFT",
                       });
                       resetTemplateFields();
@@ -1914,6 +1913,23 @@ function App() {
                     <div className="row" key={tpl.id}>
                       <span className="title">{tpl.name}</span>
                       <span className="meta">{tpl.category || "General"}</span>
+                      <button
+                        className="button small danger"
+                        onClick={async () => {
+                          try {
+                            if (!window.confirm("Delete this template?")) {
+                              return;
+                            }
+                            await deleteTemplateApi(tpl.id);
+                            await loadTestCaseData();
+                            alert("Template deleted");
+                          } catch (error: any) {
+                            alert(error?.message || "Delete template failed");
+                          }
+                        }}
+                      >
+                        Delete
+                      </button>
                       <button
                         className="button small"
                         onClick={async () => {

@@ -927,6 +927,24 @@ router.get(
   }
 );
 
+router.delete(
+  "/testcase-templates/:id",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
+    if (!template) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+    if (template.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can only delete templates you created" });
+    }
+
+    await prisma.testCaseTemplate.delete({ where: { id: req.params.id } });
+    await writeAuditLog(req.user!.userId, "DELETE_TEST_CASE_TEMPLATE", "TestCaseTemplate", req.params.id);
+    return res.json({ message: "Template deleted" });
+  }
+);
+
 router.post(
   "/testcases/from-template/:templateId",
   authorizeRoles(Role.TESTER),
