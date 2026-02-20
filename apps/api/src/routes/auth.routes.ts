@@ -18,6 +18,7 @@ const REFRESH_TOKEN_EXPIRY = "7d";
 
 const isStrongPassword = (password: string): boolean =>
   PASSWORD_REGEX.test(password);
+const PUBLIC_REGISTRATION_ROLES: Role[] = [Role.TESTER, Role.DEVELOPER];
 
 const appendPasswordHistory = (
   existing: string[],
@@ -69,7 +70,7 @@ router.post("/register", async (req: Request, res: Response) => {
       typeof email === "string" ? email.trim().toLowerCase() : "";
     const requestedRole = role as Role | undefined;
     const selectedRole =
-      requestedRole && Object.values(Role).includes(requestedRole)
+      requestedRole && PUBLIC_REGISTRATION_ROLES.includes(requestedRole)
         ? requestedRole
         : Role.TESTER;
 
