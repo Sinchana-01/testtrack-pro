@@ -89,24 +89,65 @@ type StepExecutionItem = {
 };
 
 const toExecutionStepItems = (steps: unknown): StepExecutionItem[] => {
-  if (!Array.isArray(steps)) return [];
-  return steps
-    .filter((item) => item && typeof item === "object" && !Array.isArray(item))
-    .map((item, idx) => {
+  let rawSteps: unknown = steps;
+  if (typeof rawSteps === "string") {
+    const textValue = rawSteps;
+    try {
+      rawSteps = JSON.parse(textValue);
+    } catch {
+      rawSteps = textValue
+        .split(/\r?\n/)
+        .map((line: string) => line.trim())
+        .filter(Boolean)
+        .map((line: string, idx: number) => ({
+          stepNumber: idx + 1,
+          action: line,
+          expectedResult: "",
+        }));
+    }
+  }
+  if (rawSteps && typeof rawSteps === "object" && !Array.isArray(rawSteps)) {
+    const maybeSteps = (rawSteps as Record<string, unknown>).steps;
+    if (Array.isArray(maybeSteps)) {
+      rawSteps = maybeSteps;
+    }
+  }
+  if (!Array.isArray(rawSteps)) return [];
+
+  const normalized: StepExecutionItem[] = [];
+  rawSteps.forEach((item: unknown, idx: number) => {
+    if (item && typeof item === "object" && !Array.isArray(item)) {
       const step = item as Record<string, unknown>;
       const rawStepNumber = step.stepNumber;
-      const stepNumber =
-        typeof rawStepNumber === "number" && Number.isFinite(rawStepNumber) ? rawStepNumber : idx + 1;
-      return {
+      const parsedStepNumber =
+        typeof rawStepNumber === "number"
+          ? rawStepNumber
+          : typeof rawStepNumber === "string"
+          ? Number(rawStepNumber)
+          : NaN;
+      const stepNumber = Number.isFinite(parsedStepNumber) ? parsedStepNumber : idx + 1;
+      normalized.push({
         stepNumber,
         action: asString(step.action) || `Step ${stepNumber}`,
         expectedResult: asString(step.expectedResult),
-        status: "NOT_EXECUTED" as const,
+        status: "NOT_EXECUTED",
         actualResult: "",
         notes: "",
-      };
-    })
-    .sort((a, b) => a.stepNumber - b.stepNumber);
+      });
+      return;
+    }
+    const text = asString(item);
+    if (!text) return;
+    normalized.push({
+      stepNumber: idx + 1,
+      action: text,
+      expectedResult: "",
+      status: "NOT_EXECUTED",
+      actualResult: "",
+      notes: "",
+    });
+  });
+  return normalized.sort((a, b) => a.stepNumber - b.stepNumber);
 };
 
 const parseStoredStepResults = (value: unknown): StepExecutionItem[] => {
@@ -147,6 +188,176 @@ const deriveRunCaseStatus = (result: ExecutionStatus): TestRunCaseStatus => {
       return TestRunCaseStatus.SKIPPED;
     default:
       return TestRunCaseStatus.NOT_RUN;
+  }
+};
+
+const SUITE_EXECUTION_MODE = {
+  SEQUENTIAL: "SEQUENTIAL",
+  PARALLEL: "PARALLEL",
+} as const;
+type SuiteExecutionModeValue = (typeof SUITE_EXECUTION_MODE)[keyof typeof SUITE_EXECUTION_MODE];
+
+const SUITE_EXECUTION_STATUS = {
+  PLANNED: "PLANNED",
+  RUNNING: "RUNNING",
+  COMPLETED: "COMPLETED",
+  PARTIAL: "PARTIAL",
+  FAILED: "FAILED",
+} as const;
+type SuiteExecutionStatusValue =
+  (typeof SUITE_EXECUTION_STATUS)[keyof typeof SUITE_EXECUTION_STATUS];
+
+const getSuiteExecutionStatus = (summary: {
+  total: number;
+  passed: number;
+  failed: number;
+  blocked: number;
+  skipped: number;
+}): SuiteExecutionStatusValue => {
+  const { total, passed, failed, blocked, skipped } = summary;
+  const completed = passed + failed + blocked + skipped;
+  if (total === 0) return SUITE_EXECUTION_STATUS.PLANNED;
+  if (completed === 0) return SUITE_EXECUTION_STATUS.RUNNING;
+  if (completed < total) return SUITE_EXECUTION_STATUS.RUNNING;
+  if (failed + blocked > 0 && passed > 0) return SUITE_EXECUTION_STATUS.PARTIAL;
+  if (failed + blocked > 0 && passed === 0) return SUITE_EXECUTION_STATUS.FAILED;
+  return SUITE_EXECUTION_STATUS.COMPLETED;
+};
+
+const refreshSuiteExecutionSummary = async (suiteExecutionId: string): Promise<void> => {
+  const cases = await prismaAny.testSuiteExecutionCase.findMany({
+    where: { suiteExecutionId },
+    select: { status: true },
+  });
+  const total = cases.length;
+  const passed = cases.filter((item: any) => item.status === TestRunCaseStatus.PASSED).length;
+  const failed = cases.filter((item: any) => item.status === TestRunCaseStatus.FAILED).length;
+  const blocked = cases.filter((item: any) => item.status === TestRunCaseStatus.BLOCKED).length;
+  const skipped = cases.filter((item: any) => item.status === TestRunCaseStatus.SKIPPED).length;
+  const completed = passed + failed + blocked + skipped;
+  const passRate = completed > 0 ? Number(((passed / completed) * 100).toFixed(2)) : null;
+  const status = getSuiteExecutionStatus({ total, passed, failed, blocked, skipped });
+
+  await prismaAny.testSuiteExecution.update({
+    where: { id: suiteExecutionId },
+    data: {
+      totalCases: total,
+      passed,
+      failed,
+      blocked,
+      skipped,
+      passRate,
+      status,
+      completedAt: completed === total && total > 0 ? new Date() : null,
+    },
+  });
+};
+
+const syncSuiteExecutionCaseFromTestRun = async (
+  testRunId: string,
+  testCaseId: string,
+  executionId: string,
+  runCaseStatus: TestRunCaseStatus
+): Promise<void> => {
+  const suiteCases = await prismaAny.testSuiteExecutionCase.findMany({
+    where: {
+      testCaseId,
+      suiteExecution: { linkedTestRunId: testRunId },
+    },
+    select: { id: true, suiteExecutionId: true },
+  });
+  if (!suiteCases.length) return;
+
+  for (const row of suiteCases) {
+    await prismaAny.testSuiteExecutionCase.update({
+      where: { id: row.id },
+      data: {
+        status: runCaseStatus,
+        executionId,
+        startedAt: new Date(),
+        completedAt: new Date(),
+      },
+    });
+    await refreshSuiteExecutionSummary(row.suiteExecutionId);
+  }
+};
+
+const getActiveSuiteExecutionCase = async (
+  testRunId: string,
+  testCaseId: string
+): Promise<{
+  id: string;
+  suiteExecutionId: string;
+  status: TestRunCaseStatus;
+  position: number;
+  suiteExecution: { id: string; mode: SuiteExecutionModeValue; status: SuiteExecutionStatusValue };
+} | null> => {
+  const row = await prismaAny.testSuiteExecutionCase.findFirst({
+    where: {
+      testCaseId,
+      suiteExecution: {
+        linkedTestRunId: testRunId,
+        status: {
+          in: [
+            SUITE_EXECUTION_STATUS.PLANNED,
+            SUITE_EXECUTION_STATUS.RUNNING,
+            SUITE_EXECUTION_STATUS.PARTIAL,
+            SUITE_EXECUTION_STATUS.FAILED,
+          ],
+        },
+      },
+    },
+    include: {
+      suiteExecution: {
+        select: { id: true, mode: true, status: true },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return row ?? null;
+};
+
+const enforceSuiteExecutionModeConstraints = async (params: {
+  testRunId: string;
+  testCaseId: string;
+  userId: string;
+}): Promise<void> => {
+  const suiteCase = await getActiveSuiteExecutionCase(params.testRunId, params.testCaseId);
+  if (!suiteCase) return;
+
+  if (suiteCase.status !== TestRunCaseStatus.NOT_RUN) {
+    throw new Error("This suite case is already executed");
+  }
+
+  const draftByAnyTester = await prisma.testExecution.findFirst({
+    where: {
+      testRunId: params.testRunId,
+      testCaseId: params.testCaseId,
+      isDraft: true,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (draftByAnyTester && draftByAnyTester.executedBy !== params.userId) {
+    throw new Error("This suite case is already in progress by another tester");
+  }
+
+  if (suiteCase.suiteExecution.mode !== SUITE_EXECUTION_MODE.SEQUENTIAL) {
+    return;
+  }
+
+  const nextPending = await prismaAny.testSuiteExecutionCase.findFirst({
+    where: {
+      suiteExecutionId: suiteCase.suiteExecutionId,
+      status: TestRunCaseStatus.NOT_RUN,
+    },
+    orderBy: { position: "asc" },
+    select: { id: true, testCaseId: true, position: true },
+  });
+  if (!nextPending) return;
+
+  if (nextPending.testCaseId !== params.testCaseId) {
+    throw new Error("Sequential suite mode: execute the next pending suite case first");
   }
 };
 
@@ -430,6 +641,38 @@ const generateBugCode = async (): Promise<string> => {
   const count = await prisma.issue.count();
   const serial = String(count + 1).padStart(5, "0");
   return `BUG-${year}-${serial}`;
+};
+
+const resolveTestCaseRefs = async (
+  refs: string[]
+): Promise<{ resolvedIds: string[]; unresolved: string[] }> => {
+  const cleaned = [...new Set(refs.map((item) => asString(item)).filter(Boolean))];
+  if (!cleaned.length) return { resolvedIds: [], unresolved: [] };
+
+  const rows = await prisma.testCase.findMany({
+    where: {
+      isDeleted: false,
+      OR: [{ id: { in: cleaned } }, { testCaseCode: { in: cleaned } }],
+    },
+    select: { id: true, testCaseCode: true },
+  });
+
+  const byId = new Map<string, string>();
+  const byCode = new Map<string, string>();
+  rows.forEach((row) => {
+    byId.set(row.id, row.id);
+    if (row.testCaseCode) byCode.set(row.testCaseCode, row.id);
+  });
+
+  const resolved: string[] = [];
+  const unresolved: string[] = [];
+  cleaned.forEach((ref) => {
+    const id = byId.get(ref) || byCode.get(ref);
+    if (id) resolved.push(id);
+    else unresolved.push(ref);
+  });
+
+  return { resolvedIds: [...new Set(resolved)], unresolved };
 };
 
 router.use(authenticate);
@@ -1457,9 +1700,22 @@ router.get(
         return res.status(404).json({ message: "Test run not found" });
       }
       const assigned = run.assignments.some((item: { testerId: string }) => item.testerId === req.user!.userId);
+      const isCreator = run.createdBy === req.user!.userId;
       const included = run.testCases.some((item: { testCaseId: string }) => item.testCaseId === existing.id);
-      if (req.user!.role !== Role.ADMIN && (!assigned || !included)) {
-        return res.status(403).json({ message: "You are not assigned to execute this test case in the selected run" });
+      if (req.user!.role !== Role.ADMIN && !assigned && !isCreator) {
+        return res.status(403).json({ message: "You are not assigned to this test run" });
+      }
+      if (!included) {
+        return res.status(403).json({ message: "Selected test case is not part of this test run" });
+      }
+      try {
+        await enforceSuiteExecutionModeConstraints({
+          testRunId,
+          testCaseId: existing.id,
+          userId: req.user!.userId,
+        });
+      } catch (error: any) {
+        return res.status(409).json({ message: error?.message || "Suite execution constraint violation" });
       }
     }
 
@@ -1538,10 +1794,37 @@ router.post(
         return res.status(404).json({ message: "Test run not found" });
       }
       const assigned = run.assignments.some((item: { testerId: string }) => item.testerId === req.user!.userId);
+      const isCreator = run.createdBy === req.user!.userId;
       const included = run.testCases.some((item: { testCaseId: string }) => item.testCaseId === existing.id);
-      if (req.user!.role !== Role.ADMIN && (!assigned || !included)) {
-        return res.status(403).json({ message: "You are not assigned to this test run/test case" });
+      if (req.user!.role !== Role.ADMIN && !assigned && !isCreator) {
+        return res.status(403).json({ message: "You are not assigned to this test run" });
       }
+      if (!included) {
+        return res.status(403).json({ message: "Selected test case is not part of this test run" });
+      }
+      try {
+        await enforceSuiteExecutionModeConstraints({
+          testRunId,
+          testCaseId: existing.id,
+          userId: req.user!.userId,
+        });
+      } catch (error: any) {
+        return res.status(409).json({ message: error?.message || "Suite execution constraint violation" });
+      }
+    }
+
+    // Idempotent start: reuse latest draft for same user + test case + run.
+    const existingDraft = await prisma.testExecution.findFirst({
+      where: {
+        testCaseId: existing.id,
+        executedBy: req.user!.userId,
+        testRunId,
+        isDraft: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (existingDraft) {
+      return res.status(200).json(existingDraft);
     }
 
     const execution = await prisma.testExecution.create({
@@ -1903,6 +2186,12 @@ router.post(
           lastExecutionId: finalized.id,
         },
       });
+      await syncSuiteExecutionCaseFromTestRun(
+        finalized.testRunId,
+        finalized.testCaseId,
+        finalized.id,
+        deriveRunCaseStatus(finalResult)
+      );
     }
 
     await writeAuditLog(req.user!.userId, "FINALIZE_TEST_EXECUTION", "TestExecution", finalized.id, {
@@ -1934,11 +2223,40 @@ router.post(
       return res.status(400).json({ message: "Valid execution result is required" });
     }
 
+    const testRunId = asString(req.body.testRunId) || null;
+    if (testRunId) {
+      const run = await prisma.testRun.findUnique({
+        where: { id: testRunId },
+        include: { assignments: true, testCases: true },
+      });
+      if (!run) {
+        return res.status(404).json({ message: "Test run not found" });
+      }
+      const assigned = run.assignments.some((item: { testerId: string }) => item.testerId === req.user!.userId);
+      const isCreator = run.createdBy === req.user!.userId;
+      const included = run.testCases.some((item: { testCaseId: string }) => item.testCaseId === existing.id);
+      if (req.user!.role !== Role.ADMIN && !assigned && !isCreator) {
+        return res.status(403).json({ message: "You are not assigned to this test run" });
+      }
+      if (!included) {
+        return res.status(403).json({ message: "Selected test case is not part of this test run" });
+      }
+      try {
+        await enforceSuiteExecutionModeConstraints({
+          testRunId,
+          testCaseId: existing.id,
+          userId: req.user!.userId,
+        });
+      } catch (error: any) {
+        return res.status(409).json({ message: error?.message || "Suite execution constraint violation" });
+      }
+    }
+
     const execution = await prisma.testExecution.create({
       data: {
         testCaseId: existing.id,
         executedBy: req.user!.userId,
-        testRunId: asString(req.body.testRunId) || null,
+        testRunId,
         result,
         notes: mergeExecutionNotes(null, asString(req.body.notes) || "", {
           timerStartAt: new Date().toISOString(),
@@ -1962,6 +2280,12 @@ router.post(
           lastExecutionId: execution.id,
         },
       });
+      await syncSuiteExecutionCaseFromTestRun(
+        execution.testRunId,
+        execution.testCaseId,
+        execution.id,
+        deriveRunCaseStatus(result)
+      );
     }
 
     await writeAuditLog(req.user!.userId, "EXECUTE_TEST_CASE", "TestExecution", execution.id, { result });
@@ -2273,42 +2597,464 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
   if (!name) {
     return res.status(400).json({ message: "Suite name is required" });
   }
+  const parentSuiteId = asString(req.body.parentSuiteId) || null;
+  const projectId = asString(req.body.projectId) || null;
+  const moduleName = asString(req.body.module) || null;
+  const testCaseRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
 
-  const suite = await prisma.testSuite.create({
+  if (parentSuiteId) {
+    const parentSuite = await prismaAny.testSuite.findUnique({ where: { id: parentSuiteId } });
+    if (!parentSuite || parentSuite.isArchived) {
+      return res.status(404).json({ message: "Parent suite not found" });
+    }
+  }
+
+  const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
+  if (resolvedRefs.unresolved.length > 0) {
+    return res.status(400).json({
+      message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
+    });
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const suite = await (tx as any).testSuite.create({
+      data: {
+        name,
+        description: asString(req.body.description) || null,
+        module: moduleName,
+        createdBy: req.user!.userId,
+        projectId,
+        parentSuiteId,
+      },
+    });
+
+    if (resolvedRefs.resolvedIds.length > 0) {
+      const rows = resolvedRefs.resolvedIds.map((testCaseId, idx) => ({
+        suiteId: suite.id,
+        testCaseId,
+        position: idx + 1,
+        addedBy: req.user!.userId,
+      }));
+      await (tx as any).testSuiteCase.createMany({ data: rows });
+    }
+    return suite;
+  });
+
+  await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name });
+  return res.status(201).json(created);
+});
+
+router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const includeArchived = String(req.query.includeArchived || "").toLowerCase() === "true";
+  const parentSuiteId = asString(req.query.parentSuiteId);
+  const projectId = asString(req.query.projectId);
+  const moduleName = asString(req.query.module);
+  const where: any = {
+    ...(includeArchived ? {} : { isArchived: false }),
+    ...(parentSuiteId ? { parentSuiteId } : {}),
+    ...(projectId ? { projectId } : {}),
+    ...(moduleName ? { module: moduleName } : {}),
+  };
+
+  const suites = await (prisma as any).testSuite.findMany({
+    where,
+    include: {
+      parentSuite: { select: { id: true, name: true } },
+      childSuites: { select: { id: true, name: true, isArchived: true } },
+      _count: { select: { suiteCases: true } },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  return res.json(suites);
+});
+
+router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await (prisma as any).testSuite.findUnique({
+    where: { id: req.params.suiteId },
+    include: {
+      creator: { select: { id: true, name: true, email: true } },
+      parentSuite: { select: { id: true, name: true } },
+      childSuites: { select: { id: true, name: true, isArchived: true } },
+      suiteCases: {
+        include: { testCase: { select: { id: true, title: true, testCaseCode: true, module: true } } },
+        orderBy: { position: "asc" },
+      },
+      _count: { select: { suiteCases: true } },
+    },
+  });
+  if (!suite) {
+    return res.status(404).json({ message: "Suite not found" });
+  }
+  return res.json(suite);
+});
+
+router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
+  if (!suite) return res.status(404).json({ message: "Suite not found" });
+
+  const parentSuiteId = req.body.parentSuiteId !== undefined ? asString(req.body.parentSuiteId) || null : undefined;
+  if (parentSuiteId !== undefined) {
+    if (parentSuiteId === suite.id) {
+      return res.status(400).json({ message: "Suite cannot be parent of itself" });
+    }
+    if (parentSuiteId) {
+      let cursor: string | null = parentSuiteId;
+      while (cursor) {
+        const node: any = await prismaAny.testSuite.findUnique({
+          where: { id: cursor },
+          select: { id: true, parentSuiteId: true, isArchived: true },
+        });
+        if (!node) return res.status(404).json({ message: "Parent suite not found" });
+        if (node.isArchived) return res.status(400).json({ message: "Archived suite cannot be set as parent" });
+        if (node.id === suite.id) {
+          return res.status(400).json({ message: "Circular hierarchy is not allowed" });
+        }
+        cursor = (node.parentSuiteId as string | null) || null;
+      }
+    }
+  }
+
+  const updated = await prismaAny.testSuite.update({
+    where: { id: suite.id },
     data: {
-      name,
-      description: asString(req.body.description) || null,
-      createdBy: req.user!.userId,
-      projectId: asString(req.body.projectId) || null,
+      name: asString(req.body.name) || undefined,
+      description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
+      module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
+      projectId: req.body.projectId !== undefined ? asString(req.body.projectId) || null : undefined,
+      parentSuiteId,
     },
   });
 
-  await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", suite.id, { name: suite.name });
-  return res.status(201).json(suite);
+  await writeAuditLog(req.user!.userId, "UPDATE_TEST_SUITE", "TestSuite", updated.id);
+  return res.json(updated);
 });
 
-router.post(
-  "/suites/:suiteId/testcases/:testCaseId",
-  authorizeRoles(Role.TESTER),
-  async (req: AuthRequest, res: Response) => {
-    const link = await prisma.testSuiteCase.upsert({
-      where: {
-        suiteId_testCaseId: {
-          suiteId: req.params.suiteId,
-          testCaseId: req.params.testCaseId,
-        },
-      },
+router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suiteId = req.params.suiteId;
+  const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
+  if (!suite || suite.isArchived) return res.status(404).json({ message: "Suite not found" });
+
+  const refs = Array.isArray(req.body.testCaseIds)
+    ? asStringArray(req.body.testCaseIds)
+    : asString(req.body.testCaseId)
+    ? [asString(req.body.testCaseId)]
+    : [];
+  const testCaseRefs = [...new Set(refs)];
+  if (!testCaseRefs.length) return res.status(400).json({ message: "testCaseIds are required" });
+
+  const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
+  if (resolvedRefs.unresolved.length > 0) {
+    return res.status(400).json({
+      message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
+    });
+  }
+
+  const maxPosRow = await (prisma as any).testSuiteCase.findFirst({
+    where: { suiteId },
+    orderBy: { position: "desc" },
+    select: { position: true },
+  });
+  let pos = Number(maxPosRow?.position || 0);
+
+  const createdRows: any[] = [];
+  for (const testCaseId of resolvedRefs.resolvedIds) {
+    const row = await (prisma as any).testSuiteCase.upsert({
+      where: { suiteId_testCaseId: { suiteId, testCaseId } },
       create: {
-        suiteId: req.params.suiteId,
-        testCaseId: req.params.testCaseId,
+        suiteId,
+        testCaseId,
+        position: ++pos,
+        addedBy: req.user!.userId,
       },
       update: {},
     });
+    createdRows.push(row);
+  }
+  await writeAuditLog(req.user!.userId, "ADD_TEST_CASE_TO_SUITE", "TestSuite", suiteId, { count: createdRows.length });
+  return res.status(201).json(createdRows);
+});
 
-    await writeAuditLog(req.user!.userId, "ADD_TEST_CASE_TO_SUITE", "TestSuiteCase", link.id);
-    return res.status(201).json(link);
+router.delete(
+  "/suites/:suiteId/testcases/:testCaseId",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const suiteId = req.params.suiteId;
+    const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
+    if (!suite) return res.status(404).json({ message: "Suite not found" });
+    const ref = asString(req.params.testCaseId);
+    const resolved = await resolveTestCaseRefs([ref]);
+    if (!resolved.resolvedIds.length) {
+      return res.status(404).json({ message: "Test case not found" });
+    }
+    const testCaseId = resolved.resolvedIds[0];
+    const row = await prismaAny.testSuiteCase.findUnique({
+      where: { suiteId_testCaseId: { suiteId, testCaseId } },
+    });
+    if (!row) return res.status(404).json({ message: "Suite test case link not found" });
+    await prismaAny.testSuiteCase.delete({ where: { id: row.id } });
+    await writeAuditLog(req.user!.userId, "REMOVE_TEST_CASE_FROM_SUITE", "TestSuiteCase", row.id);
+    return res.json({ message: "Removed from suite" });
   }
 );
+
+router.patch(
+  "/suites/:suiteId/testcases/reorder",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const suiteId = req.params.suiteId;
+    const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
+    if (!suite) return res.status(404).json({ message: "Suite not found" });
+    if (suite.isArchived) return res.status(400).json({ message: "Cannot reorder archived suite" });
+    const orderedRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
+    if (!orderedRefs.length) return res.status(400).json({ message: "testCaseIds are required" });
+    const uniqueRefs = [...new Set(orderedRefs)];
+    if (uniqueRefs.length !== orderedRefs.length) {
+      return res.status(400).json({ message: "testCaseIds must not contain duplicates" });
+    }
+    const resolvedRefs = await resolveTestCaseRefs(orderedRefs);
+    if (resolvedRefs.unresolved.length > 0) {
+      return res.status(400).json({
+        message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
+      });
+    }
+    const orderedIds = resolvedRefs.resolvedIds;
+
+    const links = await prismaAny.testSuiteCase.findMany({ where: { suiteId }, select: { testCaseId: true } });
+    const existing = links.map((l: any) => l.testCaseId).sort();
+    const incoming = [...new Set(orderedIds)].sort();
+    if (existing.length !== incoming.length || existing.some((id: string, i: number) => id !== incoming[i])) {
+      return res.status(400).json({ message: "testCaseIds must exactly match current suite membership" });
+    }
+
+    await prisma.$transaction(
+      orderedIds.map((testCaseId, idx) =>
+        prismaAny.testSuiteCase.update({
+          where: { suiteId_testCaseId: { suiteId, testCaseId } },
+          data: { position: idx + 1 },
+        })
+      )
+    );
+    await writeAuditLog(req.user!.userId, "REORDER_SUITE_TEST_CASES", "TestSuite", suiteId);
+    return res.json({ message: "Suite test case order updated" });
+  }
+);
+
+router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const source = await (prisma as any).testSuite.findUnique({
+    where: { id: req.params.suiteId },
+    include: { suiteCases: { orderBy: { position: "asc" } } },
+  });
+  if (!source) return res.status(404).json({ message: "Suite not found" });
+  if (source.isArchived) return res.status(400).json({ message: "Cannot clone archived suite" });
+
+  const clone = await prisma.$transaction(async (tx) => {
+    const created = await (tx as any).testSuite.create({
+      data: {
+        name: asString(req.body.name) || `${source.name} (Clone)`,
+        description: source.description,
+        module: source.module,
+        createdBy: req.user!.userId,
+        projectId: source.projectId,
+        parentSuiteId: source.parentSuiteId,
+      },
+    });
+    if (source.suiteCases.length > 0) {
+      await (tx as any).testSuiteCase.createMany({
+        data: source.suiteCases.map((item: any, idx: number) => ({
+          suiteId: created.id,
+          testCaseId: item.testCaseId,
+          position: idx + 1,
+          addedBy: req.user!.userId,
+        })),
+      });
+    }
+    return created;
+  });
+  await writeAuditLog(req.user!.userId, "CLONE_TEST_SUITE", "TestSuite", clone.id, {
+    sourceSuiteId: source.id,
+  });
+  return res.status(201).json(clone);
+});
+
+router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
+  if (!suite) return res.status(404).json({ message: "Suite not found" });
+  if (suite.isArchived) return res.status(400).json({ message: "Suite is already archived" });
+  const activeChildren = await prismaAny.testSuite.count({
+    where: { parentSuiteId: suite.id, isArchived: false },
+  });
+  if (activeChildren > 0) {
+    return res.status(400).json({ message: "Archive child suites first before archiving parent suite" });
+  }
+  const updated = await prismaAny.testSuite.update({
+    where: { id: req.params.suiteId },
+    data: { isArchived: true },
+  });
+  await writeAuditLog(req.user!.userId, "ARCHIVE_TEST_SUITE", "TestSuite", updated.id);
+  return res.json(updated);
+});
+
+router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
+  if (!suite) return res.status(404).json({ message: "Suite not found" });
+  if (!suite.isArchived) return res.status(400).json({ message: "Suite is already active" });
+  if (suite.parentSuiteId) {
+    const parent = await prismaAny.testSuite.findUnique({
+      where: { id: suite.parentSuiteId },
+      select: { id: true, isArchived: true },
+    });
+    if (!parent) return res.status(400).json({ message: "Parent suite no longer exists" });
+    if (parent.isArchived) {
+      return res.status(400).json({ message: "Restore parent suite first" });
+    }
+  }
+  const updated = await prismaAny.testSuite.update({
+    where: { id: req.params.suiteId },
+    data: { isArchived: false },
+  });
+  await writeAuditLog(req.user!.userId, "RESTORE_TEST_SUITE", "TestSuite", updated.id);
+  return res.json(updated);
+});
+
+router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await prismaAny.testSuite.findUnique({
+    where: { id: req.params.suiteId },
+    select: { id: true, name: true, isArchived: true, _count: { select: { suiteCases: true, childSuites: true } } },
+  });
+  if (!suite) return res.status(404).json({ message: "Suite not found" });
+  if (!suite.isArchived) {
+    return res.status(400).json({ message: "Archive suite before permanent delete" });
+  }
+
+  await prismaAny.testSuite.delete({
+    where: { id: suite.id },
+  });
+
+  await writeAuditLog(req.user!.userId, "DELETE_TEST_SUITE", "TestSuite", suite.id, {
+    name: suite.name,
+    caseCount: suite._count?.suiteCases || 0,
+    childCount: suite._count?.childSuites || 0,
+  });
+  return res.json({ message: "Suite deleted permanently", id: suite.id });
+});
+
+router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suiteId = asString(req.body.suiteId);
+  const mode = parseEnum(SUITE_EXECUTION_MODE, req.body.mode) || SUITE_EXECUTION_MODE.SEQUENTIAL;
+  if (!suiteId) return res.status(400).json({ message: "suiteId is required" });
+
+  const suite = await (prisma as any).testSuite.findUnique({
+    where: { id: suiteId },
+    include: { suiteCases: { orderBy: { position: "asc" } } },
+  });
+  if (!suite || suite.isArchived) return res.status(404).json({ message: "Suite not found" });
+  if (!suite.suiteCases.length) return res.status(400).json({ message: "Suite has no test cases to execute" });
+
+  const requestedTesterIds = Array.isArray(req.body.testerIds) ? [...new Set(asStringArray(req.body.testerIds))] : [];
+  const testerIds =
+    requestedTesterIds.length > 0
+      ? [...new Set([...requestedTesterIds, req.user!.userId])]
+      : [req.user!.userId];
+  if (testerIds.length > 0) {
+    const testers = await prisma.user.findMany({
+      where: { id: { in: testerIds }, role: Role.TESTER, isActive: true },
+      select: { id: true },
+    });
+    if (testers.length !== testerIds.length) {
+      return res.status(400).json({ message: "One or more testerIds are invalid/inactive/non-tester users" });
+    }
+  }
+
+  const created = await prisma.$transaction(async (tx) => {
+    const run = await tx.testRun.create({
+      data: {
+        name: `${suite.name} Run ${new Date().toISOString().slice(0, 10)}`,
+        description: `Auto-linked run for suite ${suite.name}`,
+        createdBy: req.user!.userId,
+        targetStartDate: req.body.targetStartDate ? new Date(req.body.targetStartDate) : null,
+        targetEndDate: req.body.targetEndDate ? new Date(req.body.targetEndDate) : null,
+        status: TestRunStatus.PLANNED,
+      },
+    });
+    await tx.testRunCase.createMany({
+      data: suite.suiteCases.map((item: any) => ({
+        testRunId: run.id,
+        testCaseId: item.testCaseId,
+        status: TestRunCaseStatus.NOT_RUN,
+      })),
+    });
+    if (testerIds.length > 0) {
+      await tx.testRunAssignment.createMany({
+        data: testerIds.map((testerId) => ({ testRunId: run.id, testerId })),
+      });
+    }
+
+    const suiteExecution = await (tx as any).testSuiteExecution.create({
+      data: {
+        suiteId: suite.id,
+        startedBy: req.user!.userId,
+        mode,
+        status: SUITE_EXECUTION_STATUS.RUNNING,
+        linkedTestRunId: run.id,
+        totalCases: suite.suiteCases.length,
+        startedAt: new Date(),
+      },
+    });
+
+    await (tx as any).testSuiteExecutionCase.createMany({
+      data: suite.suiteCases.map((item: any) => ({
+        suiteExecutionId: suiteExecution.id,
+        suiteId: suite.id,
+        suiteCaseId: item.id,
+        testCaseId: item.testCaseId,
+        position: item.position,
+        status: TestRunCaseStatus.NOT_RUN,
+      })),
+    });
+    return suiteExecution;
+  });
+
+  await refreshSuiteExecutionSummary(created.id);
+  await writeAuditLog(req.user!.userId, "START_SUITE_EXECUTION", "TestSuiteExecution", created.id, {
+    suiteId,
+    mode,
+  });
+  return res.status(201).json(created);
+});
+
+router.get("/suite-executions/:id", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  await refreshSuiteExecutionSummary(req.params.id);
+  const suiteExecution = await (prisma as any).testSuiteExecution.findUnique({
+    where: { id: req.params.id },
+    include: {
+      suite: { select: { id: true, name: true, module: true } },
+      starter: { select: { id: true, name: true, email: true } },
+      linkedTestRun: { select: { id: true, name: true, status: true } },
+      cases: {
+        include: {
+          testCase: { select: { id: true, title: true, testCaseCode: true, module: true } },
+          execution: { select: { id: true, result: true, executedAt: true } },
+        },
+        orderBy: { position: "asc" },
+      },
+    },
+  });
+  if (!suiteExecution) return res.status(404).json({ message: "Suite execution not found" });
+  return res.json(suiteExecution);
+});
+
+router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suiteId = req.params.suiteId;
+  const executions = await (prisma as any).testSuiteExecution.findMany({
+    where: { suiteId },
+    include: {
+      starter: { select: { id: true, name: true, email: true } },
+      linkedTestRun: { select: { id: true, name: true, status: true } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return res.json(executions);
+});
 
 router.get(
   "/reports/test-executions",
@@ -3095,6 +3841,19 @@ router.patch("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthReq
   });
   await writeAuditLog(req.user!.userId, "ADMIN_UPDATE_USER", "User", user.id);
   return res.json(user);
+});
+
+router.delete("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  if (req.user!.userId === req.params.id) {
+    return res.status(400).json({ message: "Admin cannot delete their own account" });
+  }
+
+  await prisma.user.delete({
+    where: { id: req.params.id },
+  });
+
+  await writeAuditLog(req.user!.userId, "ADMIN_DELETE_USER", "User", req.params.id);
+  return res.status(204).send();
 });
 
 router.post("/admin/roles/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
