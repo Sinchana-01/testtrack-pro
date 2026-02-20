@@ -34,6 +34,8 @@ model User {
   assignedTestCases   TestCase[]      @relation("AssignedTestCases")
   modifiedTestCases   TestCase[]      @relation("ModifiedTestCases")
   createdSuites       TestSuite[]     @relation("CreatedSuites")
+  startedSuiteExecutions TestSuiteExecution[] @relation("StartedSuiteExecutions")
+  addedSuiteCaseLinks TestSuiteCase[] @relation("SuiteCaseAddedBy")
   executions          TestExecution[] @relation("ExecutedBy")
   uploadedAttachments Attachment[]    @relation("UploadedBy")
   uploadedBugAttachments BugAttachment[] @relation("BugAttachmentUploadedBy")
@@ -89,6 +91,7 @@ model TestCase {
   versionHistory TestCaseVersion[]
 
   suiteLinks  TestSuiteCase[]
+  suiteExecutionCases TestSuiteExecutionCase[]
   executions  TestExecution[]
   attachments Attachment[]
   issues      Issue[]
@@ -132,6 +135,7 @@ model TestRun {
   assignments     TestRunAssignment[]
   testCases       TestRunCase[]
   executions      TestExecution[]
+  suiteExecutions TestSuiteExecution[]
 
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -175,31 +179,103 @@ model TestSuite {
   id          String         @id @default(uuid())
   name        String
   description String?
+  module      String?
   createdBy   String
   projectId   String?
+  parentSuiteId String?
+  isArchived  Boolean        @default(false)
 
   creator     User           @relation("CreatedSuites", fields: [createdBy], references: [id])
   project     Project?       @relation(fields: [projectId], references: [id])
+  parentSuite TestSuite?     @relation("SuiteHierarchy", fields: [parentSuiteId], references: [id], onDelete: SetNull)
+  childSuites TestSuite[]    @relation("SuiteHierarchy")
   suiteCases  TestSuiteCase[]
+  executions  TestSuiteExecution[]
+  executionCases TestSuiteExecutionCase[]
 
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
   @@index([createdBy])
   @@index([projectId])
+  @@index([parentSuiteId])
+  @@index([isArchived])
 }
 
 model TestSuiteCase {
   id         String    @id @default(uuid())
   suiteId    String
   testCaseId String
+  position   Int       @default(0)
+  addedBy    String?
 
   suite      TestSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
   testCase   TestCase  @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  addedByUser User?    @relation("SuiteCaseAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+  suiteExecutionCases TestSuiteExecutionCase[]
 
   createdAt  DateTime  @default(now())
 
   @@unique([suiteId, testCaseId])
+  @@index([suiteId, position])
+}
+
+model TestSuiteExecution {
+  id              String              @id @default(uuid())
+  suiteId         String
+  startedBy       String
+  mode            SuiteExecutionMode
+  status          SuiteExecutionStatus @default(PLANNED)
+  linkedTestRunId String?
+  totalCases      Int                 @default(0)
+  passed          Int                 @default(0)
+  failed          Int                 @default(0)
+  blocked         Int                 @default(0)
+  skipped         Int                 @default(0)
+  passRate        Float?
+  startedAt       DateTime?
+  completedAt     DateTime?
+
+  suite           TestSuite           @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  starter         User                @relation("StartedSuiteExecutions", fields: [startedBy], references: [id], onDelete: Cascade)
+  linkedTestRun   TestRun?            @relation(fields: [linkedTestRunId], references: [id], onDelete: SetNull)
+  cases           TestSuiteExecutionCase[]
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([suiteId])
+  @@index([startedBy])
+  @@index([linkedTestRunId])
+  @@index([status])
+}
+
+model TestSuiteExecutionCase {
+  id               String             @id @default(uuid())
+  suiteExecutionId String
+  suiteId          String
+  suiteCaseId      String
+  testCaseId       String
+  position         Int
+  status           TestRunCaseStatus  @default(NOT_RUN)
+  executionId      String?
+  startedAt        DateTime?
+  completedAt      DateTime?
+
+  suiteExecution   TestSuiteExecution @relation(fields: [suiteExecutionId], references: [id], onDelete: Cascade)
+  suite            TestSuite          @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  suiteCase        TestSuiteCase      @relation(fields: [suiteCaseId], references: [id], onDelete: Cascade)
+  testCase         TestCase           @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  execution        TestExecution?     @relation(fields: [executionId], references: [id], onDelete: SetNull)
+
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([suiteExecutionId, suiteCaseId])
+  @@index([suiteExecutionId, status])
+  @@index([suiteId])
+  @@index([testCaseId])
+  @@index([executionId])
 }
 
 model TestExecution {
@@ -218,6 +294,7 @@ model TestExecution {
   testRun     TestRun?        @relation(fields: [testRunId], references: [id], onDelete: SetNull)
   issues      Issue[]
   runCaseRefs TestRunCase[]   @relation("RunCaseLastExecution")
+  suiteExecutionRefs TestSuiteExecutionCase[]
 
   executedAt  DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
@@ -480,6 +557,19 @@ enum TestRunCaseStatus {
   FAILED
   BLOCKED
   SKIPPED
+}
+
+enum SuiteExecutionMode {
+  SEQUENTIAL
+  PARALLEL
+}
+
+enum SuiteExecutionStatus {
+  PLANNED
+  RUNNING
+  COMPLETED
+  PARTIAL
+  FAILED
 }
 
 enum BugPriority {
