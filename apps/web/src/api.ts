@@ -113,9 +113,27 @@ export async function logoutAllApi() {
 
 /* AUTH FETCH WITH AUTO REFRESH */
 export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
+  const fetchWithRetry = async (
+    target: RequestInfo | URL,
+    requestInit: RequestInit | undefined,
+    retries = 1
+  ): Promise<Response> => {
+    try {
+      return await fetch(target, requestInit);
+    } catch (error: any) {
+      if (retries > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        return fetchWithRetry(target, requestInit, retries - 1);
+      }
+      throw new Error(
+        `Unable to reach API server at ${TEST_API_URL}. Ensure backend is running on port 4000.`
+      );
+    }
+  };
+
   let accessToken = getAccessToken();
   const usingSessionStorage = Boolean(sessionStorage.getItem(REFRESH_TOKEN_KEY));
-  let response = await fetch(input, {
+  let response = await fetchWithRetry(input, {
     ...init,
     headers: {
       ...(init?.headers || {}),
@@ -141,7 +159,7 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
   setSessionTokens(refreshed.accessToken, refreshed.refreshToken, !usingSessionStorage);
   accessToken = refreshed.accessToken;
 
-  return fetch(input, {
+  return fetchWithRetry(input, {
     ...init,
     headers: {
       ...(init?.headers || {}),
@@ -254,5 +272,369 @@ export async function importTestCasesApi(payload: Record<string, unknown>) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function openExecutionApi(testCaseId: string, testRunId?: string) {
+  const query = testRunId ? `?testRunId=${encodeURIComponent(testRunId)}` : "";
+  return authJson(`/executions/testcases/${testCaseId}/open${query}`);
+}
+
+export async function startExecutionApi(payload: { testCaseId: string; testRunId?: string | null; notes?: string }) {
+  return authJson(`/executions/testcases/${payload.testCaseId}/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      testRunId: payload.testRunId || null,
+      notes: payload.notes || "",
+    }),
+  });
+}
+
+export async function saveExecutionStepApi(
+  executionId: string,
+  stepNumber: number,
+  payload: { status: string; actualResult?: string; notes?: string; executionNotes?: string }
+) {
+  return authJson(`/executions/${executionId}/steps/${stepNumber}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function finalizeExecutionApi(executionId: string, payload?: { result?: string; notes?: string }) {
+  return authJson(`/executions/${executionId}/finalize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function createTestRunApi(payload: {
+  name: string;
+  description?: string;
+  targetStartDate?: string;
+  targetEndDate?: string;
+  testCaseIds: string[];
+  testerIds: string[];
+}) {
+  return authJson("/test-runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listTestRunsApi() {
+  return authJson("/test-runs");
+}
+
+export async function getTestRunApi(id: string) {
+  return authJson(`/test-runs/${id}`);
+}
+
+export async function listExecutionReportsApi() {
+  return authJson("/reports/test-executions");
+}
+
+export async function startExecutionTimerApi(executionId: string) {
+  return authJson(`/executions/${executionId}/timer/start`, { method: "POST" });
+}
+
+export async function stopExecutionTimerApi(executionId: string) {
+  return authJson(`/executions/${executionId}/timer/stop`, { method: "POST" });
+}
+
+export async function listExecutionEvidenceApi(executionId: string) {
+  return authJson(`/executions/${executionId}/evidence`);
+}
+
+export async function uploadExecutionEvidenceApi(
+  executionId: string,
+  payload: { fileType: string; fileUrl: string; fileName: string; notes?: string }
+) {
+  return authJson(`/executions/${executionId}/evidence`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteExecutionEvidenceApi(executionId: string, evidenceId: string) {
+  return authJson(`/executions/${executionId}/evidence/${evidenceId}`, { method: "DELETE" });
+}
+
+export async function createBugFromExecutionApi(
+  executionId: string,
+  payload?: { title?: string; description?: string; severity?: string; assignedTo?: string }
+) {
+  return authJson(`/issues/from-executions/${executionId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function reexecuteExecutionApi(executionId: string, payload?: { notes?: string }) {
+  return authJson(`/executions/${executionId}/reexecute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function createBugApi(payload: Record<string, unknown>) {
+  return authJson("/bugs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listBugsApi(params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/bugs${query}`);
+}
+
+export async function getBugApi(id: string) {
+  return authJson(`/bugs/${id}`);
+}
+
+export async function updateBugWorkflowApi(id: string, payload: Record<string, unknown>) {
+  return authJson(`/bugs/${id}/workflow`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function resolveBugApi(id: string, payload: Record<string, unknown>) {
+  return authJson(`/bugs/${id}/resolve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listDeveloperBugsApi(params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/developer/bugs${query}`);
+}
+
+export async function quickUpdateDeveloperBugStatusApi(id: string, status: string) {
+  return authJson(`/developer/bugs/${id}/quick-status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function createBugCommentApi(id: string, payload: { comment: string; parentCommentId?: string }) {
+  return authJson(`/bugs/${id}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listBugCommentsApi(id: string) {
+  return authJson(`/bugs/${id}/comments`);
+}
+
+export async function editBugCommentApi(commentId: string, comment: string) {
+  return authJson(`/bugs/comments/${commentId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+}
+
+export async function deleteBugCommentApi(commentId: string) {
+  return authJson(`/bugs/comments/${commentId}`, { method: "DELETE" });
+}
+
+export async function deleteTemplateApi(templateId: string) {
+  return authJson(`/testcase-templates/${templateId}`, { method: "DELETE" });
+}
+
+export async function createSuiteApi(payload: Record<string, unknown>) {
+  return authJson("/suites", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listSuitesApi(params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/suites${query}`);
+}
+
+export async function getSuiteApi(id: string) {
+  return authJson(`/suites/${id}`);
+}
+
+export async function updateSuiteApi(id: string, payload: Record<string, unknown>) {
+  return authJson(`/suites/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function addSuiteTestCasesApi(suiteId: string, testCaseIds: string[]) {
+  return authJson(`/suites/${suiteId}/testcases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testCaseIds }),
+  });
+}
+
+export async function removeSuiteTestCaseApi(suiteId: string, testCaseId: string) {
+  return authJson(`/suites/${suiteId}/testcases/${testCaseId}`, { method: "DELETE" });
+}
+
+export async function reorderSuiteTestCasesApi(suiteId: string, testCaseIds: string[]) {
+  return authJson(`/suites/${suiteId}/testcases/reorder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testCaseIds }),
+  });
+}
+
+export async function cloneSuiteApi(suiteId: string, name?: string) {
+  return authJson(`/suites/${suiteId}/clone`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(name ? { name } : {}),
+  });
+}
+
+export async function archiveSuiteApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/archive`, { method: "POST" });
+}
+
+export async function restoreSuiteApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/restore`, { method: "POST" });
+}
+
+export async function deleteSuiteApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}`, { method: "DELETE" });
+}
+
+export async function startSuiteExecutionApi(payload: Record<string, unknown>) {
+  return authJson("/suite-executions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSuiteExecutionApi(id: string) {
+  return authJson(`/suite-executions/${id}`);
+}
+
+export async function listSuiteExecutionsApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/executions`);
+}
+
+export async function listAdminUsersApi() {
+  return authJson("/admin/users");
+}
+
+export async function createAdminUserApi(payload: {
+  name: string;
+  email: string;
+  password: string;
+  role: string;
+}) {
+  return authJson("/admin/users", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminUserApi(
+  id: string,
+  payload: { name?: string; role?: string; isActive?: boolean }
+) {
+  return authJson(`/admin/users/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAdminUserApi(id: string) {
+  return authJson(`/admin/users/${id}`, {
+    method: "DELETE",
+  });
+}
+
+export async function updateAdminRoleApi(id: string, role: string) {
+  return authJson(`/admin/roles/${id}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function listAdminProjectsApi() {
+  return authJson("/admin/projects");
+}
+
+export async function createAdminProjectApi(payload: { name: string; description?: string }) {
+  return authJson("/admin/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminProjectApi(
+  id: string,
+  payload: { name?: string; description?: string; isActive?: boolean }
+) {
+  return authJson(`/admin/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listAdminAuditLogsApi(entityType?: string) {
+  const query = entityType ? `?entityType=${encodeURIComponent(entityType)}` : "";
+  return authJson(`/admin/audit-logs${query}`);
+}
+
+export async function listAdminSystemConfigsApi() {
+  return authJson("/admin/system-config");
+}
+
+export async function upsertAdminSystemConfigApi(payload: { key: string; value: string }) {
+  return authJson("/admin/system-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listAdminBackupsApi() {
+  return authJson("/admin/backups");
+}
+
+export async function triggerAdminBackupApi(notes?: string) {
+  return authJson("/admin/backups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: notes || "" }),
   });
 }
