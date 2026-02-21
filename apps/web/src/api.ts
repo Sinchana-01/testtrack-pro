@@ -574,6 +574,7 @@ export async function updateAdminUserApi(
 }
 
 export async function deleteAdminUserApi(id: string) {
+  return authJson(`/admin/users/${id}`, { method: "DELETE" });
   return authJson(`/admin/users/${id}`, {
     method: "DELETE",
   });
