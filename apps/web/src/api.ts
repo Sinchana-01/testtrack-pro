@@ -458,6 +458,93 @@ export async function deleteBugCommentApi(commentId: string) {
   return authJson(`/bugs/comments/${commentId}`, { method: "DELETE" });
 }
 
+export async function deleteTemplateApi(templateId: string) {
+  return authJson(`/testcase-templates/${templateId}`, { method: "DELETE" });
+}
+
+export async function createSuiteApi(payload: Record<string, unknown>) {
+  return authJson("/suites", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listSuitesApi(params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/suites${query}`);
+}
+
+export async function getSuiteApi(id: string) {
+  return authJson(`/suites/${id}`);
+}
+
+export async function updateSuiteApi(id: string, payload: Record<string, unknown>) {
+  return authJson(`/suites/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function addSuiteTestCasesApi(suiteId: string, testCaseIds: string[]) {
+  return authJson(`/suites/${suiteId}/testcases`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testCaseIds }),
+  });
+}
+
+export async function removeSuiteTestCaseApi(suiteId: string, testCaseId: string) {
+  return authJson(`/suites/${suiteId}/testcases/${testCaseId}`, { method: "DELETE" });
+}
+
+export async function reorderSuiteTestCasesApi(suiteId: string, testCaseIds: string[]) {
+  return authJson(`/suites/${suiteId}/testcases/reorder`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testCaseIds }),
+  });
+}
+
+export async function cloneSuiteApi(suiteId: string, name?: string) {
+  return authJson(`/suites/${suiteId}/clone`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(name ? { name } : {}),
+  });
+}
+
+export async function archiveSuiteApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/archive`, { method: "POST" });
+}
+
+export async function restoreSuiteApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/restore`, { method: "POST" });
+}
+
+export async function deleteSuiteApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}`, { method: "DELETE" });
+}
+
+export async function startSuiteExecutionApi(payload: Record<string, unknown>) {
+  return authJson("/suite-executions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getSuiteExecutionApi(id: string) {
+  return authJson(`/suite-executions/${id}`);
+}
+
+export async function listSuiteExecutionsApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/executions`);
+}
+
 export async function listAdminUsersApi() {
   return authJson("/admin/users");
 }
@@ -488,6 +575,9 @@ export async function updateAdminUserApi(
 
 export async function deleteAdminUserApi(id: string) {
   return authJson(`/admin/users/${id}`, { method: "DELETE" });
+  return authJson(`/admin/users/${id}`, {
+    method: "DELETE",
+  });
 }
 
 export async function updateAdminRoleApi(id: string, role: string) {
@@ -495,5 +585,57 @@ export async function updateAdminRoleApi(id: string, role: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ role }),
+  });
+}
+
+export async function listAdminProjectsApi() {
+  return authJson("/admin/projects");
+}
+
+export async function createAdminProjectApi(payload: { name: string; description?: string }) {
+  return authJson("/admin/projects", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAdminProjectApi(
+  id: string,
+  payload: { name?: string; description?: string; isActive?: boolean }
+) {
+  return authJson(`/admin/projects/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listAdminAuditLogsApi(entityType?: string) {
+  const query = entityType ? `?entityType=${encodeURIComponent(entityType)}` : "";
+  return authJson(`/admin/audit-logs${query}`);
+}
+
+export async function listAdminSystemConfigsApi() {
+  return authJson("/admin/system-config");
+}
+
+export async function upsertAdminSystemConfigApi(payload: { key: string; value: string }) {
+  return authJson("/admin/system-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listAdminBackupsApi() {
+  return authJson("/admin/backups");
+}
+
+export async function triggerAdminBackupApi(notes?: string) {
+  return authJson("/admin/backups", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ notes: notes || "" }),
   });
 }
