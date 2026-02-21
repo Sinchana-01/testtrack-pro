@@ -267,12 +267,6 @@ export async function createFromTemplateApi(templateId: string, payload: Record<
   });
 }
 
-export async function deleteTemplateApi(templateId: string) {
-  return authJson(`/testcase-templates/${templateId}`, {
-    method: "DELETE",
-  });
-}
-
 export async function importTestCasesApi(payload: Record<string, unknown>) {
   return authJson("/testcases/import", {
     method: "POST",
@@ -334,6 +328,10 @@ export async function createTestRunApi(payload: {
 
 export async function listTestRunsApi() {
   return authJson("/test-runs");
+}
+
+export async function listAvailableTestersApi() {
+  return authJson("/test-runs/available-testers");
 }
 
 export async function getTestRunApi(id: string) {

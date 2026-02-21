@@ -2445,6 +2445,19 @@ router.get(
 );
 
 router.get(
+  "/test-runs/available-testers",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (_req: AuthRequest, res: Response) => {
+    const testers = await prisma.user.findMany({
+      where: { role: Role.TESTER, isActive: true },
+      select: { id: true, name: true, email: true },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+    return res.json(testers);
+  }
+);
+
+router.get(
   "/test-runs/:id",
   authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
