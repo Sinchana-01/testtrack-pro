@@ -1303,6 +1303,29 @@ function App() {
       resetExecutionPanel();
       resetBugPanel();
     }
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "register") return;
+    setName("");
+    setEmail("");
+    setPassword("");
+    setRole("");
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !selectedBugId) return;
+    loadBugDetails(selectedBugId).catch(() => {
+      setSelectedBug(null);
+      setBugComments([]);
+    });
+  }, [selectedBugId, screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !currentRole) return;
+    loadTestCaseData().catch(() => {
+      // no-op: page-level actions already show explicit alerts on manual refresh
+    });
   }, [screen, currentRole]);
 
   useEffect(() => {
