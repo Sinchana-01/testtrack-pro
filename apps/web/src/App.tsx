@@ -12,6 +12,7 @@ import {
   deleteExecutionEvidenceApi,
   deleteAdminUserApi,
   deleteBugCommentApi,
+  deleteTemplateApi,
   createFromTemplateApi,
   createTemplateApi,
   createTestCaseApi,
@@ -62,6 +63,18 @@ import {
   updateAdminRoleApi,
   updateAdminUserApi,
   updateSuiteApi,
+  createAdminProjectApi,
+  createAdminUserApi,
+  listAdminAuditLogsApi,
+  listAdminBackupsApi,
+  listAdminProjectsApi,
+  listAdminSystemConfigsApi,
+  listAdminUsersApi,
+  triggerAdminBackupApi,
+  updateAdminProjectApi,
+  updateAdminRoleApi,
+  updateAdminUserApi,
+  upsertAdminSystemConfigApi,
   updateTestCaseApi,
 } from "./api";
 import "./App.css";
@@ -78,7 +91,13 @@ type DashboardFeature =
   | "bug_management"
   | "test_cases"
   | "developer_workspace"
-  | "admin_workspace";
+  | "admin_workspace"
+  | "admin_users"
+  | "admin_projects"
+  | "admin_roles"
+  | "admin_audit_logs"
+  | "admin_system_config"
+  | "admin_backups";
 
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
@@ -248,6 +267,30 @@ function App() {
   const [adminCreatePassword, setAdminCreatePassword] = useState("");
   const [adminCreateRole, setAdminCreateRole] = useState("");
   const [adminUserSavingId, setAdminUserSavingId] = useState("");
+  const [adminProjects, setAdminProjects] = useState<any[]>([]);
+  const [adminAuditLogs, setAdminAuditLogs] = useState<any[]>([]);
+  const [adminConfigs, setAdminConfigs] = useState<any[]>([]);
+  const [adminBackups, setAdminBackups] = useState<any[]>([]);
+  const [adminUserName, setAdminUserName] = useState("");
+  const [adminUserEmail, setAdminUserEmail] = useState("");
+  const [adminUserPassword, setAdminUserPassword] = useState("");
+  const [adminUserRole, setAdminUserRole] = useState("TESTER");
+  const [adminUserUpdateName, setAdminUserUpdateName] = useState("");
+  const [adminUserUpdateRole, setAdminUserUpdateRole] = useState("TESTER");
+  const [adminUserUpdateActive, setAdminUserUpdateActive] = useState(true);
+  const [adminUserUpdateId, setAdminUserUpdateId] = useState("");
+  const [adminProjectName, setAdminProjectName] = useState("");
+  const [adminProjectDescription, setAdminProjectDescription] = useState("");
+  const [adminProjectUpdateId, setAdminProjectUpdateId] = useState("");
+  const [adminProjectUpdateName, setAdminProjectUpdateName] = useState("");
+  const [adminProjectUpdateDescription, setAdminProjectUpdateDescription] = useState("");
+  const [adminProjectUpdateActive, setAdminProjectUpdateActive] = useState(true);
+  const [adminRoleUserId, setAdminRoleUserId] = useState("");
+  const [adminRoleValue, setAdminRoleValue] = useState("TESTER");
+  const [adminAuditEntityType, setAdminAuditEntityType] = useState("");
+  const [adminConfigKey, setAdminConfigKey] = useState("");
+  const [adminConfigValue, setAdminConfigValue] = useState("");
+  const [adminBackupNotes, setAdminBackupNotes] = useState("");
   const [navOpen, setNavOpen] = useState(false);
   const [activeFeature, setActiveFeature] = useState<DashboardFeature | "none">("none");
   const roleName = currentRole.toUpperCase();
@@ -261,11 +304,11 @@ function App() {
   const canImportTestCases = isTester;
   const canManageSuites = isTester;
   const canSeeSelectionControls = isTester;
-  const canExecuteTests = isTester || isAdmin;
-  const canManageTestRuns = isTester || isAdmin;
-  const canViewBugs = isTester || isDeveloper || isAdmin;
-  const canCreateBugs = isTester || isAdmin;
-  const canTransitionBugs = isTester || isDeveloper || isAdmin;
+  const canExecuteTests = isTester;
+  const canManageTestRuns = isTester;
+  const canViewBugs = isTester || isDeveloper;
+  const canCreateBugs = isTester;
+  const canTransitionBugs = isTester || isDeveloper;
   const canResolveBugs = isDeveloper;
   const testerFeatures: Array<{ key: DashboardFeature; label: string }> = [
     { key: "create_test_case", label: "Create Test Case" },
@@ -285,9 +328,12 @@ function App() {
   ];
   const adminFeatures: Array<{ key: DashboardFeature; label: string }> = [
     { key: "admin_workspace", label: "Admin Workspace" },
-    { key: "bug_management", label: "Bug Management" },
-    { key: "execute_tests", label: "Execution Monitoring" },
-    { key: "test_cases", label: "Test Cases" },
+    { key: "admin_users", label: "Manage Users" },
+    { key: "admin_projects", label: "Manage Projects" },
+    { key: "admin_roles", label: "Manage Roles" },
+    { key: "admin_audit_logs", label: "Audit Logs" },
+    { key: "admin_system_config", label: "System Config" },
+    { key: "admin_backups", label: "Backup Management" },
   ];
   const roleFeatures = isTester ? testerFeatures : isDeveloper ? developerFeatures : adminFeatures;
   const roleSummary = isTester
@@ -319,6 +365,12 @@ function App() {
     executionRunId && executionRunCaseIds.size > 0
       ? testCases.filter((tc) => executionRunCaseIds.has(tc.id))
       : testCases;
+  const showAdminUsers = isAdmin && activeFeature === "admin_users";
+  const showAdminProjects = isAdmin && activeFeature === "admin_projects";
+  const showAdminRoles = isAdmin && activeFeature === "admin_roles";
+  const showAdminAuditLogs = isAdmin && activeFeature === "admin_audit_logs";
+  const showAdminSystemConfig = isAdmin && activeFeature === "admin_system_config";
+  const showAdminBackups = isAdmin && activeFeature === "admin_backups";
   const assignedBugCount = bugs.length;
   const p1UrgentCount = bugs.filter((item) => item.priority === "P1_URGENT").length;
   const criticalBugCount = bugs.filter((item) => item.severity === "CRITICAL").length;
@@ -484,6 +536,15 @@ function App() {
 
   const loadTestCaseData = async () => {
     setIsRefreshing(true);
+    if (isAdmin) {
+      setTestCases([]);
+      setTemplates([]);
+      setTestRuns([]);
+      setExecutionReports([]);
+      setBugs([]);
+      setIsRefreshing(false);
+      return;
+    }
     const bugParams: Record<string, string> = {
       status: bugFilterStatus,
       priority: bugFilterPriority,
@@ -522,6 +583,29 @@ function App() {
       return bugList.find((item) => item.id === prev.id) || null;
     });
     setIsRefreshing(false);
+  };
+
+  const loadAdminData = async () => {
+    if (!isAdmin) {
+      setAdminUsers([]);
+      setAdminProjects([]);
+      setAdminAuditLogs([]);
+      setAdminConfigs([]);
+      setAdminBackups([]);
+      return;
+    }
+    const [users, projects, logs, configs, backups] = await Promise.all([
+      listAdminUsersApi(),
+      listAdminProjectsApi(),
+      listAdminAuditLogsApi(adminAuditEntityType || undefined),
+      listAdminSystemConfigsApi(),
+      listAdminBackupsApi(),
+    ]);
+    setAdminUsers(Array.isArray(users) ? users : []);
+    setAdminProjects(Array.isArray(projects) ? projects : []);
+    setAdminAuditLogs(Array.isArray(logs) ? logs : []);
+    setAdminConfigs(Array.isArray(configs) ? configs : []);
+    setAdminBackups(Array.isArray(backups) ? backups : []);
   };
 
   const loadBugDetails = async (bugId: string) => {
@@ -802,12 +886,47 @@ function App() {
 
   const isDeletedComment = (item: any): boolean => String(item.comment || "").trim() === "[DELETED]";
 
+  const renderInlineCommentMarkdown = (text: string): JSX.Element[] => {
+    const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*|_[^_]+_)/g).filter((part) => part.length > 0);
+    return tokens.map((part, index) => {
+      if (/^`[^`]+`$/.test(part)) {
+        return (
+          <code className="commentCode" key={`code-${index}`}>
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      if (/^\*\*[^*]+\*\*$/.test(part)) {
+        return <strong key={`bold-${index}`}>{part.slice(2, -2)}</strong>;
+      }
+      if (/^_[^_]+_$/.test(part)) {
+        return <em key={`italic-${index}`}>{part.slice(1, -1)}</em>;
+      }
+      return <span key={`text-${index}`}>{part}</span>;
+    });
+  };
+
+  const renderCommentContent = (text: string): JSX.Element => {
+    const lines = text.split(/\r?\n/);
+    return (
+      <>
+        {lines.map((line, index) => (
+          <span key={`line-${index}`}>
+            {renderInlineCommentMarkdown(line)}
+            {index < lines.length - 1 ? <br /> : null}
+          </span>
+        ))}
+      </>
+    );
+  };
+
   const renderCommentThreads = (items: any[], depth = 0): JSX.Element[] =>
     items.map((item) => (
       <div key={item.id} style={{ marginLeft: depth > 0 ? `${Math.min(depth * 18, 54)}px` : "0" }}>
         <div className="row">
           <span className="title">
-            <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
+            <strong>Comment:</strong>{" "}
+            {isDeletedComment(item) ? "[Comment deleted]" : renderCommentContent(String(item.comment || ""))}
             {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
               <>
                 <br />
@@ -1184,6 +1303,29 @@ function App() {
       resetExecutionPanel();
       resetBugPanel();
     }
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "register") return;
+    setName("");
+    setEmail("");
+    setPassword("");
+    setRole("");
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !selectedBugId) return;
+    loadBugDetails(selectedBugId).catch(() => {
+      setSelectedBug(null);
+      setBugComments([]);
+    });
+  }, [selectedBugId, screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !currentRole) return;
+    loadTestCaseData().catch(() => {
+      // no-op: page-level actions already show explicit alerts on manual refresh
+    });
   }, [screen, currentRole]);
 
   useEffect(() => {
@@ -1216,18 +1358,41 @@ function App() {
 
   useEffect(() => {
     if (screen !== "dashboard" || !currentRole) return;
-    loadTestCaseData().catch(() => {
+    const loader = isAdmin ? loadAdminData : loadTestCaseData;
+    loader().catch(() => {
       // no-op: page-level actions already show explicit alerts on manual refresh
     });
-  }, [screen, currentRole]);
+  }, [screen, currentRole, isAdmin]);
 
   useEffect(() => {
     if (screen !== "dashboard") return;
+    if (isAdmin) {
+      if (
+        activeFeature === "admin_users" ||
+        activeFeature === "admin_projects" ||
+        activeFeature === "admin_roles" ||
+        activeFeature === "admin_audit_logs" ||
+        activeFeature === "admin_system_config" ||
+        activeFeature === "admin_backups"
+      ) {
+        loadAdminData().catch(() => {
+          // no-op
+        });
+      }
+      return;
+    }
     if (activeFeature !== "bug_management" && activeFeature !== "test_cases") return;
     loadTestCaseData().catch(() => {
       // no-op
     });
-  }, [activeFeature, screen]);
+  }, [activeFeature, screen, isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin || screen !== "dashboard" || activeFeature !== "admin_audit_logs") return;
+    loadAdminData().catch(() => {
+      // no-op
+    });
+  }, [adminAuditEntityType, activeFeature, isAdmin, screen]);
 
   useEffect(() => {
     if (screen !== "dashboard" || !isAdmin || activeFeature !== "admin_workspace") return;
@@ -1549,8 +1714,12 @@ function App() {
                   disabled={isRefreshing}
                   onClick={async () => {
                     try {
-                      resetEntryFields();
-                      await loadTestCaseData();
+                      if (!isAdmin) {
+                        resetEntryFields();
+                        await loadTestCaseData();
+                      } else {
+                        await loadAdminData();
+                      }
                     } catch (error: any) {
                       setIsRefreshing(false);
                       alert(error?.message || "Refresh failed");
@@ -1787,6 +1956,288 @@ function App() {
                 </section>
               )}
 
+              {showAdminUsers && (
+                <section className="panel">
+                  <h4>Manage Users</h4>
+                  <input className="input" placeholder="Name" value={adminUserName} onChange={(e) => setAdminUserName(e.target.value)} />
+                  <input className="input" placeholder="Email" value={adminUserEmail} onChange={(e) => setAdminUserEmail(e.target.value)} />
+                  <input className="input" type="password" placeholder="Password" value={adminUserPassword} onChange={(e) => setAdminUserPassword(e.target.value)} />
+                  <select className="input" value={adminUserRole} onChange={(e) => setAdminUserRole(e.target.value)}>
+                    <option value="TESTER">TESTER</option>
+                    <option value="DEVELOPER">DEVELOPER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await createAdminUserApi({
+                          name: adminUserName,
+                          email: adminUserEmail,
+                          password: adminUserPassword,
+                          role: adminUserRole,
+                        });
+                        setAdminUserName("");
+                        setAdminUserEmail("");
+                        setAdminUserPassword("");
+                        setAdminUserRole("TESTER");
+                        await loadAdminData();
+                        alert("User created");
+                      } catch (error: any) {
+                        alert(error?.message || "Create user failed");
+                      }
+                    }}
+                  >
+                    Create User
+                  </button>
+                  <input className="input" placeholder="User ID to update" value={adminUserUpdateId} onChange={(e) => setAdminUserUpdateId(e.target.value)} />
+                  <input className="input" placeholder="Updated Name" value={adminUserUpdateName} onChange={(e) => setAdminUserUpdateName(e.target.value)} />
+                  <select className="input" value={adminUserUpdateRole} onChange={(e) => setAdminUserUpdateRole(e.target.value)}>
+                    <option value="TESTER">TESTER</option>
+                    <option value="DEVELOPER">DEVELOPER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <label className="note" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <input type="checkbox" checked={adminUserUpdateActive} onChange={(e) => setAdminUserUpdateActive(e.target.checked)} />
+                    Active User
+                  </label>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await updateAdminUserApi(adminUserUpdateId, {
+                          name: adminUserUpdateName || undefined,
+                          role: adminUserUpdateRole || undefined,
+                          isActive: adminUserUpdateActive,
+                        });
+                        setAdminUserUpdateId("");
+                        setAdminUserUpdateName("");
+                        setAdminUserUpdateRole("TESTER");
+                        setAdminUserUpdateActive(true);
+                        await loadAdminData();
+                        alert("User updated");
+                      } catch (error: any) {
+                        alert(error?.message || "Update user failed");
+                      }
+                    }}
+                  >
+                    Update User
+                  </button>
+                  <div className="listCompact">
+                    {adminUsers.map((item) => (
+                      <div className="row" key={item.id}>
+                        <span className="title">
+                          {item.name} ({item.email})
+                          <br />
+                          <strong>User ID:</strong> {item.id}
+                        </span>
+                        <span className="meta">{item.role} | {item.isActive ? "ACTIVE" : "INACTIVE"}</span>
+                        <button
+                          className="button small"
+                          onClick={async () => {
+                            try {
+                              await navigator.clipboard.writeText(item.id);
+                              alert("User ID copied");
+                            } catch {
+                              alert(`User ID: ${item.id}`);
+                            }
+                          }}
+                        >
+                          Copy ID
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {showAdminProjects && (
+                <section className="panel">
+                  <h4>Manage Projects</h4>
+                  <input className="input" placeholder="Project Name" value={adminProjectName} onChange={(e) => setAdminProjectName(e.target.value)} />
+                  <input className="input" placeholder="Project Description" value={adminProjectDescription} onChange={(e) => setAdminProjectDescription(e.target.value)} />
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await createAdminProjectApi({
+                          name: adminProjectName,
+                          description: adminProjectDescription || undefined,
+                        });
+                        setAdminProjectName("");
+                        setAdminProjectDescription("");
+                        await loadAdminData();
+                        alert("Project created");
+                      } catch (error: any) {
+                        alert(error?.message || "Create project failed");
+                      }
+                    }}
+                  >
+                    Create Project
+                  </button>
+                  <input className="input" placeholder="Project ID to update" value={adminProjectUpdateId} onChange={(e) => setAdminProjectUpdateId(e.target.value)} />
+                  <input className="input" placeholder="Updated Project Name" value={adminProjectUpdateName} onChange={(e) => setAdminProjectUpdateName(e.target.value)} />
+                  <input className="input" placeholder="Updated Description" value={adminProjectUpdateDescription} onChange={(e) => setAdminProjectUpdateDescription(e.target.value)} />
+                  <label className="note" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <input type="checkbox" checked={adminProjectUpdateActive} onChange={(e) => setAdminProjectUpdateActive(e.target.checked)} />
+                    Active Project
+                  </label>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await updateAdminProjectApi(adminProjectUpdateId, {
+                          name: adminProjectUpdateName || undefined,
+                          description: adminProjectUpdateDescription || undefined,
+                          isActive: adminProjectUpdateActive,
+                        });
+                        setAdminProjectUpdateId("");
+                        setAdminProjectUpdateName("");
+                        setAdminProjectUpdateDescription("");
+                        setAdminProjectUpdateActive(true);
+                        await loadAdminData();
+                        alert("Project updated");
+                      } catch (error: any) {
+                        alert(error?.message || "Update project failed");
+                      }
+                    }}
+                  >
+                    Update Project
+                  </button>
+                  <div className="listCompact">
+                    {adminProjects.map((item) => (
+                      <div className="row" key={item.id}>
+                        <span className="title">{item.name}</span>
+                        <span className="meta">{item.isActive ? "ACTIVE" : "INACTIVE"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {showAdminRoles && (
+                <section className="panel">
+                  <h4>Manage Roles</h4>
+                  <input className="input" placeholder="User ID" value={adminRoleUserId} onChange={(e) => setAdminRoleUserId(e.target.value)} />
+                  <select className="input" value={adminRoleValue} onChange={(e) => setAdminRoleValue(e.target.value)}>
+                    <option value="TESTER">TESTER</option>
+                    <option value="DEVELOPER">DEVELOPER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await updateAdminRoleApi(adminRoleUserId, adminRoleValue);
+                        setAdminRoleUserId("");
+                        setAdminRoleValue("TESTER");
+                        await loadAdminData();
+                        alert("Role updated");
+                      } catch (error: any) {
+                        alert(error?.message || "Role update failed");
+                      }
+                    }}
+                  >
+                    Update Role
+                  </button>
+                </section>
+              )}
+
+              {showAdminAuditLogs && (
+                <section className="panel">
+                  <h4>Audit Logs</h4>
+                  <input
+                    className="input"
+                    placeholder="Filter by entity type (optional)"
+                    value={adminAuditEntityType}
+                    onChange={(e) => setAdminAuditEntityType(e.target.value)}
+                  />
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        const logs = await listAdminAuditLogsApi(adminAuditEntityType || undefined);
+                        setAdminAuditLogs(Array.isArray(logs) ? logs : []);
+                      } catch (error: any) {
+                        alert(error?.message || "Load audit logs failed");
+                      }
+                    }}
+                  >
+                    Refresh Logs
+                  </button>
+                  <div className="listCompact">
+                    {adminAuditLogs.map((item) => (
+                      <div className="row" key={item.id}>
+                        <span className="title">{item.action} | {item.entityType} | {item.entityId}</span>
+                        <span className="meta">{new Date(item.createdAt).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {showAdminSystemConfig && (
+                <section className="panel">
+                  <h4>System Configuration</h4>
+                  <input className="input" placeholder="Config Key" value={adminConfigKey} onChange={(e) => setAdminConfigKey(e.target.value)} />
+                  <input className="input" placeholder="Config Value" value={adminConfigValue} onChange={(e) => setAdminConfigValue(e.target.value)} />
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await upsertAdminSystemConfigApi({ key: adminConfigKey, value: adminConfigValue });
+                        setAdminConfigKey("");
+                        setAdminConfigValue("");
+                        await loadAdminData();
+                        alert("System config updated");
+                      } catch (error: any) {
+                        alert(error?.message || "System config update failed");
+                      }
+                    }}
+                  >
+                    Save Config
+                  </button>
+                  <div className="listCompact">
+                    {adminConfigs.map((item) => (
+                      <div className="row" key={item.id}>
+                        <span className="title">{item.key}: {item.value}</span>
+                        <span className="meta">{item.updater?.name || item.updatedBy}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {showAdminBackups && (
+                <section className="panel">
+                  <h4>Backup Management</h4>
+                  <input className="input" placeholder="Backup notes" value={adminBackupNotes} onChange={(e) => setAdminBackupNotes(e.target.value)} />
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        await triggerAdminBackupApi(adminBackupNotes || undefined);
+                        setAdminBackupNotes("");
+                        await loadAdminData();
+                        alert("Backup triggered");
+                      } catch (error: any) {
+                        alert(error?.message || "Trigger backup failed");
+                      }
+                    }}
+                  >
+                    Trigger Backup
+                  </button>
+                  <div className="listCompact">
+                    {adminBackups.map((item) => (
+                      <div className="row" key={item.id}>
+                        <span className="title">{item.status} | {item.notes || "No notes"}</span>
+                        <span className="meta">{new Date(item.startedAt).toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               {showCreateTestCase && (
               <section className="panel">
                 <h4>Create Test Case</h4>
@@ -1920,22 +2371,20 @@ function App() {
                       await createTemplateApi({
                         name: templateName,
                         category: templateCategory,
-                        preConditions: parseSection(tcPreConditionsText),
-                        testDataRequirements: parseSection(tcTestDataRequirementsText),
-                        environmentRequirements: parseSection(tcEnvironmentRequirementsText),
-                        module: tcModule,
+                        preConditions: [],
+                        testDataRequirements: [],
+                        environmentRequirements: [],
+                        module: templateCategory || "General",
                         steps: parseSteps(templateSteps),
-                        postConditions: parseSection(tcPostConditionsText),
-                        metadata: parseMetadata(tcMetadataText),
-                        tags: parseTags(tcTagsText),
-                        estimatedDurationMinutes: tcEstimatedDurationMinutes
-                          ? Number(tcEstimatedDurationMinutes)
-                          : null,
-                        automationStatus: tcAutomationStatus,
-                        automationScriptLink: tcAutomationScriptLink || null,
-                        priority: tcPriority,
-                        severity: tcSeverity,
-                        type: tcType,
+                        postConditions: [],
+                        metadata: {},
+                        tags: [],
+                        estimatedDurationMinutes: null,
+                        automationStatus: "NOT_AUTOMATED",
+                        automationScriptLink: null,
+                        priority: "MEDIUM",
+                        severity: "MAJOR",
+                        type: "FUNCTIONAL",
                         status: "DRAFT",
                       });
                       resetTemplateFields();
@@ -1953,6 +2402,23 @@ function App() {
                     <div className="row" key={tpl.id}>
                       <span className="title">{tpl.name}</span>
                       <span className="meta">{tpl.category || "General"}</span>
+                      <button
+                        className="button small danger"
+                        onClick={async () => {
+                          try {
+                            if (!window.confirm("Delete this template?")) {
+                              return;
+                            }
+                            await deleteTemplateApi(tpl.id);
+                            await loadTestCaseData();
+                            alert("Template deleted");
+                          } catch (error: any) {
+                            alert(error?.message || "Delete template failed");
+                          }
+                        }}
+                      >
+                        Delete
+                      </button>
                       <button
                         className="button small"
                         onClick={async () => {
@@ -3941,7 +4407,10 @@ function App() {
                         {bugComments.map((item) => (
                           <div className="row" key={item.id}>
                             <span className="title">
-                              <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
+                              <strong>Comment:</strong>{" "}
+                              {isDeletedComment(item)
+                                ? "[Comment deleted]"
+                                : renderCommentContent(String(item.comment || ""))}
                               {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
                                 <>
                                   <br />

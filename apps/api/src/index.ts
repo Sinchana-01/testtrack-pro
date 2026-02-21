@@ -14,7 +14,7 @@ dotenv.config({ path: path.resolve(process.cwd(), "../../.env"), override: false
 const app = express();
 const allowedOrigins = (
   process.env.FRONTEND_ORIGINS ??
-  "http://localhost:3000,http://localhost:3001"
+  "http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:4173"
 )
   .split(",")
   .map((origin) => origin.trim())
@@ -29,7 +29,7 @@ app.use(
       }
       callback(new Error("CORS blocked for this origin"));
     },
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
