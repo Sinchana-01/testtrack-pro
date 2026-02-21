@@ -22,6 +22,7 @@ import { authenticate, AuthRequest } from "../middleware/auth.middleware";
 import { authorizeRoles } from "../middleware/role.middleware";
 
 const router = Router();
+const prismaAny = prisma as any;
 
 const asString = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 const asStringArray = (value: unknown): string[] => {
@@ -202,6 +203,156 @@ const mergeExecutionNotes = (
 
 const executionEvidencePrefix = (executionId: string): string => `EXEVID::${executionId}::`;
 
+const BUG_PRIORITY = {
+  P1_URGENT: "P1_URGENT",
+  P2_HIGH: "P2_HIGH",
+  P3_MEDIUM: "P3_MEDIUM",
+  P4_LOW: "P4_LOW",
+} as const;
+type BugPriority = (typeof BUG_PRIORITY)[keyof typeof BUG_PRIORITY];
+
+const BUG_WORKFLOW_STATUS = {
+  NEW: "NEW",
+  OPEN: "OPEN",
+  IN_PROGRESS: "IN_PROGRESS",
+  FIXED: "FIXED",
+  VERIFIED: "VERIFIED",
+  CLOSED: "CLOSED",
+  REOPENED: "REOPENED",
+  WONT_FIX: "WONT_FIX",
+  DUPLICATE: "DUPLICATE",
+} as const;
+type BugWorkflowStatus = (typeof BUG_WORKFLOW_STATUS)[keyof typeof BUG_WORKFLOW_STATUS];
+
+type BugMeta = {
+  bugCode?: string;
+  workflowStatus?: BugWorkflowStatus;
+  priority?: BugPriority;
+  stepsToReproduce?: string;
+  expectedBehavior?: string;
+  actualBehavior?: string;
+  environment?: string;
+  affectedVersion?: string;
+  linkedTestCaseCode?: string;
+  dueDate?: string;
+  duplicateOfBugCode?: string;
+  resolutionReason?: string;
+  mentions?: string[];
+};
+
+const BUG_META_PREFIX = "[BUGMETA]";
+const BUG_META_SUFFIX = "[/BUGMETA]";
+
+const parseBugDescription = (value: string): { details: string; meta: BugMeta } => {
+  const text = (value || "").trim();
+  if (!text.startsWith(BUG_META_PREFIX)) {
+    return { details: value, meta: {} };
+  }
+  const idx = text.indexOf(BUG_META_SUFFIX);
+  if (idx === -1) {
+    return { details: value, meta: {} };
+  }
+  const jsonPart = text.slice(BUG_META_PREFIX.length, idx);
+  const details = text.slice(idx + BUG_META_SUFFIX.length).trimStart();
+  try {
+    const meta = JSON.parse(jsonPart) as BugMeta;
+    return { details, meta: meta ?? {} };
+  } catch {
+    return { details: value, meta: {} };
+  }
+};
+
+const issueStatusFromWorkflow = (workflow: BugWorkflowStatus): IssueStatus => {
+  switch (workflow) {
+    case "IN_PROGRESS":
+      return IssueStatus.IN_PROGRESS;
+    case "FIXED":
+    case "VERIFIED":
+      return IssueStatus.FIXED;
+    case "CLOSED":
+      return IssueStatus.CLOSED;
+    case "WONT_FIX":
+    case "DUPLICATE":
+      return IssueStatus.WONT_FIX;
+    case "NEW":
+    case "OPEN":
+    case "REOPENED":
+    default:
+      return IssueStatus.OPEN;
+  }
+};
+
+const parseMentions = (text: string): string[] => {
+  const matches = text.match(/@([a-zA-Z0-9._-]+)/g) || [];
+  return [...new Set(matches.map((item) => item.slice(1).toLowerCase()))];
+};
+
+const resolveActiveDeveloperId = async (raw: unknown): Promise<string | null> => {
+  const input = asString(raw);
+  if (!input) return null;
+  const byId = await prisma.user.findUnique({ where: { id: input } });
+  if (byId && byId.role === Role.DEVELOPER && byId.isActive) return byId.id;
+  if (input.includes("@")) {
+    const byEmail = await prisma.user.findUnique({ where: { email: input } });
+    if (byEmail && byEmail.role === Role.DEVELOPER && byEmail.isActive) return byEmail.id;
+  }
+  return null;
+};
+
+const parseBugAttachments = (value: unknown) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+      const row = item as Record<string, unknown>;
+      const fileType = parseEnum(AttachmentType, row.fileType);
+      const fileUrl = asString(row.fileUrl);
+      const fileName = asString(row.fileName);
+      const notes = asString(row.notes) || null;
+      if (!fileType || !fileUrl || !fileName) return null;
+      return { fileType, fileUrl, fileName, notes };
+    })
+    .filter(Boolean) as Array<{ fileType: AttachmentType; fileUrl: string; fileName: string; notes: string | null }>;
+};
+
+const isAllowedWorkflowTransition = (from: BugWorkflowStatus, to: BugWorkflowStatus): boolean => {
+  const map: Record<BugWorkflowStatus, BugWorkflowStatus[]> = {
+    NEW: ["OPEN", "WONT_FIX", "DUPLICATE"],
+    OPEN: ["IN_PROGRESS"],
+    IN_PROGRESS: ["FIXED"],
+    FIXED: ["VERIFIED", "REOPENED"],
+    VERIFIED: ["CLOSED"],
+    CLOSED: [],
+    REOPENED: ["IN_PROGRESS"],
+    WONT_FIX: [],
+    DUPLICATE: [],
+  };
+  return map[from]?.includes(to) ?? false;
+};
+
+const enrichIssue = (issue: any) => {
+  const parsed = parseBugDescription(issue.description || "");
+  const workflowStatus = issue.workflowStatus || parsed.meta.workflowStatus || BUG_WORKFLOW_STATUS.OPEN;
+  const bugPriority = issue.bugPriority || parsed.meta.priority || BUG_PRIORITY.P3_MEDIUM;
+  return {
+    ...issue,
+    description: parsed.details || issue.description,
+    bugMeta: {
+      ...parsed.meta,
+      stepsToReproduce: issue.stepsToReproduce || parsed.meta.stepsToReproduce,
+      expectedBehavior: issue.expectedBehavior || parsed.meta.expectedBehavior,
+      actualBehavior: issue.actualBehavior || parsed.meta.actualBehavior,
+      environment: issue.environment || parsed.meta.environment,
+      affectedVersion: issue.affectedVersion || parsed.meta.affectedVersion,
+      dueDate: issue.dueDate ? new Date(issue.dueDate).toISOString() : parsed.meta.dueDate,
+      linkedTestCaseCode: issue.testCase?.testCaseCode || parsed.meta.linkedTestCaseCode,
+    },
+    bugId: issue.bugCode || parsed.meta.bugCode || issue.id,
+    workflowStatus,
+    priority: bugPriority,
+  };
+};
+
 const isOwnerOrAssignee = (req: AuthRequest, createdBy: string, assignedTo: string | null): boolean =>
   req.user!.role === Role.ADMIN || req.user!.userId === createdBy || req.user!.userId === assignedTo;
 
@@ -272,6 +423,13 @@ const generateTestCaseCode = async (): Promise<string> => {
   const count = await prisma.testCase.count();
   const serial = String(count + 1).padStart(5, "0");
   return `TC-${year}-${serial}`;
+};
+
+const generateBugCode = async (): Promise<string> => {
+  const year = new Date().getFullYear();
+  const count = await prisma.issue.count();
+  const serial = String(count + 1).padStart(5, "0");
+  return `BUG-${year}-${serial}`;
 };
 
 router.use(authenticate);
@@ -2229,18 +2387,31 @@ router.post(
       return res.status(400).json({ message: "Only FAILED execution can be converted to a bug report" });
     }
 
-    const issue = await prisma.issue.create({
+    const assignedDeveloperId = await resolveActiveDeveloperId(req.body.assignedTo);
+    if (asString(req.body.assignedTo) && !assignedDeveloperId) {
+      return res.status(400).json({ message: "assignedTo must be an active developer (id or email)" });
+    }
+
+    const issue = await prismaAny.issue.create({
       data: {
+        bugCode: await generateBugCode(),
         title: asString(req.body.title) || `Bug: ${execution.testCase.title}`,
         description:
           asString(req.body.description) ||
           `Auto-created from failed execution ${execution.id} for test case ${execution.testCase.title}`,
+        stepsToReproduce: asString(req.body.stepsToReproduce) || "Auto-created from failed execution",
+        expectedBehavior: asString(req.body.expectedBehavior) || "Execution should pass without errors",
+        actualBehavior: asString(req.body.actualBehavior) || `Execution failed with result ${execution.result}`,
+        bugPriority: parseEnum(BUG_PRIORITY, req.body.priority) || BUG_PRIORITY.P3_MEDIUM,
+        workflowStatus: BUG_WORKFLOW_STATUS.OPEN,
         severity: parseEnum(Severity, req.body.severity) || Severity.MEDIUM,
         status: IssueStatus.OPEN,
+        environment: asString(req.body.environment) || null,
+        affectedVersion: asString(req.body.affectedVersion) || null,
         testCaseId: execution.testCaseId,
         executionId: execution.id,
         reportedBy: req.user!.userId,
-        assignedTo: asString(req.body.assignedTo) || null,
+        assignedTo: assignedDeveloperId,
       },
     });
 
@@ -2248,6 +2419,438 @@ router.post(
     return res.status(201).json(issue);
   }
 );
+
+router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const title = asString(req.body.title);
+  const details = asString(req.body.description);
+  const stepsToReproduce = asString(req.body.stepsToReproduce);
+  const expectedBehavior = asString(req.body.expectedBehavior);
+  const actualBehavior = asString(req.body.actualBehavior);
+  const environment = asString(req.body.environment);
+  const affectedVersion = asString(req.body.affectedVersion);
+  const priority = parseEnum(BUG_PRIORITY, asString(req.body.priority).toUpperCase()) || BUG_PRIORITY.P3_MEDIUM;
+  const workflowStatus =
+    parseEnum(BUG_WORKFLOW_STATUS, asString(req.body.workflowStatus).toUpperCase()) || BUG_WORKFLOW_STATUS.NEW;
+  const linkedTestCaseId = asString(req.body.testCaseId) || null;
+  const executionId = asString(req.body.executionId) || null;
+  const assignedToInput = asString(req.body.assignedTo) || null;
+  const dueDate = asString(req.body.dueDate) || null;
+  const severity = parseEnum(Severity, req.body.severity) || Severity.MEDIUM;
+  const attachments = parseBugAttachments(req.body.attachments);
+
+  if (!title || !details || !stepsToReproduce || !expectedBehavior || !actualBehavior) {
+    return res.status(400).json({
+      message:
+        "title, description, stepsToReproduce, expectedBehavior, and actualBehavior are required",
+    });
+  }
+  if (title.length > 200) {
+    return res.status(400).json({ message: "Title cannot exceed 200 characters" });
+  }
+
+  if (linkedTestCaseId) {
+    const tc = await prisma.testCase.findUnique({ where: { id: linkedTestCaseId } });
+    if (!tc || tc.isDeleted) return res.status(400).json({ message: "Invalid linked testCaseId" });
+  }
+  if (executionId) {
+    const execution = await prisma.testExecution.findUnique({ where: { id: executionId } });
+    if (!execution) return res.status(400).json({ message: "Invalid executionId" });
+  }
+  const assignedTo = await resolveActiveDeveloperId(assignedToInput);
+  if (assignedToInput && !assignedTo) {
+    return res.status(400).json({ message: "assignedTo must be an active developer (id or email)" });
+  }
+
+  const bugCode = await generateBugCode();
+  const issue = await prismaAny.issue.create({
+    data: {
+      bugCode,
+      title,
+      description: details,
+      stepsToReproduce,
+      expectedBehavior,
+      actualBehavior,
+      bugPriority: priority,
+      workflowStatus,
+      severity,
+      status: issueStatusFromWorkflow(workflowStatus),
+      environment: environment || null,
+      affectedVersion: affectedVersion || null,
+      dueDate: dueDate ? new Date(dueDate) : null,
+      testCaseId: linkedTestCaseId,
+      executionId,
+      reportedBy: req.user!.userId,
+      assignedTo,
+      attachments:
+        attachments.length > 0
+          ? {
+              create: attachments.map((item) => ({
+                ...item,
+                uploadedBy: req.user!.userId,
+              })),
+            }
+          : undefined,
+    },
+    include: {
+      attachments: true,
+    },
+  });
+
+  await writeAuditLog(req.user!.userId, "CREATE_BUG_REPORT", "Issue", issue.id, { bugCode, workflowStatus });
+  return res.status(201).json(enrichIssue(issue));
+});
+
+router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const mineOnly = String(req.query.mine || "") === "1";
+  const statusFilter = asString(req.query.status).toUpperCase();
+  const priorityFilter = asString(req.query.priority).toUpperCase();
+  const severityFilter = asString(req.query.severity).toUpperCase();
+  const rows = await prismaAny.issue.findMany({
+    where:
+      req.user!.role === Role.DEVELOPER
+        ? {
+            assignedTo: req.user!.userId,
+            ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
+            ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
+            ...(severityFilter ? { severity: severityFilter as Severity } : {}),
+          }
+        : mineOnly
+        ? {
+            reportedBy: req.user!.userId,
+            ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
+            ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
+            ...(severityFilter ? { severity: severityFilter as Severity } : {}),
+          }
+        : {
+            ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
+            ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
+            ...(severityFilter ? { severity: severityFilter as Severity } : {}),
+          },
+    include: {
+      reporter: { select: { id: true, name: true, email: true } },
+      assignee: { select: { id: true, name: true, email: true } },
+      testCase: { select: { id: true, title: true, testCaseCode: true } },
+      execution: { select: { id: true, result: true, executedAt: true } },
+      comments: true,
+      attachments: true,
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  let enriched = rows.map(enrichIssue);
+  const sortBy = asString(req.query.sortBy).toLowerCase();
+  if (sortBy === "priority") {
+    const rank: Record<string, number> = { [BUG_PRIORITY.P1_URGENT]: 1, [BUG_PRIORITY.P2_HIGH]: 2, [BUG_PRIORITY.P3_MEDIUM]: 3, [BUG_PRIORITY.P4_LOW]: 4 };
+    enriched = enriched.sort((a: any, b: any) => (rank[a.bugPriority] || rank[a.priority] || 99) - (rank[b.bugPriority] || rank[b.priority] || 99));
+  } else if (sortBy === "age") {
+    enriched = enriched.sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  } else if (sortBy === "dueDate") {
+    enriched = enriched.sort((a: any, b: any) => {
+      const da = a.dueDate ? new Date(a.dueDate).getTime() : a.bugMeta?.dueDate ? new Date(a.bugMeta.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      const db = b.dueDate ? new Date(b.dueDate).getTime() : b.bugMeta?.dueDate ? new Date(b.bugMeta.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      return da - db;
+    });
+  }
+  return res.json(enriched);
+});
+
+router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const issue = await prismaAny.issue.findUnique({
+    where: { id: req.params.id },
+    include: {
+      reporter: { select: { id: true, name: true, email: true } },
+      assignee: { select: { id: true, name: true, email: true } },
+      testCase: { select: { id: true, title: true, testCaseCode: true } },
+      execution: { select: { id: true, result: true, executedAt: true } },
+      comments: { orderBy: { createdAt: "asc" } },
+      attachments: true,
+    },
+  });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can view only assigned bugs" });
+  }
+  return res.json(enrichIssue(issue));
+});
+
+router.post("/bugs/:id/attachments", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can upload only for assigned bugs" });
+  }
+  const fileType = parseEnum(AttachmentType, req.body.fileType);
+  const fileUrl = asString(req.body.fileUrl);
+  const fileName = asString(req.body.fileName);
+  const notes = asString(req.body.notes) || null;
+  if (!fileType || !fileUrl || !fileName) {
+    return res.status(400).json({ message: "fileType, fileUrl, fileName are required" });
+  }
+  const created = await prismaAny.bugAttachment.create({
+    data: {
+      issueId: issue.id,
+      uploadedBy: req.user!.userId,
+      fileType,
+      fileUrl,
+      fileName,
+      notes,
+    },
+  });
+  await writeAuditLog(req.user!.userId, "BUG_ATTACHMENT_ADD", "BugAttachment", created.id, { issueId: issue.id });
+  return res.status(201).json(created);
+});
+
+router.get("/bugs/:id/attachments", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can view only assigned bug attachments" });
+  }
+  const rows = await prismaAny.bugAttachment.findMany({
+    where: { issueId: issue.id },
+    orderBy: { createdAt: "desc" },
+  });
+  return res.json(rows);
+});
+
+router.delete("/bugs/:id/attachments/:attachmentId", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  const attachment = await prismaAny.bugAttachment.findUnique({ where: { id: req.params.attachmentId } });
+  if (!attachment || attachment.issueId !== issue.id) {
+    return res.status(404).json({ message: "Attachment not found" });
+  }
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can delete only for assigned bugs" });
+  }
+  await prismaAny.bugAttachment.delete({ where: { id: attachment.id } });
+  await writeAuditLog(req.user!.userId, "BUG_ATTACHMENT_DELETE", "BugAttachment", attachment.id, { issueId: issue.id });
+  return res.json({ message: "Attachment removed" });
+});
+
+router.patch("/bugs/:id/workflow", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  try {
+    const target = parseEnum(BUG_WORKFLOW_STATUS, asString(req.body.toStatus).toUpperCase());
+    if (!target) return res.status(400).json({ message: "toStatus is required" });
+    const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
+    if (!issue) return res.status(404).json({ message: "Bug not found" });
+    if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+      return res.status(403).json({ message: "You can update only assigned bugs" });
+    }
+
+    // Legacy rows may have null workflowStatus; treat them as NEW to allow first triage transitions.
+    const from = issue.workflowStatus || BUG_WORKFLOW_STATUS.NEW;
+    if (!isAllowedWorkflowTransition(from, target) && req.user!.role !== Role.ADMIN) {
+      return res.status(400).json({ message: `Invalid transition: ${from} -> ${target}` });
+    }
+
+    const updated = await prismaAny.issue.update({
+      where: { id: issue.id },
+      data: {
+        workflowStatus: target,
+        status: issueStatusFromWorkflow(target),
+        fixNotes:
+          target === BUG_WORKFLOW_STATUS.WONT_FIX
+            ? asString(req.body.reason) || issue.fixNotes
+            : issue.fixNotes,
+      },
+    });
+    await writeAuditLog(req.user!.userId, "BUG_WORKFLOW_TRANSITION", "Issue", updated.id, { from, to: target });
+    return res.json(enrichIssue(updated));
+  } catch (error: any) {
+    console.error("BUG_WORKFLOW_TRANSITION_ERROR", error);
+    return res.status(500).json({ message: error?.message || "Failed to update bug workflow" });
+  }
+});
+
+router.get("/developer/bugs", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
+  const query: Record<string, string> = {};
+  if (req.query.priority) query.priority = String(req.query.priority);
+  if (req.query.severity) query.severity = String(req.query.severity);
+  if (req.query.status) query.status = String(req.query.status);
+  if (req.query.sortBy) query.sortBy = String(req.query.sortBy);
+  const rows = await prismaAny.issue.findMany({
+    where: {
+      assignedTo: req.user!.userId,
+      ...(query.priority ? { bugPriority: query.priority as BugPriority } : {}),
+      ...(query.severity ? { severity: query.severity as Severity } : {}),
+      ...(query.status ? { workflowStatus: query.status as BugWorkflowStatus } : {}),
+    },
+    orderBy: { updatedAt: "desc" },
+    include: { comments: true, attachments: true },
+  });
+  let enriched = rows.map(enrichIssue);
+  if (query.sortBy === "priority") {
+    const rank: Record<string, number> = { [BUG_PRIORITY.P1_URGENT]: 1, [BUG_PRIORITY.P2_HIGH]: 2, [BUG_PRIORITY.P3_MEDIUM]: 3, [BUG_PRIORITY.P4_LOW]: 4 };
+    enriched = enriched.sort((a: any, b: any) => (rank[a.bugPriority] || rank[a.priority] || 99) - (rank[b.bugPriority] || rank[b.priority] || 99));
+  }
+  if (query.sortBy === "age") {
+    enriched = enriched.sort((a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  }
+  if (query.sortBy === "dueDate") {
+    enriched = enriched.sort((a: any, b: any) => {
+      const da = a.dueDate ? new Date(a.dueDate).getTime() : a.bugMeta?.dueDate ? new Date(a.bugMeta.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      const db = b.dueDate ? new Date(b.dueDate).getTime() : b.bugMeta?.dueDate ? new Date(b.bugMeta.dueDate).getTime() : Number.MAX_SAFE_INTEGER;
+      return da - db;
+    });
+  }
+  return res.json(enriched);
+});
+
+router.patch("/developer/bugs/:id/quick-status", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
+  const target = parseEnum(BUG_WORKFLOW_STATUS, asString(req.body.toStatus || req.body.status).toUpperCase());
+  if (!target) return res.status(400).json({ message: "status is required" });
+  const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can update only assigned bugs" });
+  }
+  const from = issue.workflowStatus || BUG_WORKFLOW_STATUS.OPEN;
+  if (!isAllowedWorkflowTransition(from, target)) {
+    return res.status(400).json({ message: `Invalid transition: ${from} -> ${target}` });
+  }
+  const updated = await prismaAny.issue.update({
+    where: { id: issue.id },
+    data: {
+      workflowStatus: target,
+      status: issueStatusFromWorkflow(target),
+    },
+  });
+  await writeAuditLog(req.user!.userId, "BUG_QUICK_STATUS_UPDATE", "Issue", updated.id, {
+    from,
+    to: target,
+  });
+  return res.json(enrichIssue(updated));
+});
+
+router.post("/bugs/:id/resolve", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
+  const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can resolve only assigned bugs" });
+  }
+  const action = asString(req.body.action).toUpperCase();
+  let workflowStatus = issue.workflowStatus || BUG_WORKFLOW_STATUS.OPEN;
+  if (action === "START_PROGRESS") {
+    workflowStatus = BUG_WORKFLOW_STATUS.IN_PROGRESS;
+  } else if (action === "MARK_FIXED") {
+    workflowStatus = BUG_WORKFLOW_STATUS.FIXED;
+  } else if (action === "REQUEST_RETEST") {
+    workflowStatus = BUG_WORKFLOW_STATUS.FIXED;
+  } else if (action === "WONT_FIX") {
+    workflowStatus = BUG_WORKFLOW_STATUS.WONT_FIX;
+  } else {
+    return res.status(400).json({ message: "Unsupported action" });
+  }
+  const updated = await prismaAny.issue.update({
+    where: { id: issue.id },
+    data: {
+      fixNotes: req.body.fixNotes !== undefined ? asString(req.body.fixNotes) || issue.fixNotes : issue.fixNotes,
+      commitLink: req.body.commitLink !== undefined ? asString(req.body.commitLink) || issue.commitLink : issue.commitLink,
+      retestRequested: action === "REQUEST_RETEST" ? true : issue.retestRequested,
+      workflowStatus,
+      status: issueStatusFromWorkflow(workflowStatus),
+    },
+  });
+  await writeAuditLog(req.user!.userId, "BUG_RESOLUTION_ACTION", "Issue", issue.id, { action });
+  return res.json(enrichIssue(updated));
+});
+
+router.post("/bugs/:id/comments", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const issue = await prisma.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can comment only assigned bugs" });
+  }
+  const comment = asString(req.body.comment);
+  if (!comment) return res.status(400).json({ message: "comment is required" });
+  const parentCommentId = asString(req.body.parentCommentId) || null;
+  const payload = parentCommentId ? `[PARENT:${parentCommentId}]\n${comment}` : comment;
+  const mentions = parseMentions(comment);
+  const created = await prisma.issueComment.create({
+    data: { issueId: issue.id, authorId: req.user!.userId, comment: payload },
+  });
+  await writeAuditLog(req.user!.userId, "BUG_COMMENT_ADD", "IssueComment", created.id, { mentions });
+  return res.status(201).json({ ...created, mentions, parentCommentId });
+});
+
+router.get("/bugs/:id/comments", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const issue = await prisma.issue.findUnique({ where: { id: req.params.id } });
+  if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+    return res.status(403).json({ message: "You can view only assigned bug comments" });
+  }
+  const rows = await prisma.issueComment.findMany({
+    where: { issueId: issue.id },
+    include: { author: { select: { id: true, name: true, email: true } } },
+    orderBy: { createdAt: "asc" },
+  });
+  const normalized = rows.map((item) => {
+    const match = item.comment.match(/^\[PARENT:([^\]]+)\]\s*\n?/);
+    const parentCommentId = match?.[1] || null;
+    const body = match ? item.comment.replace(match[0], "") : item.comment;
+    return { ...item, parentCommentId, comment: body, mentions: parseMentions(body) };
+  });
+  const byParent: Record<string, any[]> = {};
+  normalized.forEach((item) => {
+    const key = item.parentCommentId || "__root__";
+    byParent[key] = byParent[key] || [];
+    byParent[key].push({ ...item, replies: [] as any[] });
+  });
+  const roots = byParent["__root__"] || [];
+  Object.keys(byParent)
+    .filter((k) => k !== "__root__")
+    .forEach((parentId) => {
+      const parent = normalized.find((item) => item.id === parentId);
+      if (!parent) return;
+      const parentNode = roots
+        .concat(...roots.map((r) => r.replies || []))
+        .find((n: any) => n.id === parentId);
+      if (parentNode) parentNode.replies = byParent[parentId];
+    });
+  return res.json({ comments: normalized, threaded: roots });
+});
+
+router.patch("/bugs/comments/:commentId", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const existing = await prisma.issueComment.findUnique({ where: { id: req.params.commentId } });
+  if (!existing) return res.status(404).json({ message: "Comment not found" });
+  const diffMs = Date.now() - new Date(existing.createdAt).getTime();
+  if (req.user!.role !== Role.ADMIN && existing.authorId !== req.user!.userId) {
+    return res.status(403).json({ message: "You can edit only your own comments" });
+  }
+  if (req.user!.role !== Role.ADMIN && diffMs > 5 * 60 * 1000) {
+    return res.status(400).json({ message: "Comments can be edited only within 5 minutes" });
+  }
+  const comment = asString(req.body.comment);
+  if (!comment) return res.status(400).json({ message: "comment is required" });
+  const prefixMatch = existing.comment.match(/^\[PARENT:[^\]]+\]\s*\n?/);
+  const prefix = prefixMatch ? prefixMatch[0] : "";
+  const updated = await prisma.issueComment.update({
+    where: { id: existing.id },
+    data: { comment: `${prefix}${comment}` },
+  });
+  await writeAuditLog(req.user!.userId, "BUG_COMMENT_EDIT", "IssueComment", updated.id);
+  return res.json({ ...updated, mentions: parseMentions(comment) });
+});
+
+router.delete("/bugs/comments/:commentId", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const existing = await prisma.issueComment.findUnique({ where: { id: req.params.commentId } });
+  if (!existing) return res.status(404).json({ message: "Comment not found" });
+  const diffMs = Date.now() - new Date(existing.createdAt).getTime();
+  if (req.user!.role !== Role.ADMIN && existing.authorId !== req.user!.userId) {
+    return res.status(403).json({ message: "You can delete only your own comments" });
+  }
+  if (req.user!.role !== Role.ADMIN && diffMs > 5 * 60 * 1000) {
+    return res.status(400).json({ message: "Comments can be deleted only within 5 minutes" });
+  }
+  const prefixMatch = existing.comment.match(/^\[PARENT:[^\]]+\]\s*\n?/);
+  const prefix = prefixMatch ? prefixMatch[0] : "";
+  const updated = await prisma.issueComment.update({
+    where: { id: existing.id },
+    data: { comment: `${prefix}[DELETED]` },
+  });
+  await writeAuditLog(req.user!.userId, "BUG_COMMENT_DELETE", "IssueComment", updated.id);
+  return res.json({ message: "Comment deleted" });
+});
 
 router.post("/issues/:id/assign", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const developerId = asString(req.body.developerId);
@@ -2492,6 +3095,21 @@ router.patch("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthReq
   });
   await writeAuditLog(req.user!.userId, "ADMIN_UPDATE_USER", "User", user.id);
   return res.json(user);
+});
+
+router.delete("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  if (req.params.id === req.user!.userId) {
+    return res.status(400).json({ message: "Admin cannot delete own account" });
+  }
+
+  const existing = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!existing) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  await prisma.user.delete({ where: { id: req.params.id } });
+  await writeAuditLog(req.user!.userId, "ADMIN_DELETE_USER", "User", req.params.id);
+  return res.json({ message: "User deleted" });
 });
 
 router.post("/admin/roles/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {

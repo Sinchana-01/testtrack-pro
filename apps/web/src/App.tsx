@@ -3,19 +3,29 @@ import {
   bulkTestCaseOperationApi,
   clearSessionTokens,
   cloneTestCaseApi,
+  createBugApi,
+  createBugCommentApi,
   createBugFromExecutionApi,
   createTestRunApi,
+  createAdminUserApi,
+  deleteAdminUserApi,
   deleteExecutionEvidenceApi,
+  deleteBugCommentApi,
   createFromTemplateApi,
   createTemplateApi,
   createTestCaseApi,
+  editBugCommentApi,
   deleteTestCaseApi,
   finalizeExecutionApi,
   forgotPasswordApi,
+  getBugApi,
   getTestRunApi,
   getRefreshToken,
+  listBugCommentsApi,
+  listBugsApi,
   listExecutionEvidenceApi,
   listExecutionReportsApi,
+  listAdminUsersApi,
   getTestCasesApi,
   importTestCasesApi,
   listTemplatesApi,
@@ -26,18 +36,34 @@ import {
   reexecuteExecutionApi,
   refreshTokenApi,
   registerApi,
+  resolveBugApi,
   resetPasswordApi,
   saveExecutionStepApi,
   setSessionTokens,
   startExecutionTimerApi,
   startExecutionApi,
   stopExecutionTimerApi,
+  quickUpdateDeveloperBugStatusApi,
   uploadExecutionEvidenceApi,
+  updateBugWorkflowApi,
+  updateAdminRoleApi,
+  updateAdminUserApi,
   updateTestCaseApi,
 } from "./api";
 import "./App.css";
 
 type Screen = "login" | "register" | "forgot" | "reset" | "dashboard";
+type DashboardFeature =
+  | "create_test_case"
+  | "templates"
+  | "bulk_operations"
+  | "import_test_cases"
+  | "test_runs"
+  | "execute_tests"
+  | "bug_management"
+  | "test_cases"
+  | "developer_workspace"
+  | "admin_workspace";
 
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
@@ -45,8 +71,9 @@ function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
-  const [role, setRole] = useState("TESTER");
+  const [role, setRole] = useState("");
   const [currentRole, setCurrentRole] = useState("");
+  const [currentUserId, setCurrentUserId] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [resetToken, setResetToken] = useState("");
   const [testCases, setTestCases] = useState<any[]>([]);
@@ -54,17 +81,15 @@ function App() {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [tcTitle, setTcTitle] = useState("");
   const [tcDescription, setTcDescription] = useState("");
-  const [tcPreConditionsText, setTcPreConditionsText] = useState('["User account exists","User is on login page"]');
-  const [tcTestDataRequirementsText, setTcTestDataRequirementsText] = useState('["Valid email: test@example.com","Valid password: Test@123"]');
-  const [tcEnvironmentRequirementsText, setTcEnvironmentRequirementsText] = useState('["Browser: Chrome 120+","OS: Windows 10/11"]');
+  const [tcPreConditionsText, setTcPreConditionsText] = useState("");
+  const [tcTestDataRequirementsText, setTcTestDataRequirementsText] = useState("");
+  const [tcEnvironmentRequirementsText, setTcEnvironmentRequirementsText] = useState("");
   const [tcModule, setTcModule] = useState("Authentication");
-  const [tcStepsText, setTcStepsText] = useState(
-    '[{"stepNumber":1,"action":"Open login page","testData":"N/A","expectedResult":"Login page is visible"}]'
-  );
-  const [tcPostConditionsText, setTcPostConditionsText] = useState('["User is redirected to dashboard"]');
-  const [tcMetadataText, setTcMetadataText] = useState('{"owner":"QA Team","component":"Authentication"}');
-  const [tcTagsText, setTcTagsText] = useState("login, authentication, smoke-test");
-  const [tcEstimatedDurationMinutes, setTcEstimatedDurationMinutes] = useState("5");
+  const [tcStepsText, setTcStepsText] = useState("");
+  const [tcPostConditionsText, setTcPostConditionsText] = useState("");
+  const [tcMetadataText, setTcMetadataText] = useState("");
+  const [tcTagsText, setTcTagsText] = useState("");
+  const [tcEstimatedDurationMinutes, setTcEstimatedDurationMinutes] = useState("");
   const [tcAutomationStatus, setTcAutomationStatus] = useState("NOT_AUTOMATED");
   const [tcAutomationScriptLink, setTcAutomationScriptLink] = useState("");
   const [tcPriority, setTcPriority] = useState("MEDIUM");
@@ -79,17 +104,13 @@ function App() {
   const [bulkSuiteId, setBulkSuiteId] = useState("");
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [templateName, setTemplateName] = useState("");
-  const [templateCategory, setTemplateCategory] = useState("Login Tests");
-  const [templateSteps, setTemplateSteps] = useState(
-    '[{"stepNumber":1,"action":"Execute template step","testData":"N/A","expectedResult":"Expected outcome"}]'
-  );
+  const [templateCategory, setTemplateCategory] = useState("");
+  const [templateSteps, setTemplateSteps] = useState("");
   const [importType, setImportType] = useState("JSON");
-  const [importFieldMappingText, setImportFieldMappingText] = useState("{}");
+  const [importFieldMappingText, setImportFieldMappingText] = useState("");
   const [importExcelRows, setImportExcelRows] = useState<any[]>([]);
   const [importExcelFileName, setImportExcelFileName] = useState("");
-  const [importPayload, setImportPayload] = useState(
-    '[{"title":"Imported Case","description":"From JSON","preConditions":["User exists"],"testDataRequirements":["Valid email: test@example.com"],"environmentRequirements":["Chrome 120+"],"module":"Authentication","steps":[{"stepNumber":1,"action":"Open login","testData":"N/A","expectedResult":"Login page opens"}],"postConditions":["User is logged in"],"metadata":{"owner":"QA"},"priority":"MEDIUM","severity":"MAJOR","type":"FUNCTIONAL","status":"DRAFT"}]'
-  );
+  const [importPayload, setImportPayload] = useState("");
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [importPreviewErrors, setImportPreviewErrors] = useState<string[]>([]);
   const [previewReady, setPreviewReady] = useState(false);
@@ -97,12 +118,12 @@ function App() {
   const [editingId, setEditingId] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
-  const [editPreConditionsText, setEditPreConditionsText] = useState("[]");
-  const [editTestDataRequirementsText, setEditTestDataRequirementsText] = useState("[]");
-  const [editEnvironmentRequirementsText, setEditEnvironmentRequirementsText] = useState("[]");
+  const [editPreConditionsText, setEditPreConditionsText] = useState("");
+  const [editTestDataRequirementsText, setEditTestDataRequirementsText] = useState("");
+  const [editEnvironmentRequirementsText, setEditEnvironmentRequirementsText] = useState("");
   const [editModule, setEditModule] = useState("");
-  const [editPostConditionsText, setEditPostConditionsText] = useState("[]");
-  const [editMetadataText, setEditMetadataText] = useState("{}");
+  const [editPostConditionsText, setEditPostConditionsText] = useState("");
+  const [editMetadataText, setEditMetadataText] = useState("");
   const [editTagsText, setEditTagsText] = useState("");
   const [editEstimatedDurationMinutes, setEditEstimatedDurationMinutes] = useState("");
   const [editAutomationStatus, setEditAutomationStatus] = useState("NOT_AUTOMATED");
@@ -145,10 +166,54 @@ function App() {
   const [quickBugTitle, setQuickBugTitle] = useState("");
   const [quickBugDescription, setQuickBugDescription] = useState("");
   const [quickBugSeverity, setQuickBugSeverity] = useState("MEDIUM");
+  const [bugs, setBugs] = useState<any[]>([]);
+  const [selectedBugId, setSelectedBugId] = useState("");
+  const [selectedBug, setSelectedBug] = useState<any>(null);
+  const [bugComments, setBugComments] = useState<any[]>([]);
+  const [bugCommentThreads, setBugCommentThreads] = useState<any[]>([]);
+  const [bugFilterStatus, setBugFilterStatus] = useState("");
+  const [bugFilterPriority, setBugFilterPriority] = useState("");
+  const [bugFilterSeverity, setBugFilterSeverity] = useState("");
+  const [bugSortBy, setBugSortBy] = useState("");
+  const [bugCreateTitle, setBugCreateTitle] = useState("");
+  const [bugCreateDescription, setBugCreateDescription] = useState("");
+  const [bugCreateStepsToReproduce, setBugCreateStepsToReproduce] = useState("");
+  const [bugCreateExpectedBehavior, setBugCreateExpectedBehavior] = useState("");
+  const [bugCreateActualBehavior, setBugCreateActualBehavior] = useState("");
+  const [bugCreateSeverity, setBugCreateSeverity] = useState("MEDIUM");
+  const [bugCreatePriority, setBugCreatePriority] = useState("P3_MEDIUM");
+  const [bugCreateEnvironment, setBugCreateEnvironment] = useState("");
+  const [bugCreateAffectedVersion, setBugCreateAffectedVersion] = useState("");
+  const [bugCreateAssignedTo, setBugCreateAssignedTo] = useState("");
+  const [bugCreateTestCaseId, setBugCreateTestCaseId] = useState("");
+  const [bugCreateExecutionId, setBugCreateExecutionId] = useState("");
+  const [bugCreateDueDate, setBugCreateDueDate] = useState("");
+  const [bugCreateAttachmentsText, setBugCreateAttachmentsText] = useState("");
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminCreateName, setAdminCreateName] = useState("");
+  const [adminCreateEmail, setAdminCreateEmail] = useState("");
+  const [adminCreatePassword, setAdminCreatePassword] = useState("");
+  const [adminCreateRole, setAdminCreateRole] = useState("");
+  const [bugTransitionToStatus, setBugTransitionToStatus] = useState("OPEN");
+  const [bugTransitionReason, setBugTransitionReason] = useState("");
+  const [bugTransitionDuplicateOf, setBugTransitionDuplicateOf] = useState("");
+  const [bugResolveAction, setBugResolveAction] = useState("START_PROGRESS");
+  const [bugResolveFixNotes, setBugResolveFixNotes] = useState("");
+  const [bugResolveCommitLink, setBugResolveCommitLink] = useState("");
+  const [bugCommentText, setBugCommentText] = useState("");
+  const [bugCommentParentId, setBugCommentParentId] = useState("");
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [showMentionPopup, setShowMentionPopup] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState("");
+  const [editingCommentText, setEditingCommentText] = useState("");
+  const [quickStatusByBugId, setQuickStatusByBugId] = useState<Record<string, string>>({});
+  const [navOpen, setNavOpen] = useState(false);
+  const [activeFeature, setActiveFeature] = useState<DashboardFeature | "none">("none");
   const roleName = currentRole.toUpperCase();
   const isTester = roleName === "TESTER";
   const isDeveloper = roleName === "DEVELOPER";
   const isAdmin = roleName === "ADMIN";
+  const roleKey = isTester ? "tester" : isDeveloper ? "developer" : isAdmin ? "admin" : "unknown";
   const canCreateAndManageTestCases = isTester;
   const canUseTemplates = isTester;
   const canRunBulkOps = isTester;
@@ -156,6 +221,53 @@ function App() {
   const canSeeSelectionControls = isTester;
   const canExecuteTests = isTester || isAdmin;
   const canManageTestRuns = isTester || isAdmin;
+  const canViewBugs = isTester || isDeveloper || isAdmin;
+  const canCreateBugs = isTester || isAdmin;
+  const canTransitionBugs = isTester || isDeveloper || isAdmin;
+  const canResolveBugs = isDeveloper;
+  const testerFeatures: Array<{ key: DashboardFeature; label: string }> = [
+    { key: "create_test_case", label: "Create Test Case" },
+    { key: "templates", label: "Templates" },
+    { key: "bulk_operations", label: "Bulk Operations" },
+    { key: "import_test_cases", label: "Import Test Cases" },
+    { key: "test_runs", label: "Test Run Management" },
+    { key: "execute_tests", label: "Execute Tests" },
+    { key: "bug_management", label: "Bug Management" },
+    { key: "test_cases", label: "Test Cases" },
+  ];
+  const developerFeatures: Array<{ key: DashboardFeature; label: string }> = [
+    { key: "developer_workspace", label: "Developer Workspace" },
+    { key: "bug_management", label: "Assigned Bugs" },
+    { key: "test_cases", label: "Test Cases" },
+  ];
+  const adminFeatures: Array<{ key: DashboardFeature; label: string }> = [
+    { key: "admin_workspace", label: "Admin Workspace" },
+    { key: "bug_management", label: "Bug Management" },
+    { key: "execute_tests", label: "Execution Monitoring" },
+    { key: "test_cases", label: "Test Cases" },
+  ];
+  const roleFeatures = isTester ? testerFeatures : isDeveloper ? developerFeatures : adminFeatures;
+  const roleSummary = isTester
+    ? "Tester workspace: create, edit, execute, report, and assign issues."
+    : isDeveloper
+    ? "Developer workspace: view assigned bugs, add fix notes, and update statuses."
+    : isAdmin
+    ? "Admin workspace: govern users, projects, roles, configuration, and audits."
+    : "Workspace";
+  const showCreateTestCase = canCreateAndManageTestCases && activeFeature === "create_test_case";
+  const showTemplates = canUseTemplates && activeFeature === "templates";
+  const showBulkOperations = canRunBulkOps && activeFeature === "bulk_operations";
+  const showImport = canImportTestCases && activeFeature === "import_test_cases";
+  const showTestRuns = canManageTestRuns && activeFeature === "test_runs";
+  const showExecute = canExecuteTests && activeFeature === "execute_tests";
+  const showBugs =
+    canViewBugs &&
+    (activeFeature === "bug_management" || (isDeveloper && activeFeature === "developer_workspace"));
+  const showTestCases = activeFeature === "test_cases";
+  const showRolePanel = activeFeature === "developer_workspace" || activeFeature === "admin_workspace";
+  const assignedBugCount = bugs.length;
+  const p1UrgentCount = bugs.filter((item) => item.priority === "P1_URGENT").length;
+  const criticalBugCount = bugs.filter((item) => item.severity === "CRITICAL").length;
 
   const parseSteps = (raw: string): unknown => {
     const value = raw.trim();
@@ -318,11 +430,18 @@ function App() {
 
   const loadTestCaseData = async () => {
     setIsRefreshing(true);
-    const [caseRows, templateRows, runRows, executionRows] = await Promise.all([
+    const bugParams: Record<string, string> = {
+      status: bugFilterStatus,
+      priority: bugFilterPriority,
+      severity: bugFilterSeverity,
+      sortBy: bugSortBy,
+    };
+    const [caseRows, templateRows, runRows, executionRows, bugRows] = await Promise.all([
       getTestCasesApi(),
       listTemplatesApi(),
       canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
       canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
+      canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
     ]);
     const rows = Array.isArray(caseRows) ? caseRows : [];
     setTestCases(rows);
@@ -330,7 +449,31 @@ function App() {
     setTemplates(Array.isArray(templateRows) ? templateRows : []);
     setTestRuns(Array.isArray(runRows) ? runRows : []);
     setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
+    const bugList = Array.isArray(bugRows) ? bugRows : [];
+    setBugs(bugList);
+    setSelectedBug((prev: any) => {
+      if (!prev?.id) return prev;
+      return bugList.find((item) => item.id === prev.id) || null;
+    });
     setIsRefreshing(false);
+  };
+
+  const loadBugDetails = async (bugId: string) => {
+    if (!bugId) {
+      setSelectedBug(null);
+      setBugComments([]);
+      setBugCommentThreads([]);
+      return;
+    }
+    const [bug, commentsPayload] = await Promise.all([getBugApi(bugId), listBugCommentsApi(bugId)]);
+    setSelectedBug(bug || null);
+    setBugComments(Array.isArray(commentsPayload?.comments) ? commentsPayload.comments : []);
+    setBugCommentThreads(Array.isArray(commentsPayload?.threaded) ? commentsPayload.threaded : []);
+  };
+
+  const loadAdminUsers = async () => {
+    const rows = await listAdminUsersApi();
+    setAdminUsers(Array.isArray(rows) ? rows : []);
   };
 
   const resetExecutionPanel = () => {
@@ -358,20 +501,54 @@ function App() {
     setQuickBugSeverity("MEDIUM");
   };
 
+  const resetBugPanel = () => {
+    setBugs([]);
+    setSelectedBugId("");
+    setSelectedBug(null);
+    setBugComments([]);
+    setBugCommentThreads([]);
+    setBugCreateTitle("");
+    setBugCreateDescription("");
+    setBugCreateStepsToReproduce("");
+    setBugCreateExpectedBehavior("");
+    setBugCreateActualBehavior("");
+    setBugCreateSeverity("MEDIUM");
+    setBugCreatePriority("P3_MEDIUM");
+    setBugCreateEnvironment("");
+    setBugCreateAffectedVersion("");
+    setBugCreateAssignedTo("");
+    setBugCreateTestCaseId("");
+    setBugCreateExecutionId("");
+    setBugCreateDueDate("");
+    setBugCreateAttachmentsText("");
+    setBugTransitionToStatus("OPEN");
+    setBugTransitionReason("");
+    setBugTransitionDuplicateOf("");
+    setBugResolveAction("START_PROGRESS");
+    setBugResolveFixNotes("");
+    setBugResolveCommitLink("");
+    setBugCommentText("");
+    setBugCommentParentId("");
+    setEditingCommentId("");
+    setEditingCommentText("");
+    setBugFilterStatus("");
+    setBugFilterPriority("");
+    setBugFilterSeverity("");
+    setBugSortBy("");
+  };
+
   const resetEntryFields = () => {
     setTcTitle("");
     setTcDescription("");
-    setTcPreConditionsText('["User account exists","User is on login page"]');
-    setTcTestDataRequirementsText('["Valid email: test@example.com","Valid password: Test@123"]');
-    setTcEnvironmentRequirementsText('["Browser: Chrome 120+","OS: Windows 10/11"]');
+    setTcPreConditionsText("");
+    setTcTestDataRequirementsText("");
+    setTcEnvironmentRequirementsText("");
     setTcModule("Authentication");
-    setTcStepsText(
-      '[{"stepNumber":1,"action":"Open login page","testData":"N/A","expectedResult":"Login page is visible"}]'
-    );
-    setTcPostConditionsText('["User is redirected to dashboard"]');
-    setTcMetadataText('{"owner":"QA Team","component":"Authentication"}');
-    setTcTagsText("login, authentication, smoke-test");
-    setTcEstimatedDurationMinutes("5");
+    setTcStepsText("");
+    setTcPostConditionsText("");
+    setTcMetadataText("");
+    setTcTagsText("");
+    setTcEstimatedDurationMinutes("");
     setTcAutomationStatus("NOT_AUTOMATED");
     setTcAutomationScriptLink("");
     setTcPriority("MEDIUM");
@@ -386,17 +563,13 @@ function App() {
     setBulkSuiteId("");
     setBulkAssignee("");
     setTemplateName("");
-    setTemplateCategory("Login Tests");
-    setTemplateSteps(
-      '[{"stepNumber":1,"action":"Execute template step","testData":"N/A","expectedResult":"Expected outcome"}]'
-    );
+    setTemplateCategory("");
+    setTemplateSteps("");
     setImportType("JSON");
-    setImportFieldMappingText("{}");
+    setImportFieldMappingText("");
     setImportExcelRows([]);
     setImportExcelFileName("");
-    setImportPayload(
-      '[{"title":"Imported Case","description":"From JSON","preConditions":["User exists"],"testDataRequirements":["Valid email: test@example.com"],"environmentRequirements":["Chrome 120+"],"module":"Authentication","steps":[{"stepNumber":1,"action":"Open login","testData":"N/A","expectedResult":"Login page opens"}],"postConditions":["User is logged in"],"metadata":{"owner":"QA"},"priority":"MEDIUM","severity":"MAJOR","type":"FUNCTIONAL","status":"DRAFT"}]'
-    );
+    setImportPayload("");
     setRunName("");
     setRunDescription("");
     setRunStartDate("");
@@ -405,7 +578,190 @@ function App() {
     setSelectedRunId("");
     setRunDetails(null);
     resetExecutionPanel();
+    resetBugPanel();
   };
+
+  const resetCreateTestCaseFields = () => {
+    setTcTitle("");
+    setTcDescription("");
+    setTcPreConditionsText("");
+    setTcTestDataRequirementsText("");
+    setTcEnvironmentRequirementsText("");
+    setTcModule("Authentication");
+    setTcStepsText("");
+    setTcPostConditionsText("");
+    setTcMetadataText("");
+    setTcTagsText("");
+    setTcEstimatedDurationMinutes("");
+    setTcAutomationStatus("NOT_AUTOMATED");
+    setTcAutomationScriptLink("");
+    setTcPriority("MEDIUM");
+    setTcSeverity("MAJOR");
+    setTcType("FUNCTIONAL");
+    setTcStatus("DRAFT");
+  };
+
+  const resetTemplateFields = () => {
+    setTemplateName("");
+    setTemplateCategory("");
+    setTemplateSteps("");
+  };
+
+  const resetImportFields = () => {
+    setImportType("JSON");
+    setImportFieldMappingText("");
+    setImportExcelRows([]);
+    setImportExcelFileName("");
+    setImportPayload("");
+    setImportPreview([]);
+    setImportPreviewErrors([]);
+    setPreviewReady(false);
+  };
+
+  const resetRunFields = () => {
+    setRunName("");
+    setRunDescription("");
+    setRunStartDate("");
+    setRunEndDate("");
+    setRunTesterIdsText("");
+    setSelectedRunId("");
+    setRunDetails(null);
+  };
+
+  const resetQuickBugFields = () => {
+    setSelectedExecutionReportId("");
+    setQuickBugTitle("");
+    setQuickBugDescription("");
+    setQuickBugSeverity("MEDIUM");
+  };
+
+  const resetBugCreateFields = () => {
+    setBugCreateTitle("");
+    setBugCreateDescription("");
+    setBugCreateStepsToReproduce("");
+    setBugCreateExpectedBehavior("");
+    setBugCreateActualBehavior("");
+    setBugCreateSeverity("MEDIUM");
+    setBugCreatePriority("P3_MEDIUM");
+    setBugCreateEnvironment("");
+    setBugCreateAffectedVersion("");
+    setBugCreateAssignedTo("");
+    setBugCreateTestCaseId("");
+    setBugCreateExecutionId("");
+    setBugCreateDueDate("");
+    setBugCreateAttachmentsText("");
+  };
+
+  const appendCommentSnippet = (snippet: string) => {
+    setBugCommentText((prev) => (prev ? `${prev} ${snippet}` : snippet));
+  };
+
+  const mentionCandidates = (() => {
+    const map = new Map<string, { key: string; label: string }>();
+    const add = (name?: string, email?: string) => {
+      const base = (name || email || "").trim();
+      if (!base) return;
+      const key = base.toLowerCase().replace(/\s+/g, ".");
+      if (!map.has(key)) {
+        map.set(key, { key, label: name ? `${name}${email ? ` (${email})` : ""}` : email || key });
+      }
+    };
+    add(selectedBug?.reporter?.name, selectedBug?.reporter?.email);
+    add(selectedBug?.assignee?.name, selectedBug?.assignee?.email);
+    bugComments.forEach((item) => add(item?.author?.name, item?.author?.email));
+    return Array.from(map.values());
+  })();
+
+  const filteredMentionCandidates = mentionQuery
+    ? mentionCandidates.filter((item) => item.key.includes(mentionQuery.toLowerCase()) || item.label.toLowerCase().includes(mentionQuery.toLowerCase()))
+    : mentionCandidates;
+
+  const handleCommentTextChange = (value: string) => {
+    setBugCommentText(value);
+    const match = value.match(/@([a-zA-Z0-9._-]*)$/);
+    if (match) {
+      setMentionQuery(match[1] || "");
+      setShowMentionPopup(true);
+    } else {
+      setMentionQuery("");
+      setShowMentionPopup(false);
+    }
+  };
+
+  const applyMention = (key: string) => {
+    const next = bugCommentText.replace(/@([a-zA-Z0-9._-]*)$/, `@${key} `);
+    setBugCommentText(next);
+    setMentionQuery("");
+    setShowMentionPopup(false);
+  };
+
+  const canModifyComment = (item: any): boolean => {
+    const authorId = String(item.authorId || item.author?.id || "");
+    const isOwner = !!currentUserId && authorId === currentUserId;
+    const within5Min = Date.now() - new Date(item.createdAt).getTime() <= 5 * 60 * 1000;
+    return isAdmin || (isOwner && within5Min);
+  };
+
+  const isDeletedComment = (item: any): boolean => String(item.comment || "").trim() === "[DELETED]";
+
+  const renderCommentThreads = (items: any[], depth = 0): JSX.Element[] =>
+    items.map((item) => (
+      <div key={item.id} style={{ marginLeft: depth > 0 ? `${Math.min(depth * 18, 54)}px` : "0" }}>
+        <div className="row">
+          <span className="title">
+            <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
+            {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
+              <>
+                <br />
+                <strong>Mentions:</strong> {item.mentions.map((m: string) => `@${m}`).join(", ")}
+              </>
+            ) : null}
+          </span>
+          <span className="meta">
+            <strong>By:</strong> {item.author?.name || item.authorId}
+            <br />
+            <strong>At:</strong> {new Date(item.createdAt).toLocaleString()}
+          </span>
+          <button
+            className="button small"
+            onClick={() => {
+              setBugCommentParentId(item.id);
+              appendCommentSnippet(`@${(item.author?.name || "user").replace(/\s+/g, ".").toLowerCase()}`);
+            }}
+            disabled={isDeletedComment(item)}
+          >
+            Reply
+          </button>
+          <button
+            className="button small"
+            onClick={() => {
+              setEditingCommentId(item.id);
+              setEditingCommentText(item.comment || "");
+            }}
+            disabled={!canModifyComment(item) || isDeletedComment(item)}
+          >
+            Edit
+          </button>
+          <button
+            className="button small danger"
+            onClick={async () => {
+              try {
+                await deleteBugCommentApi(item.id);
+                if (selectedBug?.id) {
+                  await loadBugDetails(selectedBug.id);
+                }
+              } catch (error: any) {
+                alert(error?.message || "Delete comment failed");
+              }
+            }}
+            disabled={!canModifyComment(item) || isDeletedComment(item)}
+          >
+            Delete
+          </button>
+        </div>
+        {Array.isArray(item.replies) && item.replies.length > 0 ? renderCommentThreads(item.replies, depth + 1) : null}
+      </div>
+    ));
 
   const startEditCase = (tc: any) => {
     setEditingId(tc.id);
@@ -465,6 +821,23 @@ function App() {
         status: editStatus,
       });
       setEditingId("");
+      setEditTitle("");
+      setEditDescription("");
+      setEditPreConditionsText("[]");
+      setEditTestDataRequirementsText("[]");
+      setEditEnvironmentRequirementsText("[]");
+      setEditModule("");
+      setEditPostConditionsText("[]");
+      setEditMetadataText("{}");
+      setEditTagsText("");
+      setEditEstimatedDurationMinutes("");
+      setEditAutomationStatus("NOT_AUTOMATED");
+      setEditAutomationScriptLink("");
+      setEditChangeSummary("");
+      setEditPriority("MEDIUM");
+      setEditSeverity("MAJOR");
+      setEditType("FUNCTIONAL");
+      setEditStatus("DRAFT");
       await loadTestCaseData();
       alert("Test case updated");
     } catch (error: any) {
@@ -477,6 +850,29 @@ function App() {
       .split(/[\n,]/)
       .map((item) => item.trim())
       .filter(Boolean);
+
+  const parseBugAttachmentsInput = (raw: string): Array<{
+    fileType: string;
+    fileUrl: string;
+    fileName: string;
+    notes?: string;
+  }> => {
+    const value = raw.trim();
+    if (!value) return [];
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      throw new Error("Attachments must be a JSON array");
+    }
+    return parsed
+      .filter((item) => item && typeof item === "object" && !Array.isArray(item))
+      .map((item: any) => ({
+        fileType: String(item.fileType || "").toUpperCase(),
+        fileUrl: String(item.fileUrl || ""),
+        fileName: String(item.fileName || ""),
+        notes: item.notes ? String(item.notes) : undefined,
+      }))
+      .filter((item) => item.fileType && item.fileUrl && item.fileName);
+  };
 
   /* PASSWORD RULES */
   const isValidPassword = (pwd: string) =>
@@ -526,6 +922,8 @@ function App() {
 
   useEffect(() => {
     if (screen !== "dashboard") {
+      setNavOpen(false);
+      setActiveFeature("none");
       setShowTestCaseList(false);
       setExpandedTestCaseId("");
       setSelectedIds([]);
@@ -534,11 +932,70 @@ function App() {
       setSelectedRunId("");
       setRunDetails(null);
       resetExecutionPanel();
+      resetBugPanel();
     }
   }, [screen, currentRole]);
 
+  useEffect(() => {
+    if (screen !== "dashboard") return;
+    setActiveFeature("none");
+  }, [screen, isTester, isDeveloper, isAdmin]);
+
+  useEffect(() => {
+    if (screen === "login") {
+      setEmail("");
+      setPassword("");
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "register") return;
+    setName("");
+    setEmail("");
+    setPassword("");
+    setRole("");
+  }, [screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !selectedBugId) return;
+    loadBugDetails(selectedBugId).catch(() => {
+      setSelectedBug(null);
+      setBugComments([]);
+    });
+  }, [selectedBugId, screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !currentRole) return;
+    loadTestCaseData().catch(() => {
+      // no-op: page-level actions already show explicit alerts on manual refresh
+    });
+  }, [screen, currentRole]);
+
+  useEffect(() => {
+    if (screen !== "dashboard") return;
+    if (activeFeature !== "bug_management" && activeFeature !== "test_cases") return;
+    loadTestCaseData().catch(() => {
+      // no-op
+    });
+  }, [activeFeature, screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !isAdmin || activeFeature !== "admin_workspace") return;
+    setAdminCreateName("");
+    setAdminCreateEmail("");
+    setAdminCreatePassword("");
+    setAdminCreateRole("");
+    loadAdminUsers().catch(() => {
+      setAdminUsers([]);
+    });
+  }, [screen, isAdmin, activeFeature]);
+
   /* REGISTER */
   const handleRegister = async () => {
+    if (!role) {
+      alert("Please select a role");
+      return;
+    }
     if (!isValidPassword(password)) {
       alert(
         "Password must be at least 8 characters and include uppercase, number, and special character."
@@ -548,6 +1005,10 @@ function App() {
 
     const res = await registerApi(name, email, password, role);
     alert(res.message || "Registered successfully");
+    setName("");
+    setEmail("");
+    setPassword("");
+    setRole("");
     setScreen("login");
   };
 
@@ -558,10 +1019,13 @@ function App() {
     if (res.accessToken && res.refreshToken) {
       setSessionTokens(res.accessToken, res.refreshToken, rememberMe);
       setCurrentRole(res?.user?.role || "");
+      setCurrentUserId(res?.user?.id || "");
       setShowTestCaseList(false);
       setExpandedTestCaseId("");
       setSelectedIds([]);
       setEditingId("");
+      resetBugPanel();
+      setNavOpen(false);
       setScreen("dashboard");
       try {
         await loadTestCaseData();
@@ -577,25 +1041,36 @@ function App() {
   const handleLogout = () => {
     clearSessionTokens();
     setCurrentRole("");
+    setCurrentUserId("");
+    setEmail("");
+    setPassword("");
     setShowTestCaseList(false);
     setExpandedTestCaseId("");
     setSelectedIds([]);
     setEditingId("");
+    resetBugPanel();
+    setNavOpen(false);
+    setActiveFeature("none");
     setScreen("login");
   };
 
   return (
     <div className="container">
-      <div className="card">
-        <h2>TestTrack Pro</h2>
+      <div className={`card ${screen === "dashboard" ? "cardDashboard" : "cardAuth"}`}>
+        <h2 className="brandTitle">TestTrack Pro</h2>
+        {screen !== "dashboard" && (
+          <p className="authTagline">Quality engineering workspace for testers, developers, and admins.</p>
+        )}
 
         {screen === "login" && (
-          <>
+          <section className="authPanel">
             <h3>Login</h3>
 
             <input
               className="input"
               placeholder="Email"
+              value={email}
+              autoComplete="off"
               onChange={(e) => setEmail(e.target.value)}
             />
 
@@ -603,6 +1078,8 @@ function App() {
               className="input"
               type="password"
               placeholder="Password"
+              value={password}
+              autoComplete="new-password"
               onChange={(e) => setPassword(e.target.value)}
             />
 
@@ -627,22 +1104,28 @@ function App() {
             <div className="link" onClick={() => setScreen("register")}>
               New user? Register
             </div>
-          </>
+          </section>
         )}
 
         {screen === "register" && (
-          <>
+          <section className="authPanel">
             <h3>Register</h3>
 
             <input
               className="input"
               placeholder="Name"
+              value={name}
+              autoComplete="off"
+              name="register_name"
               onChange={(e) => setName(e.target.value)}
             />
 
             <input
               className="input"
               placeholder="Email"
+              value={email}
+              autoComplete="off"
+              name="register_email"
               onChange={(e) => setEmail(e.target.value)}
             />
 
@@ -650,6 +1133,9 @@ function App() {
               className="input"
               type="password"
               placeholder="Password"
+              value={password}
+              autoComplete="new-password"
+              name="register_password"
               onChange={(e) => setPassword(e.target.value)}
             />
 
@@ -659,11 +1145,13 @@ function App() {
 
             <select
               className="input"
+              value={role}
+              name="register_role"
               onChange={(e) => setRole(e.target.value)}
             >
+              <option value="">Select role</option>
               <option value="TESTER">TESTER</option>
               <option value="DEVELOPER">DEVELOPER</option>
-              <option value="ADMIN">ADMIN</option>
             </select>
 
             <button className="button" onClick={handleRegister}>
@@ -673,11 +1161,11 @@ function App() {
             <div className="link" onClick={() => setScreen("login")}>
               Back to login
             </div>
-          </>
+          </section>
         )}
 
         {screen === "forgot" && (
-          <>
+          <section className="authPanel">
             <h3>Forgot Password</h3>
 
             <input
@@ -691,6 +1179,7 @@ function App() {
               onClick={async () => {
                 const res = await forgotPasswordApi(email);
                 alert(res.message);
+                setEmail("");
                 setScreen("login");
               }}
             >
@@ -700,11 +1189,11 @@ function App() {
             <div className="link" onClick={() => setScreen("login")}>
               Back to login
             </div>
-          </>
+          </section>
         )}
 
         {screen === "reset" && (
-          <>
+          <section className="authPanel">
             <h3>Reset Password</h3>
 
             {!resetToken ? (
@@ -739,6 +1228,7 @@ function App() {
                       typeof res.message === "string" &&
                       res.message.toLowerCase().includes("successful")
                     ) {
+                      setNewPassword("");
                       window.history.replaceState({}, "", "/");
                       setScreen("login");
                     }
@@ -758,22 +1248,28 @@ function App() {
             >
               Back to login
             </div>
-          </>
+          </section>
         )}
 
         {screen === "dashboard" && (
           <div className="dashboard">
             <div className="toolbar">
-              <div>
+              <div className="toolbarIntro">
+                <button
+                  className="menuButton"
+                  onClick={() => setNavOpen((prev) => !prev)}
+                  title="Open feature menu"
+                >
+                  <span />
+                  <span />
+                  <span />
+                </button>
                 <h3>Test Case Management</h3>
                 <p className="note">
-                  Signed in as <strong>{currentRole || "N/A"}</strong>
+                  Signed in as <strong>{currentRole || "N/A"}</strong>{" "}
+                  <span className={`roleBadge role-${roleKey}`}>{currentRole || "USER"}</span>
                 </p>
-                <p className="note">
-                  {isTester && "Tester workspace: create, edit, execute, report, assign issues."}
-                  {isDeveloper && "Developer workspace: view details, assigned issues, status updates, reports."}
-                  {isAdmin && "Admin workspace: user/project/role/audit/system/backup governance."}
-                </p>
+                <p className="note">{roleSummary}</p>
               </div>
               <div className="toolbarActions">
                 <button
@@ -809,9 +1305,34 @@ function App() {
               </div>
             </div>
 
+            <div className={`dashboardBody ${navOpen ? "withSidebar" : "withoutSidebar"}`}>
+              {navOpen && (
+                <aside className="featureSidebar">
+                  <h4>Features</h4>
+                  <div className="featureList">
+                    {roleFeatures.map((feature) => (
+                      <button
+                        key={feature.key}
+                        className={`featureItem ${activeFeature === feature.key ? "active" : ""}`}
+                        onClick={() => setActiveFeature(feature.key)}
+                      >
+                        {feature.label}
+                      </button>
+                    ))}
+                  </div>
+                </aside>
+              )}
+
+              <div className="dashboardContent">
+            {activeFeature === "none" && (
+              <section className="panel">
+                <h4>Select A Feature</h4>
+                <p className="note">Open the menu icon and choose a feature to continue.</p>
+              </section>
+            )}
             <div className="dashboardGrid">
-              {isDeveloper && (
-                <section className="panel">
+              {isDeveloper && showRolePanel && activeFeature === "developer_workspace" && (
+                <section className="panel rolePanel rolePanelDeveloper">
                   <h4>Developer Workspace</h4>
                   <p className="note">
                     Use this dashboard to view complete test case details and work on assigned issues, status
@@ -820,17 +1341,163 @@ function App() {
                 </section>
               )}
 
-              {isAdmin && (
-                <section className="panel">
+              {isAdmin && showRolePanel && activeFeature === "admin_workspace" && (
+                <section className="panel rolePanel rolePanelAdmin">
                   <h4>Admin Workspace</h4>
                   <p className="note">
                     Admin operations are restricted to user/project/role management, audit logs, system
                     configuration, and backup endpoints.
                   </p>
+                  <h4 style={{ marginTop: "10px" }}>Create User</h4>
+                  <input
+                    className="input"
+                    placeholder="Name"
+                    value={adminCreateName}
+                    autoComplete="off"
+                    name="admin_create_name"
+                    onChange={(e) => setAdminCreateName(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Email"
+                    value={adminCreateEmail}
+                    autoComplete="off"
+                    name="admin_create_email"
+                    onChange={(e) => setAdminCreateEmail(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder="Password"
+                    value={adminCreatePassword}
+                    autoComplete="new-password"
+                    name="admin_create_password"
+                    onChange={(e) => setAdminCreatePassword(e.target.value)}
+                  />
+                  <select
+                    className="input"
+                    value={adminCreateRole}
+                    onChange={(e) => setAdminCreateRole(e.target.value)}
+                  >
+                    <option value="">Select role</option>
+                    <option value="TESTER">TESTER</option>
+                    <option value="DEVELOPER">DEVELOPER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        if (!adminCreateName.trim() || !adminCreateEmail.trim() || !adminCreatePassword.trim()) {
+                          alert("Name, email, and password are required");
+                          return;
+                        }
+                        if (!adminCreateRole) {
+                          alert("Please select a role");
+                          return;
+                        }
+                        await createAdminUserApi({
+                          name: adminCreateName.trim(),
+                          email: adminCreateEmail.trim(),
+                          password: adminCreatePassword,
+                          role: adminCreateRole,
+                        });
+                        setAdminCreateName("");
+                        setAdminCreateEmail("");
+                        setAdminCreatePassword("");
+                        setAdminCreateRole("");
+                        await loadAdminUsers();
+                        alert("User created");
+                      } catch (error: any) {
+                        alert(error?.message || "Create user failed");
+                      }
+                    }}
+                  >
+                    Create User
+                  </button>
+                  <h4 style={{ marginTop: "10px" }}>Manage Users</h4>
+                  <button
+                    className="button small"
+                    onClick={async () => {
+                      try {
+                        await loadAdminUsers();
+                      } catch (error: any) {
+                        alert(error?.message || "Load users failed");
+                      }
+                    }}
+                  >
+                    Refresh Users
+                  </button>
+                  {adminUsers.length > 0 && (
+                    <div className="listCompact">
+                      {adminUsers.map((user) => (
+                        <div className="row" key={user.id}>
+                          <span className="title">{user.name} ({user.email})</span>
+                          <span className="meta">{user.role} | {user.isActive ? "Active" : "Inactive"}</span>
+                          <select
+                            className="input"
+                            style={{ width: "140px", marginBottom: 0 }}
+                            value={user.role}
+                            onChange={async (e) => {
+                              try {
+                                await updateAdminRoleApi(user.id, e.target.value);
+                                await loadAdminUsers();
+                              } catch (error: any) {
+                                alert(error?.message || "Role update failed");
+                              }
+                            }}
+                          >
+                            <option value="TESTER">TESTER</option>
+                            <option value="DEVELOPER">DEVELOPER</option>
+                            <option value="ADMIN">ADMIN</option>
+                          </select>
+                          <button
+                            className="button small"
+                            disabled={user.id === currentUserId}
+                            onClick={async () => {
+                              try {
+                                if (user.id === currentUserId) {
+                                  alert("You cannot change your own active status");
+                                  return;
+                                }
+                                await updateAdminUserApi(user.id, { isActive: !Boolean(user.isActive) });
+                                await loadAdminUsers();
+                              } catch (error: any) {
+                                alert(error?.message || "Update active status failed");
+                              }
+                            }}
+                          >
+                            {user.isActive ? "Deactivate" : "Activate"}
+                          </button>
+                          <button
+                            className="button small danger"
+                            disabled={user.id === currentUserId}
+                            onClick={async () => {
+                              try {
+                                if (user.id === currentUserId) {
+                                  alert("You cannot delete your own admin account");
+                                  return;
+                                }
+                                if (!window.confirm(`Delete user ${user.email}?`)) {
+                                  return;
+                                }
+                                await deleteAdminUserApi(user.id);
+                                await loadAdminUsers();
+                              } catch (error: any) {
+                                alert(error?.message || "Delete user failed");
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
 
-              {canCreateAndManageTestCases && (
+              {showCreateTestCase && (
               <section className="panel">
                 <h4>Create Test Case</h4>
                 <label className="fieldLabel">Title</label>
@@ -937,6 +1604,7 @@ function App() {
                         type: tcType,
                         status: tcStatus,
                       });
+                      resetCreateTestCaseFields();
                       await loadTestCaseData();
                       alert("Test case created");
                     } catch (error: any) {
@@ -949,7 +1617,7 @@ function App() {
               </section>
               )}
 
-              {canUseTemplates && (
+              {showTemplates && (
               <section className="panel">
                 <h4>Templates</h4>
                 <input className="input" placeholder="Template Name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
@@ -980,6 +1648,7 @@ function App() {
                         type: tcType,
                         status: "DRAFT",
                       });
+                      resetTemplateFields();
                       await loadTestCaseData();
                       alert("Template created");
                     } catch (error: any) {
@@ -1014,7 +1683,7 @@ function App() {
               </section>
               )}
 
-              {canRunBulkOps && (
+              {showBulkOperations && (
               <section className="panel">
                 <h4>Bulk Operations</h4>
                 <select className="input" value={bulkOperation} onChange={(e) => setBulkOperation(e.target.value)}>
@@ -1095,6 +1764,13 @@ function App() {
                         alert("Bulk export completed");
                       } else {
                         setSelectedIds([]);
+                        setBulkOperation("STATUS");
+                        setBulkStatus("READY_FOR_REVIEW");
+                        setBulkPriority("MEDIUM");
+                        setBulkSeverityValue("MAJOR");
+                        setBulkModule("General");
+                        setBulkSuiteId("");
+                        setBulkAssignee("");
                         await loadTestCaseData();
                         alert("Bulk operation completed");
                       }
@@ -1108,7 +1784,7 @@ function App() {
               </section>
               )}
 
-              {canImportTestCases && (
+              {showImport && (
               <section className="panel">
                 <h4>Import</h4>
                 <select className="input" value={importType} onChange={(e) => setImportType(e.target.value)}>
@@ -1164,6 +1840,7 @@ function App() {
                           ? { sourceType: "CSV", csvText: importPayload, fieldMapping, confirm: true }
                           : { sourceType: "EXCEL", rows: excelRows, fieldMapping, confirm: true };
                       const res = await importTestCasesApi(payload);
+                      resetImportFields();
                       await loadTestCaseData();
                       alert(`Import complete: ${res.success}/${res.total}`);
                     } catch (error: any) {
@@ -1186,7 +1863,7 @@ function App() {
               </section>
               )}
 
-              {canManageTestRuns && (
+              {showTestRuns && (
               <section className="panel">
                 <h4>Test Run / Cycle Management</h4>
                 <input
@@ -1242,6 +1919,7 @@ function App() {
                         testCaseIds: selectedIds,
                         testerIds: parseIdsFromText(runTesterIdsText),
                       });
+                      resetRunFields();
                       await loadTestCaseData();
                       alert("Test run created");
                     } catch (error: any) {
@@ -1293,7 +1971,7 @@ function App() {
               </section>
               )}
 
-              {canExecuteTests && (
+              {showExecute && (
               <section className="panel">
                 <h4>Execute Test Case</h4>
                 <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
@@ -1478,6 +2156,11 @@ function App() {
                           setExecutionDurationSeconds(
                             typeof final?.durationSeconds === "number" ? final.durationSeconds : executionDurationSeconds
                           );
+                          setExecutionNotes("");
+                          setExecutionSelectedStepNumber("");
+                          setExecutionStepStatus("PASSED");
+                          setExecutionActualResult("");
+                          setExecutionStepNotes("");
                           alert(`Execution finalized: ${final.result}`);
                         } catch (error: any) {
                           alert(error?.message || "Finalize failed");
@@ -1625,6 +2308,7 @@ function App() {
                           description: quickBugDescription || undefined,
                           severity: quickBugSeverity,
                         });
+                        resetQuickBugFields();
                         alert(`Bug created: ${issue.id}`);
                       } catch (error: any) {
                         alert(error?.message || "Quick bug creation failed");
@@ -1670,8 +2354,630 @@ function App() {
                 </div>
               </section>
               )}
+
+              {showBugs && (
+              <section className="panel">
+                <h4>{isDeveloper ? "Assigned Bugs" : "Bug Management (4.4)"}</h4>
+                {canCreateBugs && (
+                  <>
+                    <label className="fieldLabel">Title (max 200)</label>
+                    <input
+                      className="input"
+                      placeholder="Bug title"
+                      value={bugCreateTitle}
+                      onChange={(e) => setBugCreateTitle(e.target.value)}
+                    />
+                    <label className="fieldLabel">Description</label>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Detailed bug description"
+                      value={bugCreateDescription}
+                      onChange={(e) => setBugCreateDescription(e.target.value)}
+                    />
+                    <label className="fieldLabel">Steps to Reproduce</label>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Step 1... Step 2..."
+                      value={bugCreateStepsToReproduce}
+                      onChange={(e) => setBugCreateStepsToReproduce(e.target.value)}
+                    />
+                    <div className="inlineGrid">
+                      <div>
+                        <label className="fieldLabel">Expected Behavior</label>
+                        <textarea
+                          className="input"
+                          rows={2}
+                          placeholder="Expected outcome"
+                          value={bugCreateExpectedBehavior}
+                          onChange={(e) => setBugCreateExpectedBehavior(e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="fieldLabel">Actual Behavior</label>
+                        <textarea
+                          className="input"
+                          rows={2}
+                          placeholder="Observed outcome"
+                          value={bugCreateActualBehavior}
+                          onChange={(e) => setBugCreateActualBehavior(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <div className="inlineGrid">
+                      <div>
+                        <label className="fieldLabel">Severity</label>
+                        <select
+                          className="input"
+                          value={bugCreateSeverity}
+                          onChange={(e) => setBugCreateSeverity(e.target.value)}
+                        >
+                          <option value="LOW">LOW</option>
+                          <option value="MEDIUM">MEDIUM</option>
+                          <option value="HIGH">HIGH</option>
+                          <option value="CRITICAL">CRITICAL</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="fieldLabel">Priority</label>
+                        <select
+                          className="input"
+                          value={bugCreatePriority}
+                          onChange={(e) => setBugCreatePriority(e.target.value)}
+                        >
+                          <option value="P1_URGENT">P1_URGENT</option>
+                          <option value="P2_HIGH">P2_HIGH</option>
+                          <option value="P3_MEDIUM">P3_MEDIUM</option>
+                          <option value="P4_LOW">P4_LOW</option>
+                        </select>
+                      </div>
+                    </div>
+                    <input
+                      className="input"
+                      placeholder="Environment (e.g., Chrome 122, Windows 11)"
+                      value={bugCreateEnvironment}
+                      onChange={(e) => setBugCreateEnvironment(e.target.value)}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Affected Version (e.g., v1.5.0)"
+                      value={bugCreateAffectedVersion}
+                      onChange={(e) => setBugCreateAffectedVersion(e.target.value)}
+                    />
+                    <div className="inlineGrid">
+                      <input
+                        className="input"
+                        placeholder="Assign to Developer User ID"
+                        value={bugCreateAssignedTo}
+                        onChange={(e) => setBugCreateAssignedTo(e.target.value)}
+                      />
+                      <input
+                        className="input"
+                        type="date"
+                        value={bugCreateDueDate}
+                        onChange={(e) => setBugCreateDueDate(e.target.value)}
+                      />
+                    </div>
+                    <label className="fieldLabel">Attachments JSON (optional)</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      placeholder='[{"fileType":"IMAGE","fileUrl":"https://.../screenshot.png","fileName":"screenshot.png","notes":"login error"}]'
+                      value={bugCreateAttachmentsText}
+                      onChange={(e) => setBugCreateAttachmentsText(e.target.value)}
+                    />
+                    <div className="inlineGrid">
+                      <select
+                        className="input"
+                        value={bugCreateTestCaseId}
+                        onChange={(e) => setBugCreateTestCaseId(e.target.value)}
+                      >
+                        <option value="">Linked Test Case (optional)</option>
+                        {testCases.map((tc) => (
+                          <option key={tc.id} value={tc.id}>
+                            {tc.testCaseCode || tc.id} - {tc.title}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="input"
+                        value={bugCreateExecutionId}
+                        onChange={(e) => setBugCreateExecutionId(e.target.value)}
+                      >
+                        <option value="">Linked Execution (optional)</option>
+                        {executionReports.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.testCase?.title || item.testCaseId} | {item.result}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          const attachments = parseBugAttachmentsInput(bugCreateAttachmentsText);
+                          if (bugCreateTitle.length > 200) {
+                            alert("Bug title must be 200 characters or less");
+                            return;
+                          }
+                          const created = await createBugApi({
+                            title: bugCreateTitle,
+                            description: bugCreateDescription,
+                            stepsToReproduce: bugCreateStepsToReproduce,
+                            expectedBehavior: bugCreateExpectedBehavior,
+                            actualBehavior: bugCreateActualBehavior,
+                            severity: bugCreateSeverity,
+                            priority: bugCreatePriority,
+                            environment: bugCreateEnvironment || undefined,
+                            affectedVersion: bugCreateAffectedVersion || undefined,
+                            assignedTo: bugCreateAssignedTo || undefined,
+                            testCaseId: bugCreateTestCaseId || undefined,
+                            executionId: bugCreateExecutionId || undefined,
+                            dueDate: bugCreateDueDate || undefined,
+                            attachments,
+                          });
+                          setSelectedBugId(created.id);
+                          resetBugCreateFields();
+                          await loadTestCaseData();
+                          await loadBugDetails(created.id);
+                          alert(`Bug created: ${created.bugId || created.id}`);
+                        } catch (error: any) {
+                          alert(error?.message || "Create bug failed");
+                        }
+                      }}
+                    >
+                      Create Bug Report
+                    </button>
+                  </>
+                )}
+
+                <div className="panelHeader" style={{ marginTop: "12px" }}>
+                  <h4 style={{ margin: 0 }}>Bug List</h4>
+                  <button
+                    className="button small"
+                    onClick={async () => {
+                      try {
+                        await loadTestCaseData();
+                      } catch (error: any) {
+                        alert(error?.message || "Failed to refresh bugs");
+                      }
+                    }}
+                  >
+                    Refresh Bugs
+                  </button>
+                </div>
+
+                <div className="inlineGrid">
+                  <select className="input" value={bugFilterStatus} onChange={(e) => setBugFilterStatus(e.target.value)}>
+                    <option value="">All Status</option>
+                    <option value="NEW">NEW</option>
+                    <option value="OPEN">OPEN</option>
+                    <option value="IN_PROGRESS">IN_PROGRESS</option>
+                    <option value="FIXED">FIXED</option>
+                    <option value="VERIFIED">VERIFIED</option>
+                    <option value="CLOSED">CLOSED</option>
+                    <option value="REOPENED">REOPENED</option>
+                    <option value="WONT_FIX">WONT_FIX</option>
+                    <option value="DUPLICATE">DUPLICATE</option>
+                  </select>
+                  <select className="input" value={bugFilterPriority} onChange={(e) => setBugFilterPriority(e.target.value)}>
+                    <option value="">All Priority</option>
+                    <option value="P1_URGENT">P1_URGENT</option>
+                    <option value="P2_HIGH">P2_HIGH</option>
+                    <option value="P3_MEDIUM">P3_MEDIUM</option>
+                    <option value="P4_LOW">P4_LOW</option>
+                  </select>
+                </div>
+                <div className="inlineGrid">
+                  <select className="input" value={bugFilterSeverity} onChange={(e) => setBugFilterSeverity(e.target.value)}>
+                    <option value="">All Severity</option>
+                    <option value="LOW">LOW</option>
+                    <option value="MEDIUM">MEDIUM</option>
+                    <option value="HIGH">HIGH</option>
+                    <option value="CRITICAL">CRITICAL</option>
+                  </select>
+                  <select className="input" value={bugSortBy} onChange={(e) => setBugSortBy(e.target.value)}>
+                    <option value="">Sort: Latest Update</option>
+                    <option value="priority">Sort: Priority</option>
+                    <option value="age">Sort: Age</option>
+                    <option value="dueDate">Sort: Due Date</option>
+                  </select>
+                </div>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      await loadTestCaseData();
+                    } catch (error: any) {
+                      alert(error?.message || "Failed to apply bug filters");
+                    }
+                  }}
+                >
+                  Apply Filters
+                </button>
+
+                {isDeveloper && (
+                  <>
+                    <div className="testCaseDetails" style={{ marginTop: "8px" }}>
+                      <div><strong>Assigned Bugs:</strong> {assignedBugCount}</div>
+                      <div><strong>P1-Urgent:</strong> {p1UrgentCount}</div>
+                      <div><strong>Critical Severity:</strong> {criticalBugCount}</div>
+                    </div>
+                    <div className="listCompact">
+                      {bugs.map((item) => (
+                        <div key={item.id}>
+                          <div className="row">
+                            <span className="title">
+                              {(item.bugId || item.id)} | {item.title}
+                              <br />
+                              Env: {item.bugMeta?.environment || "N/A"} | Version: {item.bugMeta?.affectedVersion || "N/A"} | TC:{" "}
+                              {item.testCase?.testCaseCode || item.testCaseId || "N/A"}
+                              <br />
+                              Attachments:{" "}
+                              {Array.isArray(item.attachments) && item.attachments.length > 0
+                                ? item.attachments.map((a: any) => a.fileName).join(", ")
+                                : "N/A"}
+                            </span>
+                            <span className="meta">
+                              {item.priority} | {item.severity} | {item.workflowStatus}
+                            </span>
+                            <select
+                              className="input"
+                              style={{ width: "180px", marginBottom: 0 }}
+                              value={quickStatusByBugId[item.id] || item.workflowStatus || "OPEN"}
+                              onChange={(e) =>
+                                setQuickStatusByBugId((prev) => ({ ...prev, [item.id]: e.target.value }))
+                              }
+                            >
+                              <option value="OPEN">OPEN</option>
+                              <option value="IN_PROGRESS">IN_PROGRESS</option>
+                              <option value="FIXED">FIXED</option>
+                              <option value="VERIFIED">VERIFIED</option>
+                              <option value="CLOSED">CLOSED</option>
+                              <option value="REOPENED">REOPENED</option>
+                              <option value="WONT_FIX">WONT_FIX</option>
+                              <option value="DUPLICATE">DUPLICATE</option>
+                            </select>
+                            <button
+                              className="button small"
+                              onClick={async () => {
+                                try {
+                                  const status = quickStatusByBugId[item.id] || item.workflowStatus || "OPEN";
+                                  const current = String(item.workflowStatus || "OPEN").toUpperCase();
+                                  if (String(status).toUpperCase() === current) {
+                                    alert(`Bug is already in ${current} status`);
+                                    return;
+                                  }
+                                  await quickUpdateDeveloperBugStatusApi(item.id, status);
+                                  setQuickStatusByBugId((prev) => {
+                                    const next = { ...prev };
+                                    delete next[item.id];
+                                    return next;
+                                  });
+                                  await loadTestCaseData();
+                                } catch (error: any) {
+                                  alert(error?.message || "Quick status update failed");
+                                }
+                              }}
+                            >
+                              Quick Update
+                            </button>
+                            <button
+                              className="button small"
+                              onClick={() => setSelectedBugId((prev) => (prev === item.id ? "" : item.id))}
+                            >
+                              {selectedBugId === item.id ? "Close" : "Open"}
+                            </button>
+                          </div>
+                          {selectedBugId === item.id && selectedBug?.id === item.id && (
+                            <div className="testCaseDetails">
+                              <div><strong>Bug ID:</strong> {selectedBug.bugId || selectedBug.id}</div>
+                              <div><strong>Title:</strong> {selectedBug.title}</div>
+                              <div><strong>Status:</strong> {selectedBug.workflowStatus}</div>
+                              <div><strong>Priority:</strong> {selectedBug.priority}</div>
+                              <div><strong>Severity:</strong> {selectedBug.severity}</div>
+                              <div><strong>Description:</strong> {selectedBug.description || "N/A"}</div>
+                              <div><strong>Steps to Reproduce:</strong> {selectedBug.bugMeta?.stepsToReproduce || "N/A"}</div>
+                              <div><strong>Expected Behavior:</strong> {selectedBug.bugMeta?.expectedBehavior || "N/A"}</div>
+                              <div><strong>Actual Behavior:</strong> {selectedBug.bugMeta?.actualBehavior || "N/A"}</div>
+                              <div><strong>Environment:</strong> {selectedBug.bugMeta?.environment || "N/A"}</div>
+                              <div><strong>Affected Version:</strong> {selectedBug.bugMeta?.affectedVersion || "N/A"}</div>
+                              <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reportedBy || "N/A"}</div>
+                              <div><strong>Assigned To:</strong> {selectedBug.assignee?.name || selectedBug.assignedTo || "Unassigned"}</div>
+                              <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
+                              <div>
+                                <strong>Attachments:</strong>{" "}
+                                {Array.isArray(selectedBug.attachments) && selectedBug.attachments.length > 0
+                                  ? selectedBug.attachments.map((a: any) => a.fileName).join(", ")
+                                  : "N/A"}
+                              </div>
+                              <div><strong>Fix Notes:</strong> {selectedBug.fixNotes || "N/A"}</div>
+                              <div><strong>Commit Link:</strong> {selectedBug.commitLink || "N/A"}</div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {!isDeveloper && (
+                  <div className="listCompact">
+                    {bugs.map((item) => (
+                      <div key={item.id}>
+                        <div className="row">
+                          <span className="title">
+                            {(item.bugId || item.id)} | {item.title}
+                          </span>
+                          <span className="meta">
+                            {item.priority} | {item.severity} | {item.workflowStatus}
+                          </span>
+                          <button
+                            className="button small"
+                            onClick={() => setSelectedBugId((prev) => (prev === item.id ? "" : item.id))}
+                          >
+                            {selectedBugId === item.id ? "Close" : "Open"}
+                          </button>
+                        </div>
+                        {selectedBugId === item.id && selectedBug?.id === item.id && (
+                          <div className="testCaseDetails">
+                            <div><strong>Bug ID:</strong> {selectedBug.bugId || selectedBug.id}</div>
+                            <div><strong>Title:</strong> {selectedBug.title}</div>
+                            <div><strong>Status:</strong> {selectedBug.workflowStatus}</div>
+                            <div><strong>Priority:</strong> {selectedBug.priority}</div>
+                            <div><strong>Severity:</strong> {selectedBug.severity}</div>
+                            <div><strong>Description:</strong> {selectedBug.description || "N/A"}</div>
+                            <div><strong>Steps to Reproduce:</strong> {selectedBug.bugMeta?.stepsToReproduce || "N/A"}</div>
+                            <div><strong>Expected Behavior:</strong> {selectedBug.bugMeta?.expectedBehavior || "N/A"}</div>
+                            <div><strong>Actual Behavior:</strong> {selectedBug.bugMeta?.actualBehavior || "N/A"}</div>
+                            <div><strong>Environment:</strong> {selectedBug.bugMeta?.environment || "N/A"}</div>
+                            <div><strong>Affected Version:</strong> {selectedBug.bugMeta?.affectedVersion || "N/A"}</div>
+                            <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reportedBy || "N/A"}</div>
+                            <div><strong>Assigned To:</strong> {selectedBug.assignee?.name || selectedBug.assignedTo || "Unassigned"}</div>
+                            <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
+                            <div>
+                              <strong>Attachments:</strong>{" "}
+                              {Array.isArray(selectedBug.attachments) && selectedBug.attachments.length > 0
+                                ? selectedBug.attachments.map((a: any) => a.fileName).join(", ")
+                                : "N/A"}
+                            </div>
+                            <div><strong>Fix Notes:</strong> {selectedBug.fixNotes || "N/A"}</div>
+                            <div><strong>Commit Link:</strong> {selectedBug.commitLink || "N/A"}</div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {selectedBug && canTransitionBugs && (
+                  <>
+                    <h4 style={{ marginTop: "12px" }}>Workflow Transition</h4>
+                    <select
+                      className="input"
+                      value={bugTransitionToStatus}
+                      onChange={(e) => setBugTransitionToStatus(e.target.value)}
+                    >
+                      <option value="OPEN">OPEN</option>
+                      <option value="IN_PROGRESS">IN_PROGRESS</option>
+                      <option value="FIXED">FIXED</option>
+                      <option value="VERIFIED">VERIFIED</option>
+                      <option value="CLOSED">CLOSED</option>
+                      <option value="REOPENED">REOPENED</option>
+                      <option value="WONT_FIX">WONT_FIX</option>
+                      <option value="DUPLICATE">DUPLICATE</option>
+                    </select>
+                    <input
+                      className="input"
+                      placeholder="Reason (for Won't Fix)"
+                      value={bugTransitionReason}
+                      onChange={(e) => setBugTransitionReason(e.target.value)}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Duplicate Bug Code (for Duplicate)"
+                      value={bugTransitionDuplicateOf}
+                      onChange={(e) => setBugTransitionDuplicateOf(e.target.value)}
+                    />
+                    <div className="inlineGrid">
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            const current = String(selectedBug.workflowStatus || "OPEN").toUpperCase();
+                            const target = String(bugTransitionToStatus || "OPEN").toUpperCase();
+                            if (target === current) {
+                              alert(`Bug is already in ${current} status`);
+                              return;
+                            }
+                            if (isDeveloper) {
+                              await quickUpdateDeveloperBugStatusApi(selectedBug.id, bugTransitionToStatus);
+                            } else {
+                              await updateBugWorkflowApi(selectedBug.id, {
+                                toStatus: bugTransitionToStatus,
+                                reason: bugTransitionReason || undefined,
+                                duplicateOfBugCode: bugTransitionDuplicateOf || undefined,
+                              });
+                            }
+                            setBugTransitionToStatus("OPEN");
+                            setBugTransitionReason("");
+                            setBugTransitionDuplicateOf("");
+                            await loadTestCaseData();
+                            await loadBugDetails(selectedBug.id);
+                          } catch (error: any) {
+                            alert(error?.message || "Workflow transition failed");
+                          }
+                        }}
+                      >
+                        Apply Transition
+                      </button>
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            await loadBugDetails(selectedBug.id);
+                          } catch (error: any) {
+                            alert(error?.message || "Failed to refresh bug details");
+                          }
+                        }}
+                      >
+                        Refresh Details
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {selectedBug && canResolveBugs && (
+                  <>
+                    <h4 style={{ marginTop: "12px" }}>Developer Resolution</h4>
+                    <select className="input" value={bugResolveAction} onChange={(e) => setBugResolveAction(e.target.value)}>
+                      <option value="START_PROGRESS">START_PROGRESS</option>
+                      <option value="MARK_FIXED">MARK_FIXED</option>
+                      <option value="REQUEST_RETEST">REQUEST_RETEST</option>
+                      <option value="WONT_FIX">WONT_FIX</option>
+                    </select>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Fix notes / resolution notes"
+                      value={bugResolveFixNotes}
+                      onChange={(e) => setBugResolveFixNotes(e.target.value)}
+                    />
+                    <input
+                      className="input"
+                      placeholder="Commit link (optional)"
+                      value={bugResolveCommitLink}
+                      onChange={(e) => setBugResolveCommitLink(e.target.value)}
+                    />
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          await resolveBugApi(selectedBug.id, {
+                            action: bugResolveAction,
+                            fixNotes: bugResolveFixNotes || undefined,
+                            commitLink: bugResolveCommitLink || undefined,
+                            reason: bugTransitionReason || undefined,
+                          });
+                          setBugResolveAction("START_PROGRESS");
+                          setBugResolveFixNotes("");
+                          setBugResolveCommitLink("");
+                          await loadTestCaseData();
+                          await loadBugDetails(selectedBug.id);
+                        } catch (error: any) {
+                          alert(error?.message || "Resolution action failed");
+                        }
+                      }}
+                    >
+                      Apply Resolution Action
+                    </button>
+                  </>
+                )}
+
+                {selectedBug && (
+                  <>
+                    <h4 style={{ marginTop: "12px" }}>Bug Comments</h4>
+                    <div className="note">
+                      Supports mentions with @username. Edit/delete is allowed for 5 minutes (admin override).
+                    </div>
+                    <div className="toolbarActions" style={{ marginBottom: "8px" }}>
+                      <button className="button small" onClick={() => appendCommentSnippet("@username")}>
+                        @Mention
+                      </button>
+                      <button className="button small" onClick={() => appendCommentSnippet("**bold text**")}>
+                        Bold
+                      </button>
+                      <button className="button small" onClick={() => appendCommentSnippet("_italic text_")}>
+                        Italic
+                      </button>
+                      <button className="button small" onClick={() => appendCommentSnippet("`code`")}>
+                        Code
+                      </button>
+                    </div>
+                    <textarea
+                      className="input"
+                      rows={2}
+                      placeholder="Add comment"
+                      value={bugCommentText}
+                      onChange={(e) => handleCommentTextChange(e.target.value)}
+                    />
+                    {showMentionPopup && filteredMentionCandidates.length > 0 && (
+                      <div className="mentionPopup">
+                        {filteredMentionCandidates.slice(0, 8).map((item) => (
+                          <button
+                            key={item.key}
+                            className="mentionItem"
+                            onClick={() => applyMention(item.key)}
+                          >
+                            @{item.key} - {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <input
+                      className="input"
+                      placeholder="Reply to Comment ID (optional)"
+                      value={bugCommentParentId}
+                      onChange={(e) => setBugCommentParentId(e.target.value)}
+                    />
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          if (!bugCommentText.trim()) {
+                            alert("Comment text is required");
+                            return;
+                          }
+                          await createBugCommentApi(selectedBug.id, {
+                            comment: bugCommentText,
+                            parentCommentId: bugCommentParentId || undefined,
+                          });
+                          setBugCommentText("");
+                          setBugCommentParentId("");
+                          await loadBugDetails(selectedBug.id);
+                        } catch (error: any) {
+                          alert(error?.message || "Add comment failed");
+                        }
+                      }}
+                    >
+                      Add Comment
+                    </button>
+                    {bugCommentThreads.length > 0 && (
+                      <div className="listCompact">
+                        {renderCommentThreads(bugCommentThreads)}
+                      </div>
+                    )}
+                    {bugComments.length > 0 && bugCommentThreads.length === 0 && (
+                      <div className="listCompact">
+                        {bugComments.map((item) => (
+                          <div className="row" key={item.id}>
+                            <span className="title">
+                              <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
+                              {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
+                                <>
+                                  <br />
+                                  <strong>Mentions:</strong> {item.mentions.map((m: string) => `@${m}`).join(", ")}
+                                </>
+                              ) : null}
+                            </span>
+                            <span className="meta">
+                              <strong>By:</strong> {item.author?.name || item.authorId}
+                              <br />
+                              <strong>At:</strong> {new Date(item.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </section>
+              )}
             </div>
 
+            {showTestCases && (
             <section className="panel fullWidth">
               <div className="panelHeader">
                 <h4>Test Cases</h4>
@@ -1912,7 +3218,52 @@ function App() {
                   </div>
                 </div>
               )}
+              {editingCommentId && (
+                <div className="modalBackdrop">
+                  <div className="modalCard">
+                    <h4>Edit Bug Comment</h4>
+                    <textarea
+                      className="input"
+                      rows={4}
+                      value={editingCommentText}
+                      onChange={(e) => setEditingCommentText(e.target.value)}
+                    />
+                    <div className="toolbarActions">
+                      <button
+                        className="button small"
+                        disabled={!editingCommentText.trim()}
+                        onClick={async () => {
+                          try {
+                            await editBugCommentApi(editingCommentId, editingCommentText);
+                            setEditingCommentId("");
+                            setEditingCommentText("");
+                            if (selectedBugId) {
+                              await loadBugDetails(selectedBugId);
+                            }
+                          } catch (error: any) {
+                            alert(error?.message || "Edit comment failed");
+                          }
+                        }}
+                      >
+                        Save Comment
+                      </button>
+                      <button
+                        className="button small danger"
+                        onClick={() => {
+                          setEditingCommentId("");
+                          setEditingCommentText("");
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
+            )}
+              </div>
+            </div>
           </div>
         )}
       </div>
