@@ -330,6 +330,10 @@ export async function listTestRunsApi() {
   return authJson("/test-runs");
 }
 
+export async function listAvailableTestersApi() {
+  return authJson("/test-runs/available-testers");
+}
+
 export async function getTestRunApi(id: string) {
   return authJson(`/test-runs/${id}`);
 }
