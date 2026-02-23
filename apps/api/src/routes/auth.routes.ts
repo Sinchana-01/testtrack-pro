@@ -70,6 +70,9 @@ router.post("/register", async (req: Request, res: Response) => {
     const normalizedEmail =
       typeof email === "string" ? email.trim().toLowerCase() : "";
     const requestedRole = role as Role | undefined;
+    if (requestedRole === Role.ADMIN) {
+      return res.status(403).json({ message: "Admin self-registration is not allowed" });
+    }
     const selectedRole =
       requestedRole && PUBLIC_REGISTRATION_ROLES.includes(requestedRole)
         ? requestedRole

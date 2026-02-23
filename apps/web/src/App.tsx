@@ -547,6 +547,42 @@ function App() {
     setBugSortBy("");
   };
 
+  const resetBugPanel = () => {
+    setBugs([]);
+    setSelectedBugId("");
+    setSelectedBug(null);
+    setBugComments([]);
+    setBugCommentThreads([]);
+    setBugCreateTitle("");
+    setBugCreateDescription("");
+    setBugCreateStepsToReproduce("");
+    setBugCreateExpectedBehavior("");
+    setBugCreateActualBehavior("");
+    setBugCreateSeverity("MEDIUM");
+    setBugCreatePriority("P3_MEDIUM");
+    setBugCreateEnvironment("");
+    setBugCreateAffectedVersion("");
+    setBugCreateAssignedTo("");
+    setBugCreateTestCaseId("");
+    setBugCreateExecutionId("");
+    setBugCreateDueDate("");
+    setBugCreateAttachmentsText("");
+    setBugTransitionToStatus("OPEN");
+    setBugTransitionReason("");
+    setBugTransitionDuplicateOf("");
+    setBugResolveAction("START_PROGRESS");
+    setBugResolveFixNotes("");
+    setBugResolveCommitLink("");
+    setBugCommentText("");
+    setBugCommentParentId("");
+    setEditingCommentId("");
+    setEditingCommentText("");
+    setBugFilterStatus("");
+    setBugFilterPriority("");
+    setBugFilterSeverity("");
+    setBugSortBy("");
+  };
+
   const resetEntryFields = () => {
     setTcTitle("");
     setTcDescription("");

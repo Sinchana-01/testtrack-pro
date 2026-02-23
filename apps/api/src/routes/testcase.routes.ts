@@ -718,12 +718,6 @@ const resolveTestCaseRefs = async (
 };
 
 router.use(authenticate);
-router.use((req: AuthRequest, res: Response, next) => {
-  if (req.user?.role === Role.ADMIN && !req.path.startsWith("/admin")) {
-    return res.status(403).json({ message: "Admins can only access admin module endpoints." });
-  }
-  return next();
-});
 
 /* =========================
    TESTER/SHARED TEST CASE FLOWS
@@ -1214,24 +1208,6 @@ router.get(
       orderBy: { createdAt: "desc" },
     });
     return res.json(templates);
-  }
-);
-
-router.delete(
-  "/testcase-templates/:id",
-  authorizeRoles(Role.TESTER),
-  async (req: AuthRequest, res: Response) => {
-    const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
-    if (!template) {
-      return res.status(404).json({ message: "Template not found" });
-    }
-    if (template.createdBy !== req.user!.userId) {
-      return res.status(403).json({ message: "You can only delete templates you created" });
-    }
-
-    await prisma.testCaseTemplate.delete({ where: { id: req.params.id } });
-    await writeAuditLog(req.user!.userId, "DELETE_TEST_CASE_TEMPLATE", "TestCaseTemplate", req.params.id);
-    return res.json({ message: "Template deleted" });
   }
 );
 
@@ -3961,6 +3937,18 @@ router.patch("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthReq
 });
 
 router.delete("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  if (req.params.id === req.user!.userId) {
+    return res.status(400).json({ message: "Admin cannot delete own account" });
+  }
+
+  const existing = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!existing) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  await prisma.user.delete({ where: { id: req.params.id } });
+  await writeAuditLog(req.user!.userId, "ADMIN_DELETE_USER", "User", req.params.id);
+  return res.json({ message: "User deleted" });
   if (req.user!.userId === req.params.id) {
     return res.status(400).json({ message: "Admin cannot delete their own account" });
   }
@@ -4005,13 +3993,6 @@ router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthReque
 
   await writeAuditLog(req.user!.userId, "ADMIN_CREATE_PROJECT", "Project", project.id, { name: project.name });
   return res.status(201).json(project);
-});
-
-router.get("/admin/projects", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
-  const projects = await prisma.project.findMany({
-    orderBy: { updatedAt: "desc" },
-  });
-  return res.json(projects);
 });
 
 router.patch("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
@@ -4063,16 +4044,6 @@ router.post("/admin/system-config", authorizeRoles(Role.ADMIN), async (req: Auth
   return res.json(config);
 });
 
-router.get("/admin/system-config", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
-  const configs = await prisma.systemConfig.findMany({
-    orderBy: { key: "asc" },
-    include: {
-      updater: { select: { id: true, name: true, email: true, role: true } },
-    },
-  });
-  return res.json(configs);
-});
-
 router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const backup = await prisma.backupJob.create({
     data: {
@@ -4092,17 +4063,6 @@ router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthReques
 
   await writeAuditLog(req.user!.userId, "ADMIN_TRIGGER_BACKUP", "BackupJob", completed.id);
   return res.status(201).json(completed);
-});
-
-router.get("/admin/backups", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
-  const backups = await prisma.backupJob.findMany({
-    orderBy: { startedAt: "desc" },
-    include: {
-      triggerUser: { select: { id: true, name: true, email: true, role: true } },
-    },
-    take: 100,
-  });
-  return res.json(backups);
 });
 
 export default router;
