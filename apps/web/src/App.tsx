@@ -50,6 +50,15 @@ import {
   updateAdminRoleApi,
   updateAdminUserApi,
   updateTestCaseApi,
+  createSuiteApi,
+  listSuitesApi,
+  getSuiteApi,
+  getSuiteTestCasesApi,
+  updateSuiteApi,
+  cloneSuiteApi,
+  archiveSuiteApi,
+  restoreSuiteApi,
+  previewDynamicFilterApi,
 } from "./api";
 import "./App.css";
 
@@ -227,6 +236,7 @@ function App() {
   const canSeeSelectionControls = isTester;
   const canExecuteTests = isTester || isAdmin;
   const canManageTestRuns = isTester || isAdmin;
+  const canManageSuites = isTester || isAdmin;
   const canViewBugs = isTester || isDeveloper || isAdmin;
   const canCreateBugs = isTester || isAdmin;
   const canTransitionBugs = isTester || isDeveloper || isAdmin;
@@ -236,6 +246,7 @@ function App() {
     { key: "templates", label: "Templates" },
     { key: "bulk_operations", label: "Bulk Operations" },
     { key: "import_test_cases", label: "Import Test Cases" },
+    { key: "test_suites", label: "Test Suites" },
     { key: "test_runs", label: "Test Run Management" },
     { key: "execute_tests", label: "Execute Tests" },
     { key: "bug_management", label: "Bug Management" },
@@ -264,6 +275,7 @@ function App() {
   const showTemplates = canUseTemplates && activeFeature === "templates";
   const showBulkOperations = canRunBulkOps && activeFeature === "bulk_operations";
   const showImport = canImportTestCases && activeFeature === "import_test_cases";
+  const showTestSuites = canManageSuites && activeFeature === "test_suites";
   const showTestRuns = canManageTestRuns && activeFeature === "test_runs";
   const showExecute = canExecuteTests && activeFeature === "execute_tests";
   const showBugs =
@@ -449,6 +461,7 @@ function App() {
       canManageTestRuns ? listAvailableTestersApi() : Promise.resolve([]),
       canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
       canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
+      canManageSuites ? listSuitesApi() : Promise.resolve([]),
     ]);
     const rows = Array.isArray(caseRows) ? caseRows : [];
     setTestCases(rows);
@@ -465,6 +478,7 @@ function App() {
       if (!prev?.id) return prev;
       return bugList.find((item) => item.id === prev.id) || null;
     });
+    setSuites(Array.isArray(suiteRows) ? suiteRows : []);
     setIsRefreshing(false);
   };
 
@@ -672,6 +686,29 @@ function App() {
     setRunTesterIds([]);
     setSelectedRunId("");
     setRunDetails(null);
+  };
+
+  const resetSuiteFields = () => {
+    setSuiteName("");
+    setSuiteDescription("");
+    setSuiteModule("");
+    setSuiteType("STATIC");
+    setSuiteFilterModules([]);
+    setSuiteFilterPriorities([]);
+    setSuiteFilterTags([]);
+    setSuiteFilterAutoStatus("");
+    setSuiteStaticTestCases([]);
+    setSuiteFilterPreviewCount(null);
+    setEditingSuiteId("");
+    setEditSuiteName("");
+    setEditSuiteDescription("");
+    setEditSuiteModule("");
+    setEditSuiteFilterModules([]);
+    setEditSuiteFilterPriorities([]);
+    setEditSuiteFilterTags([]);
+    setEditSuiteFilterAutoStatus("");
+    setSelectedSuiteId("");
+    setSuiteDetails(null);
   };
 
   const resetQuickBugFields = () => {
@@ -2003,10 +2040,197 @@ function App() {
                 </button>
                 <select
                   className="input"
+                  multiple
+                  size={Math.min(Math.max(runTesterOptions.length, 3), 8)}
+                  value={runTesterIds}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                    setRunTesterIds(selected);
+                  }}
+                >
+                  {runTesterOptions.map((tester) => (
+                    <option key={tester.id} value={tester.id}>
+                      {tester.name} ({tester.email})
+                    </option>
+                  ))}
+                </select>
+                <div className="note">
+                  {runTesterIds.length > 0
+                    ? `${runTesterIds.length} tester(s) selected`
+                    : "Select one or more testers (optional)"}
+                </div>
+
+                <label className="fieldLabel">Select Test Cases for This Run</label>
+                <input
+                  className="input"
+                  placeholder="Search test cases by title, code, or module..."
+                  value={runTestCaseSearchQuery}
+                  onChange={(e) => setRunTestCaseSearchQuery(e.target.value)}
+                />
+                <select
+                  className="input"
+                  value={runTestCaseFilterModule}
+                  onChange={(e) => setRunTestCaseFilterModule(e.target.value)}
+                >
+                  <option value="">All Modules</option>
+                  {Array.from(new Set(testCases.map((tc: any) => tc.module))).map((module: any) => (
+                    <option key={module} value={module}>
+                      {module}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="note">
+                  {runSelectedTestCaseIds.length} test case(s) selected for this run
+                </div>
+
+                <div style={{ maxHeight: "400px", overflowY: "auto", border: "1px solid #ccc", padding: "8px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ position: "sticky", top: 0, backgroundColor: "#f0f0f0" }}>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd", width: "40px" }}>
+                          <input
+                            type="checkbox"
+                            checked={
+                              testCases
+                                .filter((tc: any) => {
+                                  const matchesSearch = runTestCaseSearchQuery
+                                    ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                      (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                      (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                                    : true;
+                                  const matchesModule = runTestCaseFilterModule
+                                    ? tc.module === runTestCaseFilterModule
+                                    : true;
+                                  return matchesSearch && matchesModule;
+                                })
+                                .every((tc: any) => runSelectedTestCaseIds.includes(tc.id)) &&
+                              testCases.filter((tc: any) => {
+                                const matchesSearch = runTestCaseSearchQuery
+                                  ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                                  : true;
+                                const matchesModule = runTestCaseFilterModule
+                                  ? tc.module === runTestCaseFilterModule
+                                  : true;
+                                return matchesSearch && matchesModule;
+                              }).length > 0
+                            }
+                            onChange={(e) => {
+                              const filtered = testCases.filter((tc: any) => {
+                                const matchesSearch = runTestCaseSearchQuery
+                                  ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                                  : true;
+                                const matchesModule = runTestCaseFilterModule
+                                  ? tc.module === runTestCaseFilterModule
+                                  : true;
+                                return matchesSearch && matchesModule;
+                              });
+                              if (e.target.checked) {
+                                setRunSelectedTestCaseIds(
+                                  Array.from(new Set([...runSelectedTestCaseIds, ...filtered.map((tc: any) => tc.id)]))
+                                );
+                              } else {
+                                const toRemove = new Set(filtered.map((tc: any) => tc.id));
+                                setRunSelectedTestCaseIds(
+                                  runSelectedTestCaseIds.filter((id) => !toRemove.has(id))
+                                );
+                              }
+                            }}
+                          />
+                        </th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Code</th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Title</th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Module</th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Priority</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {testCases
+                        .filter((tc: any) => {
+                          const matchesSearch = runTestCaseSearchQuery
+                            ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                              (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                              (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                            : true;
+                          const matchesModule = runTestCaseFilterModule
+                            ? tc.module === runTestCaseFilterModule
+                            : true;
+                          return matchesSearch && matchesModule;
+                        })
+                        .map((tc: any) => (
+                          <tr key={tc.id} style={{ borderBottom: "1px solid #eee" }}>
+                            <td style={{ padding: "8px", textAlign: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={runSelectedTestCaseIds.includes(tc.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setRunSelectedTestCaseIds([...runSelectedTestCaseIds, tc.id]);
+                                  } else {
+                                    setRunSelectedTestCaseIds(
+                                      runSelectedTestCaseIds.filter((id) => id !== tc.id)
+                                    );
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: "8px" }}>{tc.testCaseCode}</td>
+                            <td style={{ padding: "8px" }}>{tc.title}</td>
+                            <td style={{ padding: "8px" }}>{tc.module}</td>
+                            <td style={{ padding: "8px" }}>{tc.priority}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <button
+                  className="button"
+                  disabled={!runName.trim() || runSelectedTestCaseIds.length === 0}
+                  onClick={async () => {
+                    try {
+                      if (!runName.trim()) {
+                        alert("Run name is required");
+                        return;
+                      }
+                      if (runSelectedTestCaseIds.length === 0) {
+                        alert("Select at least one test case");
+                        return;
+                      }
+                      await createTestRunApi({
+                        name: runName,
+                        description: runDescription || undefined,
+                        targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
+                        targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
+                        testCaseIds: runSelectedTestCaseIds,
+                        testerIds: runTesterIds,
+                      });
+                      resetRunFields();
+                      await loadTestCaseData();
+                      alert("Test run created successfully!");
+                    } catch (error: any) {
+                      alert(error?.message || "Create test run failed");
+                    }
+                  }}
+                  style={{
+                    opacity: !runName.trim() || runSelectedTestCaseIds.length === 0 ? 0.5 : 1,
+                    cursor:
+                      !runName.trim() || runSelectedTestCaseIds.length === 0 ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Create Test Run ({runSelectedTestCaseIds.length} case{runSelectedTestCaseIds.length !== 1 ? "s" : ""})
+                </button>
+
+                <select
+                  className="input"
                   value={selectedRunId}
                   onChange={(e) => setSelectedRunId(e.target.value)}
                 >
-                  <option value="">Select Test Run</option>
+                  <option value="">Select Test Run to View</option>
                   {testRuns.map((run) => (
                     <option key={run.id} value={run.id}>
                       {run.name} ({run.progress?.completed || 0}/{run.progress?.total || 0})

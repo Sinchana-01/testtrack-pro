@@ -180,6 +180,8 @@ model TestSuite {
   name        String
   description String?
   module      String?
+  type        SuiteType      @default(STATIC)
+  filterJson  Json?
   createdBy   String
   projectId   String?
   parentSuiteId String?
@@ -200,6 +202,7 @@ model TestSuite {
   @@index([projectId])
   @@index([parentSuiteId])
   @@index([isArchived])
+  @@index([type])
 }
 
 model TestSuiteCase {
@@ -472,6 +475,11 @@ enum Role {
   ADMIN
   TESTER
   DEVELOPER
+}
+
+enum SuiteType {
+  STATIC
+  DYNAMIC
 }
 
 enum Priority {

@@ -718,6 +718,12 @@ const resolveTestCaseRefs = async (
 };
 
 router.use(authenticate);
+router.use((req: AuthRequest, res: Response, next) => {
+  if (req.user?.role === Role.ADMIN && !req.path.startsWith("/admin")) {
+    return res.status(403).json({ message: "Admins can only access admin module endpoints." });
+  }
+  return next();
+});
 
 /* =========================
    TESTER/SHARED TEST CASE FLOWS
@@ -1208,6 +1214,24 @@ router.get(
       orderBy: { createdAt: "desc" },
     });
     return res.json(templates);
+  }
+);
+
+router.delete(
+  "/testcase-templates/:id",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
+    if (!template) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+    if (template.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can only delete templates you created" });
+    }
+
+    await prisma.testCaseTemplate.delete({ where: { id: req.params.id } });
+    await writeAuditLog(req.user!.userId, "DELETE_TEST_CASE_TEMPLATE", "TestCaseTemplate", req.params.id);
+    return res.json({ message: "Template deleted" });
   }
 );
 
@@ -2693,7 +2717,14 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
   const parentSuiteId = asString(req.body.parentSuiteId) || null;
   const projectId = asString(req.body.projectId) || null;
   const moduleName = asString(req.body.module) || null;
+  const suiteType = asString(req.body.type) || "STATIC";
+  const filterJson = req.body.filterJson || null;
   const testCaseRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
+
+  // Validate suite type
+  if (suiteType !== "STATIC" && suiteType !== "DYNAMIC") {
+    return res.status(400).json({ message: "Suite type must be STATIC or DYNAMIC" });
+  }
 
   if (parentSuiteId) {
     const parentSuite = await prismaAny.testSuite.findUnique({ where: { id: parentSuiteId } });
@@ -2702,39 +2733,65 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
     }
   }
 
-  const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
-  if (resolvedRefs.unresolved.length > 0) {
-    return res.status(400).json({
-      message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
-    });
-  }
+  // For STATIC suites, validate test case references
+  if (suiteType === "STATIC") {
+    const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
+    if (resolvedRefs.unresolved.length > 0) {
+      return res.status(400).json({
+        message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
+      });
+    }
 
-  const created = await prisma.$transaction(async (tx) => {
-    const suite = await (tx as any).testSuite.create({
+    const created = await prisma.$transaction(async (tx) => {
+      const suite = await (tx as any).testSuite.create({
+        data: {
+          name,
+          description: asString(req.body.description) || null,
+          module: moduleName,
+          type: suiteType,
+          filterJson: null,
+          createdBy: req.user!.userId,
+          projectId,
+          parentSuiteId,
+        },
+      });
+
+      if (resolvedRefs.resolvedIds.length > 0) {
+        const rows = resolvedRefs.resolvedIds.map((testCaseId, idx) => ({
+          suiteId: suite.id,
+          testCaseId,
+          position: idx + 1,
+          addedBy: req.user!.userId,
+        }));
+        await (tx as any).testSuiteCase.createMany({ data: rows });
+      }
+      return suite;
+    });
+
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name, type: suiteType });
+    return res.status(201).json(created);
+  } else {
+    // For DYNAMIC suites, validate and store filter JSON
+    if (!filterJson || typeof filterJson !== "object") {
+      return res.status(400).json({ message: "DYNAMIC suite requires valid filterJson object" });
+    }
+
+    const created = await prismaAny.testSuite.create({
       data: {
         name,
         description: asString(req.body.description) || null,
         module: moduleName,
+        type: suiteType,
+        filterJson,
         createdBy: req.user!.userId,
         projectId,
         parentSuiteId,
       },
     });
 
-    if (resolvedRefs.resolvedIds.length > 0) {
-      const rows = resolvedRefs.resolvedIds.map((testCaseId, idx) => ({
-        suiteId: suite.id,
-        testCaseId,
-        position: idx + 1,
-        addedBy: req.user!.userId,
-      }));
-      await (tx as any).testSuiteCase.createMany({ data: rows });
-    }
-    return suite;
-  });
-
-  await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name });
-  return res.status(201).json(created);
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name, type: suiteType });
+    return res.status(201).json(created);
+  }
 });
 
 router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
@@ -2781,9 +2838,149 @@ router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequ
   return res.json(suite);
 });
 
+// GET /suites/:suiteId/test-cases - Return test cases for suite (handles STATIC and DYNAMIC)
+router.get("/suites/:suiteId/test-cases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await (prisma as any).testSuite.findUnique({
+    where: { id: req.params.suiteId },
+    select: { id: true, type: true, filterJson: true },
+  });
+  if (!suite) {
+    return res.status(404).json({ message: "Suite not found" });
+  }
+
+  if (suite.type === "STATIC") {
+    // For STATIC suites, return explicitly linked test cases in order
+    const suiteCases = await (prisma as any).testSuiteCase.findMany({
+      where: { suiteId: req.params.suiteId },
+      include: {
+        testCase: {
+          select: {
+            id: true,
+            testCaseCode: true,
+            title: true,
+            module: true,
+            priority: true,
+            status: true,
+            severity: true,
+            type: true,
+            isDeleted: true,
+          },
+        },
+      },
+      orderBy: { position: "asc" },
+    });
+
+    // Filter out soft-deleted test cases
+    const validCases = suiteCases
+      .filter((sc: any) => !sc.testCase.isDeleted)
+      .map((sc: any) => ({
+        ...sc.testCase,
+        position: sc.position,
+        suiteCaseId: sc.id,
+      }));
+
+    return res.json({
+      type: "STATIC",
+      testCases: validCases,
+      count: validCases.length,
+    });
+  } else if (suite.type === "DYNAMIC") {
+    // For DYNAMIC suites, build Prisma where clause from filterJson
+    const filter = suite.filterJson || {};
+    const where: any = { isDeleted: false };
+
+    if (filter.modules && Array.isArray(filter.modules) && filter.modules.length > 0) {
+      where.module = { in: filter.modules };
+    }
+
+    if (filter.priorities && Array.isArray(filter.priorities) && filter.priorities.length > 0) {
+      where.priority = { in: filter.priorities };
+    }
+
+    if (filter.statuses && Array.isArray(filter.statuses) && filter.statuses.length > 0) {
+      where.status = { in: filter.statuses };
+    }
+
+    if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+      where.tags = { hasSome: filter.tags };
+    }
+
+    if (filter.automationStatus) {
+      where.automationStatus = filter.automationStatus;
+    }
+
+    const testCases = await (prisma as any).testCase.findMany({
+      where,
+      select: {
+        id: true,
+        testCaseCode: true,
+        title: true,
+        module: true,
+        priority: true,
+        status: true,
+        severity: true,
+        type: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return res.json({
+      type: "DYNAMIC",
+      filter,
+      testCases,
+      count: testCases.length,
+    });
+  }
+
+  return res.status(400).json({ message: "Invalid suite type" });
+});
+
+// POST /suites/preview-filter - Preview test cases matching a dynamic filter
+router.post("/suites/preview-filter", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const filterJson = req.body.filterJson || {};
+
+  if (!filterJson || typeof filterJson !== "object") {
+    return res.status(400).json({ message: "filterJson must be a valid object" });
+  }
+
+  const where: any = { isDeleted: false };
+
+  if (filterJson.modules && Array.isArray(filterJson.modules) && filterJson.modules.length > 0) {
+    where.module = { in: filterJson.modules };
+  }
+
+  if (filterJson.priorities && Array.isArray(filterJson.priorities) && filterJson.priorities.length > 0) {
+    where.priority = { in: filterJson.priorities };
+  }
+
+  if (filterJson.statuses && Array.isArray(filterJson.statuses) && filterJson.statuses.length > 0) {
+    where.status = { in: filterJson.statuses };
+  }
+
+  if (filterJson.tags && Array.isArray(filterJson.tags) && filterJson.tags.length > 0) {
+    where.tags = { hasSome: filterJson.tags };
+  }
+
+  if (filterJson.automationStatus) {
+    where.automationStatus = filterJson.automationStatus;
+  }
+
+  const count = await (prisma as any).testCase.count({ where });
+
+  return res.json({
+    filter: filterJson,
+    matchingCount: count,
+  });
+});
+
 router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
+
+  // Prevent type changes after creation
+  if (req.body.type !== undefined && asString(req.body.type) !== suite.type) {
+    return res.status(400).json({ message: "Suite type cannot be changed after creation" });
+  }
 
   const parentSuiteId = req.body.parentSuiteId !== undefined ? asString(req.body.parentSuiteId) || null : undefined;
   if (parentSuiteId !== undefined) {
@@ -2807,15 +3004,26 @@ router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRe
     }
   }
 
+  const updateData: any = {
+    name: asString(req.body.name) || undefined,
+    description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
+    module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
+    projectId: req.body.projectId !== undefined ? asString(req.body.projectId) || null : undefined,
+    parentSuiteId,
+  };
+
+  // Allow updating filterJson for DYNAMIC suites
+  if (suite.type === "DYNAMIC" && req.body.filterJson !== undefined) {
+    if (req.body.filterJson && typeof req.body.filterJson === "object") {
+      updateData.filterJson = req.body.filterJson;
+    } else {
+      return res.status(400).json({ message: "filterJson must be a valid object for DYNAMIC suite" });
+    }
+  }
+
   const updated = await prismaAny.testSuite.update({
     where: { id: suite.id },
-    data: {
-      name: asString(req.body.name) || undefined,
-      description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
-      module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
-      projectId: req.body.projectId !== undefined ? asString(req.body.projectId) || null : undefined,
-      parentSuiteId,
-    },
+    data: updateData,
   });
 
   await writeAuditLog(req.user!.userId, "UPDATE_TEST_SUITE", "TestSuite", updated.id);
@@ -2898,6 +3106,10 @@ router.patch(
     const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
     if (!suite) return res.status(404).json({ message: "Suite not found" });
     if (suite.isArchived) return res.status(400).json({ message: "Cannot reorder archived suite" });
+    if (suite.type !== "STATIC") {
+      return res.status(400).json({ message: "Cannot reorder DYNAMIC suite" });
+    }
+
     const orderedRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
     if (!orderedRefs.length) return res.status(400).json({ message: "testCaseIds are required" });
     const uniqueRefs = [...new Set(orderedRefs)];
@@ -2946,12 +3158,16 @@ router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: A
         name: asString(req.body.name) || `${source.name} (Clone)`,
         description: source.description,
         module: source.module,
+        type: source.type,
+        filterJson: source.type === "DYNAMIC" ? source.filterJson : null,
         createdBy: req.user!.userId,
         projectId: source.projectId,
         parentSuiteId: source.parentSuiteId,
       },
     });
-    if (source.suiteCases.length > 0) {
+
+    // For STATIC suites, duplicate suiteCases with order preserved
+    if (source.type === "STATIC" && source.suiteCases.length > 0) {
       await (tx as any).testSuiteCase.createMany({
         data: source.suiteCases.map((item: any, idx: number) => ({
           suiteId: created.id,
@@ -2961,10 +3177,14 @@ router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: A
         })),
       });
     }
+    // For DYNAMIC suites, filterJson is already set, no need to create suiteCases
+
     return created;
   });
+
   await writeAuditLog(req.user!.userId, "CLONE_TEST_SUITE", "TestSuite", clone.id, {
     sourceSuiteId: source.id,
+    suiteType: source.type,
   });
   return res.status(201).json(clone);
 });
@@ -3995,6 +4215,13 @@ router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthReque
   return res.status(201).json(project);
 });
 
+router.get("/admin/projects", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const projects = await prisma.project.findMany({
+    orderBy: { updatedAt: "desc" },
+  });
+  return res.json(projects);
+});
+
 router.patch("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const project = await prisma.project.update({
     where: { id: req.params.id },
@@ -4044,6 +4271,16 @@ router.post("/admin/system-config", authorizeRoles(Role.ADMIN), async (req: Auth
   return res.json(config);
 });
 
+router.get("/admin/system-config", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const configs = await prisma.systemConfig.findMany({
+    orderBy: { key: "asc" },
+    include: {
+      updater: { select: { id: true, name: true, email: true, role: true } },
+    },
+  });
+  return res.json(configs);
+});
+
 router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const backup = await prisma.backupJob.create({
     data: {
@@ -4063,6 +4300,17 @@ router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthReques
 
   await writeAuditLog(req.user!.userId, "ADMIN_TRIGGER_BACKUP", "BackupJob", completed.id);
   return res.status(201).json(completed);
+});
+
+router.get("/admin/backups", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const backups = await prisma.backupJob.findMany({
+    orderBy: { startedAt: "desc" },
+    include: {
+      triggerUser: { select: { id: true, name: true, email: true, role: true } },
+    },
+    take: 100,
+  });
+  return res.json(backups);
 });
 
 export default router;

@@ -485,6 +485,18 @@ export async function getSuiteApi(id: string) {
   return authJson(`/suites/${id}`);
 }
 
+export async function getSuiteTestCasesApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/test-cases`);
+}
+
+export async function previewDynamicFilterApi(filterJson: Record<string, unknown>) {
+  return authJson("/suites/preview-filter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filterJson }),
+  });
+}
+
 export async function updateSuiteApi(id: string, payload: Record<string, unknown>) {
   return authJson(`/suites/${id}`, {
     method: "PATCH",
