@@ -4157,6 +4157,18 @@ router.patch("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthReq
 });
 
 router.delete("/admin/users/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  if (req.params.id === req.user!.userId) {
+    return res.status(400).json({ message: "Admin cannot delete own account" });
+  }
+
+  const existing = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!existing) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  await prisma.user.delete({ where: { id: req.params.id } });
+  await writeAuditLog(req.user!.userId, "ADMIN_DELETE_USER", "User", req.params.id);
+  return res.json({ message: "User deleted" });
   if (req.user!.userId === req.params.id) {
     return res.status(400).json({ message: "Admin cannot delete their own account" });
   }

@@ -69,7 +69,6 @@ type DashboardFeature =
   | "bulk_operations"
   | "import_test_cases"
   | "test_runs"
-  | "test_suites"
   | "execute_tests"
   | "bug_management"
   | "test_cases"
@@ -153,32 +152,8 @@ function App() {
   const [runEndDate, setRunEndDate] = useState("");
   const [runTesterIds, setRunTesterIds] = useState<string[]>([]);
   const [runTesterOptions, setRunTesterOptions] = useState<any[]>([]);
-  const [runSelectedTestCaseIds, setRunSelectedTestCaseIds] = useState<string[]>([]);
-  const [runTestCaseSearchQuery, setRunTestCaseSearchQuery] = useState("");
-  const [runTestCaseFilterModule, setRunTestCaseFilterModule] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [runDetails, setRunDetails] = useState<any>(null);
-  const [suites, setSuites] = useState<any[]>([]);
-  const [suiteName, setSuiteName] = useState("");
-  const [suiteDescription, setSuiteDescription] = useState("");
-  const [suiteModule, setSuiteModule] = useState("");
-  const [suiteType, setSuiteType] = useState("STATIC");
-  const [suiteFilterModules, setSuiteFilterModules] = useState<string[]>([]);
-  const [suiteFilterPriorities, setSuiteFilterPriorities] = useState<string[]>([]);
-  const [suiteFilterTags, setSuiteFilterTags] = useState<string[]>([]);
-  const [suiteFilterAutoStatus, setSuiteFilterAutoStatus] = useState("");
-  const [suiteStaticTestCases, setSuiteStaticTestCases] = useState<string[]>([]);
-  const [suiteFilterPreviewCount, setSuiteFilterPreviewCount] = useState<number | null>(null);
-  const [editingSuiteId, setEditingSuiteId] = useState("");
-  const [editSuiteName, setEditSuiteName] = useState("");
-  const [editSuiteDescription, setEditSuiteDescription] = useState("");
-  const [editSuiteModule, setEditSuiteModule] = useState("");
-  const [editSuiteFilterModules, setEditSuiteFilterModules] = useState<string[]>([]);
-  const [editSuiteFilterPriorities, setEditSuiteFilterPriorities] = useState<string[]>([]);
-  const [editSuiteFilterTags, setEditSuiteFilterTags] = useState<string[]>([]);
-  const [editSuiteFilterAutoStatus, setEditSuiteFilterAutoStatus] = useState("");
-  const [selectedSuiteId, setSelectedSuiteId] = useState("");
-  const [suiteDetails, setSuiteDetails] = useState<any>(null);
   const [executionCaseId, setExecutionCaseId] = useState("");
   const [executionRunId, setExecutionRunId] = useState("");
   const [executionId, setExecutionId] = useState("");
@@ -479,7 +454,7 @@ function App() {
       severity: bugFilterSeverity,
       sortBy: bugSortBy,
     };
-    const [caseRows, templateRows, runRows, testerRows, executionRows, bugRows, suiteRows] = await Promise.all([
+    const [caseRows, templateRows, runRows, testerRows, executionRows, bugRows] = await Promise.all([
       getTestCasesApi(),
       listTemplatesApi(),
       canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
@@ -548,6 +523,42 @@ function App() {
     setQuickBugTitle("");
     setQuickBugDescription("");
     setQuickBugSeverity("MEDIUM");
+  };
+
+  const resetBugPanel = () => {
+    setBugs([]);
+    setSelectedBugId("");
+    setSelectedBug(null);
+    setBugComments([]);
+    setBugCommentThreads([]);
+    setBugCreateTitle("");
+    setBugCreateDescription("");
+    setBugCreateStepsToReproduce("");
+    setBugCreateExpectedBehavior("");
+    setBugCreateActualBehavior("");
+    setBugCreateSeverity("MEDIUM");
+    setBugCreatePriority("P3_MEDIUM");
+    setBugCreateEnvironment("");
+    setBugCreateAffectedVersion("");
+    setBugCreateAssignedTo("");
+    setBugCreateTestCaseId("");
+    setBugCreateExecutionId("");
+    setBugCreateDueDate("");
+    setBugCreateAttachmentsText("");
+    setBugTransitionToStatus("OPEN");
+    setBugTransitionReason("");
+    setBugTransitionDuplicateOf("");
+    setBugResolveAction("START_PROGRESS");
+    setBugResolveFixNotes("");
+    setBugResolveCommitLink("");
+    setBugCommentText("");
+    setBugCommentParentId("");
+    setEditingCommentId("");
+    setEditingCommentText("");
+    setBugFilterStatus("");
+    setBugFilterPriority("");
+    setBugFilterSeverity("");
+    setBugSortBy("");
   };
 
   const resetBugPanel = () => {
@@ -673,9 +684,6 @@ function App() {
     setRunStartDate("");
     setRunEndDate("");
     setRunTesterIds([]);
-    setRunSelectedTestCaseIds([]);
-    setRunTestCaseSearchQuery("");
-    setRunTestCaseFilterModule("");
     setSelectedRunId("");
     setRunDetails(null);
   };
@@ -1978,7 +1986,58 @@ function App() {
                   value={runEndDate}
                   onChange={(e) => setRunEndDate(e.target.value)}
                 />
-                <label className="fieldLabel">Assign Testers (Optional)</label>
+                <label className="fieldLabel">Assign Testers</label>
+                <select
+                  className="input"
+                  multiple
+                  size={Math.min(Math.max(runTesterOptions.length, 3), 8)}
+                  value={runTesterIds}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                    setRunTesterIds(selected);
+                  }}
+                >
+                  {runTesterOptions.map((tester) => (
+                    <option key={tester.id} value={tester.id}>
+                      {tester.name} ({tester.email})
+                    </option>
+                  ))}
+                </select>
+                <div className="note">
+                  {runTesterIds.length > 0
+                    ? `${runTesterIds.length} tester(s) selected`
+                    : "Select one or more testers (optional)"}
+                </div>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!runName.trim()) {
+                        alert("Run name is required");
+                        return;
+                      }
+                      if (selectedIds.length === 0) {
+                        alert("Select at least one test case from the list section");
+                        return;
+                      }
+                      await createTestRunApi({
+                        name: runName,
+                        description: runDescription || undefined,
+                        targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
+                        targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
+                        testCaseIds: selectedIds,
+                        testerIds: runTesterIds,
+                      });
+                      resetRunFields();
+                      await loadTestCaseData();
+                      alert("Test run created");
+                    } catch (error: any) {
+                      alert(error?.message || "Create test run failed");
+                    }
+                  }}
+                >
+                  Create Test Run
+                </button>
                 <select
                   className="input"
                   multiple
@@ -2203,323 +2262,6 @@ function App() {
                       <strong>Progress:</strong> {runDetails.progress?.completed || 0}/
                       {runDetails.progress?.total || 0} ({runDetails.progress?.percent || 0}%)
                     </div>
-                  </div>
-                )}
-              </section>
-              )}
-
-              {showTestSuites && (
-              <section className="panel">
-                <h3>Test Suite Management</h3>
-                <div>{suites.length} suite(s) available</div>
-                
-                <div style={{ 
-                  backgroundColor: editingSuiteId ? "#fff3cd" : "#f8f9fa",
-                  padding: "16px",
-                  borderRadius: "4px",
-                  marginTop: "16px",
-                  border: editingSuiteId ? "2px solid #ff9800" : "1px solid #dee2e6"
-                }}>
-                  <h4>{editingSuiteId ? "✏️ Edit Test Suite" : "➕ Create New Test Suite"}</h4>
-                  <input
-                    className="input"
-                    placeholder="Suite Name"
-                    value={editingSuiteId ? editSuiteName : suiteName}
-                  onChange={(e) => editingSuiteId ? setEditSuiteName(e.target.value) : setSuiteName(e.target.value)}
-                  disabled={!!editingSuiteId}
-                />
-                <input
-                  className="input"
-                  placeholder="Description"
-                  value={editingSuiteId ? editSuiteDescription : suiteDescription}
-                  onChange={(e) => editingSuiteId ? setEditSuiteDescription(e.target.value) : setSuiteDescription(e.target.value)}
-                />
-                <input
-                  className="input"
-                  placeholder="Module (optional)"
-                  value={editingSuiteId ? editSuiteModule : suiteModule}
-                  onChange={(e) => editingSuiteId ? setEditSuiteModule(e.target.value) : setSuiteModule(e.target.value)}
-                />
-
-                {!editingSuiteId && (
-                  <>
-                    <label className="fieldLabel">Suite Type</label>
-                    <select
-                      className="input"
-                      value={suiteType}
-                      onChange={(e) => setSuiteType(e.target.value)}
-                    >
-                      <option value="STATIC">STATIC - Fixed Test Cases</option>
-                      <option value="DYNAMIC">DYNAMIC - Filtered Test Cases</option>
-                    </select>
-                  </>
-                )}
-
-                {suiteType === "STATIC" && !editingSuiteId && (
-                  <>
-                    <label className="fieldLabel">Select Test Cases for Suite</label>
-                    <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #ccc", padding: "8px" }}>
-                      {testCases.map((tc: any) => (
-                        <div key={tc.id} style={{ display: "flex", alignItems: "center", marginBottom: "8px" }}>
-                          <input
-                            type="checkbox"
-                            checked={suiteStaticTestCases.includes(tc.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSuiteStaticTestCases([...suiteStaticTestCases, tc.id]);
-                              } else {
-                                setSuiteStaticTestCases(suiteStaticTestCases.filter((id) => id !== tc.id));
-                              }
-                            }}
-                          />
-                          <span style={{ marginLeft: "8px" }}>{tc.testCaseCode || "N/A"} - {tc.title}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="note">{suiteStaticTestCases.length} test case(s) selected</div>
-                  </>
-                )}
-
-                {suiteType === "DYNAMIC" && !editingSuiteId && (
-                  <>
-                    <label className="fieldLabel">Filter Criteria for Dynamic Suite</label>
-                    <label style={{ fontSize: "0.9em" }}>Modules (multi-select)</label>
-                    <select
-                      className="input"
-                      multiple
-                      size={3}
-                      value={suiteFilterModules}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                        setSuiteFilterModules(selected);
-                      }}
-                    >
-                      {Array.from(new Set(testCases.map((tc: any) => tc.module).filter(Boolean))).map((mod: any) => (
-                        <option key={mod} value={mod}>{mod}</option>
-                      ))}
-                    </select>
-
-                    <label style={{ fontSize: "0.9em", marginTop: "8px", display: "block" }}>Priorities</label>
-                    <select
-                      className="input"
-                      multiple
-                      size={3}
-                      value={suiteFilterPriorities}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                        setSuiteFilterPriorities(selected);
-                      }}
-                    >
-                      {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((pri) => (
-                        <option key={pri} value={pri}>{pri}</option>
-                      ))}
-                    </select>
-
-                    {suiteFilterPreviewCount !== null && (
-                      <div className="note">
-                        <strong>Preview:</strong> {suiteFilterPreviewCount} test case(s) match this filter
-                      </div>
-                    )}
-
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          const filterJson = {
-                            modules: suiteFilterModules.length > 0 ? suiteFilterModules : undefined,
-                            priorities: suiteFilterPriorities.length > 0 ? suiteFilterPriorities : undefined,
-                            tags: suiteFilterTags.length > 0 ? suiteFilterTags : undefined,
-                            ...(suiteFilterAutoStatus && { automationStatus: suiteFilterAutoStatus }),
-                          };
-                          const result = await previewDynamicFilterApi(filterJson);
-                          setSuiteFilterPreviewCount(result.matchingCount || 0);
-                        } catch (error: any) {
-                          alert(error?.message || "Preview failed");
-                        }
-                      }}
-                      style={{ marginTop: "8px" }}
-                    >
-                      Preview Filter
-                    </button>
-                  </>
-                )}
-
-                <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
-                  <button
-                    className="button"
-                    onClick={async () => {
-                      try {
-                        const fieldName = editingSuiteId ? editSuiteName : suiteName;
-                        if (!fieldName.trim()) {
-                          alert("Suite name is required");
-                          return;
-                        }
-
-                        if (editingSuiteId) {
-                          // EDIT MODE
-                          await updateSuiteApi(editingSuiteId, {
-                            description: editSuiteDescription || null,
-                            module: editSuiteModule || null,
-                          });
-                          resetSuiteFields();
-                          const suiteList = await listSuitesApi();
-                          setSuites(Array.isArray(suiteList) ? suiteList : []);
-                          alert("Test suite updated successfully!");
-                        } else {
-                          // CREATE MODE
-                          if (suiteType === "STATIC" && suiteStaticTestCases.length === 0) {
-                            alert("Select at least one test case for STATIC suite");
-                            return;
-                          }
-
-                          if (suiteType === "DYNAMIC" && suiteFilterPreviewCount === null) {
-                            alert("Preview filter first to ensure there are matching test cases");
-                            return;
-                          }
-
-                          const filterJson = {
-                            modules: suiteFilterModules.length > 0 ? suiteFilterModules : undefined,
-                            priorities: suiteFilterPriorities.length > 0 ? suiteFilterPriorities : undefined,
-                            tags: suiteFilterTags.length > 0 ? suiteFilterTags : undefined,
-                            ...(suiteFilterAutoStatus && { automationStatus: suiteFilterAutoStatus }),
-                          };
-
-                          await createSuiteApi({
-                            name: suiteName,
-                            description: suiteDescription || undefined,
-                            module: suiteModule || undefined,
-                            type: suiteType,
-                            testCaseIds: suiteType === "STATIC" ? suiteStaticTestCases : [],
-                            filterJson: suiteType === "DYNAMIC" ? filterJson : null,
-                          });
-
-                          resetSuiteFields();
-                          const suiteList = await listSuitesApi();
-                          setSuites(Array.isArray(suiteList) ? suiteList : []);
-                          alert("Test suite created successfully!");
-                        }
-                      } catch (error: any) {
-                        alert(error?.message || (editingSuiteId ? "Update suite failed" : "Create suite failed"));
-                      }
-                    }}
-                  >
-                    {editingSuiteId ? "Save Changes" : "Create Test Suite"}
-                  </button>
-                  {editingSuiteId && (
-                    <button
-                      className="button"
-                      style={{ backgroundColor: "#666" }}
-                      onClick={() => resetSuiteFields()}
-                    >
-                      Cancel
-                    </button>
-                  )}
-                </div>
-                </div>
-
-                {!editingSuiteId && (
-                  <>
-                    <h4 style={{ marginTop: "24px" }}>Test Suites List</h4>
-                    <div style={{ maxHeight: "400px", overflowY: "auto" }}>
-                      {suites.map((suite: any) => (
-                        <div key={suite.id} style={{ padding: "8px", border: "1px solid #ddd", marginBottom: "8px" }}>
-                          <div><strong>{suite.name}</strong> ({suite.type})</div>
-                          {suite.description && <div style={{ fontSize: "0.9em" }}>{suite.description}</div>}
-                          <div style={{ fontSize: "0.85em", color: "#666" }}>
-                        Cases: {suite._count?.suiteCases || 0} | Module: {suite.module || "N/A"}
-                      </div>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const detail = await getSuiteApi(suite.id);
-                            setSuiteDetails(detail);
-                            setSelectedSuiteId(suite.id);
-                          } catch (error: any) {
-                            alert(error?.message || "Load suite failed");
-                          }
-                        }}
-                        style={{ marginTop: "4px", marginRight: "4px" }}
-                      >
-                        View
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={() => {
-                          setEditingSuiteId(suite.id);
-                          setEditSuiteName(suite.name);
-                          setEditSuiteDescription(suite.description || "");
-                          setEditSuiteModule(suite.module || "");
-                        }}
-                        style={{ marginTop: "4px", marginRight: "4px" }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            if (suite.isArchived) {
-                              await restoreSuiteApi(suite.id);
-                              alert("Suite restored");
-                            } else {
-                              await archiveSuiteApi(suite.id);
-                              alert("Suite archived");
-                            }
-                            const suiteList = await listSuitesApi();
-                            setSuites(Array.isArray(suiteList) ? suiteList : []);
-                          } catch (error: any) {
-                            alert(error?.message || "Operation failed");
-                          }
-                        }}
-                        style={{ marginTop: "4px" }}
-                      >
-                        {suite.isArchived ? "Restore" : "Archive"}
-                      </button>
-                    </div>
-                  ))}
-                    </div>
-                  </>
-                )}
-
-                {suiteDetails && selectedSuiteId && (
-                  <div style={{ marginTop: "24px", padding: "16px", border: "2px solid #007bff", borderRadius: "4px", backgroundColor: "#f0f8ff" }}>
-                    <h4>Suite Details</h4>
-                    <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: "12px", marginBottom: "16px" }}>
-                      <strong>ID:</strong>
-                      <span>{suiteDetails.id}</span>
-                      <strong>Name:</strong>
-                      <span>{suiteDetails.name}</span>
-                      <strong>Description:</strong>
-                      <span>{suiteDetails.description || "N/A"}</span>
-                      <strong>Type:</strong>
-                      <span>{suiteDetails.type}</span>
-                      <strong>Module:</strong>
-                      <span>{suiteDetails.module || "N/A"}</span>
-                      <strong>Test Cases:</strong>
-                      <span>{suiteDetails._count?.suiteCases || 0}</span>
-                      <strong>Status:</strong>
-                      <span>{suiteDetails.isArchived ? "Archived" : "Active"}</span>
-                      <strong>Created:</strong>
-                      <span>{new Date(suiteDetails.createdAt).toLocaleString()}</span>
-                    </div>
-                    {suiteDetails.type === "DYNAMIC" && suiteDetails.filterJson && (
-                      <div style={{ marginBottom: "16px" }}>
-                        <strong>Filter Criteria:</strong>
-                        <pre style={{ backgroundColor: "#fff", padding: "8px", borderRadius: "4px", overflow: "auto" }}>
-                          {JSON.stringify(suiteDetails.filterJson, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                    <button
-                      className="button small"
-                      onClick={() => {
-                        setSuiteDetails(null);
-                        setSelectedSuiteId("");
-                      }}
-                    >
-                      Close
-                    </button>
                   </div>
                 )}
               </section>
