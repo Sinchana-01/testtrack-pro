@@ -330,6 +330,10 @@ export async function listTestRunsApi() {
   return authJson("/test-runs");
 }
 
+export async function listAvailableTestersApi() {
+  return authJson("/test-runs/available-testers");
+}
+
 export async function getTestRunApi(id: string) {
   return authJson(`/test-runs/${id}`);
 }
@@ -479,6 +483,18 @@ export async function listSuitesApi(params?: Record<string, string>) {
 
 export async function getSuiteApi(id: string) {
   return authJson(`/suites/${id}`);
+}
+
+export async function getSuiteTestCasesApi(suiteId: string) {
+  return authJson(`/suites/${suiteId}/test-cases`);
+}
+
+export async function previewDynamicFilterApi(filterJson: Record<string, unknown>) {
+  return authJson("/suites/preview-filter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filterJson }),
+  });
 }
 
 export async function updateSuiteApi(id: string, payload: Record<string, unknown>) {

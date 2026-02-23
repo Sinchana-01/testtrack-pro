@@ -6,11 +6,10 @@ import {
   createBugApi,
   createBugCommentApi,
   createBugFromExecutionApi,
-  createSuiteApi,
-  createAdminUserApi,
   createTestRunApi,
-  deleteExecutionEvidenceApi,
+  createAdminUserApi,
   deleteAdminUserApi,
+  deleteExecutionEvidenceApi,
   deleteBugCommentApi,
   createFromTemplateApi,
   createTemplateApi,
@@ -27,8 +26,7 @@ import {
   listExecutionEvidenceApi,
   listExecutionReportsApi,
   listAdminUsersApi,
-  listSuiteExecutionsApi,
-  listSuitesApi,
+  listAvailableTestersApi,
   getTestCasesApi,
   importTestCasesApi,
   listTemplatesApi,
@@ -45,24 +43,22 @@ import {
   setSessionTokens,
   startExecutionTimerApi,
   startExecutionApi,
-  startSuiteExecutionApi,
   stopExecutionTimerApi,
   quickUpdateDeveloperBugStatusApi,
   uploadExecutionEvidenceApi,
   updateBugWorkflowApi,
-  addSuiteTestCasesApi,
-  archiveSuiteApi,
-  cloneSuiteApi,
-  deleteSuiteApi,
-  getSuiteApi,
-  getSuiteExecutionApi,
-  removeSuiteTestCaseApi,
-  reorderSuiteTestCasesApi,
-  restoreSuiteApi,
   updateAdminRoleApi,
   updateAdminUserApi,
-  updateSuiteApi,
   updateTestCaseApi,
+  createSuiteApi,
+  listSuitesApi,
+  getSuiteApi,
+  getSuiteTestCasesApi,
+  updateSuiteApi,
+  cloneSuiteApi,
+  archiveSuiteApi,
+  restoreSuiteApi,
+  previewDynamicFilterApi,
 } from "./api";
 import "./App.css";
 
@@ -73,7 +69,7 @@ type DashboardFeature =
   | "bulk_operations"
   | "import_test_cases"
   | "test_runs"
-  | "suite_management"
+  | "test_suites"
   | "execute_tests"
   | "bug_management"
   | "test_cases"
@@ -155,34 +151,34 @@ function App() {
   const [runDescription, setRunDescription] = useState("");
   const [runStartDate, setRunStartDate] = useState("");
   const [runEndDate, setRunEndDate] = useState("");
-  const [runTesterIdsText, setRunTesterIdsText] = useState("");
+  const [runTesterIds, setRunTesterIds] = useState<string[]>([]);
+  const [runTesterOptions, setRunTesterOptions] = useState<any[]>([]);
+  const [runSelectedTestCaseIds, setRunSelectedTestCaseIds] = useState<string[]>([]);
+  const [runTestCaseSearchQuery, setRunTestCaseSearchQuery] = useState("");
+  const [runTestCaseFilterModule, setRunTestCaseFilterModule] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [runDetails, setRunDetails] = useState<any>(null);
   const [suites, setSuites] = useState<any[]>([]);
   const [suiteName, setSuiteName] = useState("");
   const [suiteDescription, setSuiteDescription] = useState("");
   const [suiteModule, setSuiteModule] = useState("");
-  const [suiteProjectId, setSuiteProjectId] = useState("");
-  const [suiteParentId, setSuiteParentId] = useState("");
-  const [suiteCreateCaseSelection, setSuiteCreateCaseSelection] = useState<string[]>([]);
-  const [suiteAddCaseSelection, setSuiteAddCaseSelection] = useState<string[]>([]);
-  const [suiteCreateCaseSearch, setSuiteCreateCaseSearch] = useState("");
-  const [suiteAddCaseSearch, setSuiteAddCaseSearch] = useState("");
+  const [suiteType, setSuiteType] = useState("STATIC");
+  const [suiteFilterModules, setSuiteFilterModules] = useState<string[]>([]);
+  const [suiteFilterPriorities, setSuiteFilterPriorities] = useState<string[]>([]);
+  const [suiteFilterTags, setSuiteFilterTags] = useState<string[]>([]);
+  const [suiteFilterAutoStatus, setSuiteFilterAutoStatus] = useState("");
+  const [suiteStaticTestCases, setSuiteStaticTestCases] = useState<string[]>([]);
+  const [suiteFilterPreviewCount, setSuiteFilterPreviewCount] = useState<number | null>(null);
+  const [editingSuiteId, setEditingSuiteId] = useState("");
+  const [editSuiteName, setEditSuiteName] = useState("");
+  const [editSuiteDescription, setEditSuiteDescription] = useState("");
+  const [editSuiteModule, setEditSuiteModule] = useState("");
+  const [editSuiteFilterModules, setEditSuiteFilterModules] = useState<string[]>([]);
+  const [editSuiteFilterPriorities, setEditSuiteFilterPriorities] = useState<string[]>([]);
+  const [editSuiteFilterTags, setEditSuiteFilterTags] = useState<string[]>([]);
+  const [editSuiteFilterAutoStatus, setEditSuiteFilterAutoStatus] = useState("");
   const [selectedSuiteId, setSelectedSuiteId] = useState("");
   const [suiteDetails, setSuiteDetails] = useState<any>(null);
-  const [suiteReorderIds, setSuiteReorderIds] = useState<string[]>([]);
-  const [suiteCloneName, setSuiteCloneName] = useState("");
-  const [suiteExecutionMode, setSuiteExecutionMode] = useState("SEQUENTIAL");
-  const [suiteExecutionTesterIdsText, setSuiteExecutionTesterIdsText] = useState("");
-  const [suiteExecutionId, setSuiteExecutionId] = useState("");
-  const [suiteExecutionDetails, setSuiteExecutionDetails] = useState<any>(null);
-  const [suiteExecutionHistory, setSuiteExecutionHistory] = useState<any[]>([]);
-  const [activeSuiteExecutionContext, setActiveSuiteExecutionContext] = useState<{
-    suiteExecutionId: string;
-    mode: string;
-    runId: string;
-  } | null>(null);
-  const [showArchivedSuites, setShowArchivedSuites] = useState(false);
   const [executionCaseId, setExecutionCaseId] = useState("");
   const [executionRunId, setExecutionRunId] = useState("");
   const [executionId, setExecutionId] = useState("");
@@ -229,6 +225,15 @@ function App() {
   const [bugCreateExecutionId, setBugCreateExecutionId] = useState("");
   const [bugCreateDueDate, setBugCreateDueDate] = useState("");
   const [bugCreateAttachmentsText, setBugCreateAttachmentsText] = useState("");
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminCreateName, setAdminCreateName] = useState("");
+  const [adminCreateEmail, setAdminCreateEmail] = useState("");
+  const [adminCreatePassword, setAdminCreatePassword] = useState("");
+  const [adminCreateRole, setAdminCreateRole] = useState("");
+  const [adminEditUserId, setAdminEditUserId] = useState("");
+  const [adminEditName, setAdminEditName] = useState("");
+  const [adminEditRole, setAdminEditRole] = useState("TESTER");
+  const [adminEditActive, setAdminEditActive] = useState(true);
   const [bugTransitionToStatus, setBugTransitionToStatus] = useState("OPEN");
   const [bugTransitionReason, setBugTransitionReason] = useState("");
   const [bugTransitionDuplicateOf, setBugTransitionDuplicateOf] = useState("");
@@ -242,12 +247,6 @@ function App() {
   const [editingCommentId, setEditingCommentId] = useState("");
   const [editingCommentText, setEditingCommentText] = useState("");
   const [quickStatusByBugId, setQuickStatusByBugId] = useState<Record<string, string>>({});
-  const [adminUsers, setAdminUsers] = useState<any[]>([]);
-  const [adminCreateName, setAdminCreateName] = useState("");
-  const [adminCreateEmail, setAdminCreateEmail] = useState("");
-  const [adminCreatePassword, setAdminCreatePassword] = useState("");
-  const [adminCreateRole, setAdminCreateRole] = useState("");
-  const [adminUserSavingId, setAdminUserSavingId] = useState("");
   const [navOpen, setNavOpen] = useState(false);
   const [activeFeature, setActiveFeature] = useState<DashboardFeature | "none">("none");
   const roleName = currentRole.toUpperCase();
@@ -259,10 +258,10 @@ function App() {
   const canUseTemplates = isTester;
   const canRunBulkOps = isTester;
   const canImportTestCases = isTester;
-  const canManageSuites = isTester;
   const canSeeSelectionControls = isTester;
   const canExecuteTests = isTester || isAdmin;
   const canManageTestRuns = isTester || isAdmin;
+  const canManageSuites = isTester || isAdmin;
   const canViewBugs = isTester || isDeveloper || isAdmin;
   const canCreateBugs = isTester || isAdmin;
   const canTransitionBugs = isTester || isDeveloper || isAdmin;
@@ -272,8 +271,8 @@ function App() {
     { key: "templates", label: "Templates" },
     { key: "bulk_operations", label: "Bulk Operations" },
     { key: "import_test_cases", label: "Import Test Cases" },
+    { key: "test_suites", label: "Test Suites" },
     { key: "test_runs", label: "Test Run Management" },
-    { key: "suite_management", label: "Suite Management" },
     { key: "execute_tests", label: "Execute Tests" },
     { key: "bug_management", label: "Bug Management" },
     { key: "test_cases", label: "Test Cases" },
@@ -301,24 +300,14 @@ function App() {
   const showTemplates = canUseTemplates && activeFeature === "templates";
   const showBulkOperations = canRunBulkOps && activeFeature === "bulk_operations";
   const showImport = canImportTestCases && activeFeature === "import_test_cases";
+  const showTestSuites = canManageSuites && activeFeature === "test_suites";
   const showTestRuns = canManageTestRuns && activeFeature === "test_runs";
-  const showSuiteManagement = canManageSuites && activeFeature === "suite_management";
   const showExecute = canExecuteTests && activeFeature === "execute_tests";
   const showBugs =
     canViewBugs &&
     (activeFeature === "bug_management" || (isDeveloper && activeFeature === "developer_workspace"));
   const showTestCases = activeFeature === "test_cases";
   const showRolePanel = activeFeature === "developer_workspace" || activeFeature === "admin_workspace";
-  const selectedExecutionRun = testRuns.find((run) => run.id === executionRunId) || null;
-  const executionRunCaseIds = new Set(
-    (selectedExecutionRun?.testCases || [])
-      .map((item: any) => item?.testCaseId)
-      .filter((id: any) => typeof id === "string" && id.length > 0)
-  );
-  const executionSelectableCases =
-    executionRunId && executionRunCaseIds.size > 0
-      ? testCases.filter((tc) => executionRunCaseIds.has(tc.id))
-      : testCases;
   const assignedBugCount = bugs.length;
   const p1UrgentCount = bugs.filter((item) => item.priority === "P1_URGENT").length;
   const criticalBugCount = bugs.filter((item) => item.severity === "CRITICAL").length;
@@ -490,30 +479,23 @@ function App() {
       severity: bugFilterSeverity,
       sortBy: bugSortBy,
     };
-    const [caseRows, templateRows, runRows, suiteRows, executionRows, bugRows] = await Promise.all([
+    const [caseRows, templateRows, runRows, testerRows, executionRows, bugRows, suiteRows] = await Promise.all([
       getTestCasesApi(),
       listTemplatesApi(),
       canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
-      canManageSuites
-        ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
-        : Promise.resolve([]),
+      canManageTestRuns ? listAvailableTestersApi() : Promise.resolve([]),
       canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
       canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
+      canManageSuites ? listSuitesApi() : Promise.resolve([]),
     ]);
     const rows = Array.isArray(caseRows) ? caseRows : [];
     setTestCases(rows);
     setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
     setTemplates(Array.isArray(templateRows) ? templateRows : []);
     setTestRuns(Array.isArray(runRows) ? runRows : []);
-    const suiteList = Array.isArray(suiteRows) ? suiteRows : [];
-    setSuites(suiteList);
-    if (selectedSuiteId && !suiteList.some((suite: any) => suite.id === selectedSuiteId)) {
-      setSelectedSuiteId("");
-      setSuiteDetails(null);
-      setSuiteExecutionHistory([]);
-      setSuiteExecutionId("");
-      setSuiteExecutionDetails(null);
-    }
+    const testers = Array.isArray(testerRows) ? testerRows : [];
+    setRunTesterOptions(testers);
+    setRunTesterIds((prev) => prev.filter((id) => testers.some((tester) => tester.id === id)));
     setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
     const bugList = Array.isArray(bugRows) ? bugRows : [];
     setBugs(bugList);
@@ -521,6 +503,7 @@ function App() {
       if (!prev?.id) return prev;
       return bugList.find((item) => item.id === prev.id) || null;
     });
+    setSuites(Array.isArray(suiteRows) ? suiteRows : []);
     setIsRefreshing(false);
   };
 
@@ -565,7 +548,6 @@ function App() {
     setQuickBugTitle("");
     setQuickBugDescription("");
     setQuickBugSeverity("MEDIUM");
-    setActiveSuiteExecutionContext(null);
   };
 
   const resetBugPanel = () => {
@@ -641,43 +623,12 @@ function App() {
     setRunDescription("");
     setRunStartDate("");
     setRunEndDate("");
-    setRunTesterIdsText("");
+    setRunTesterIds([]);
     setSelectedRunId("");
     setRunDetails(null);
-    setSuiteName("");
-    setSuiteDescription("");
-    setSuiteModule("");
-    setSuiteProjectId("");
-    setSuiteParentId("");
-    setSuiteCreateCaseSelection([]);
-    setSuiteAddCaseSelection([]);
-    setSuiteCreateCaseSearch("");
-    setSuiteAddCaseSearch("");
-    setSelectedSuiteId("");
-    setSuiteDetails(null);
-    setSuiteReorderIds([]);
-    setSuiteCloneName("");
-    setSuiteExecutionMode("SEQUENTIAL");
-    setSuiteExecutionTesterIdsText("");
-    setSuiteExecutionId("");
-    setSuiteExecutionDetails(null);
-    setSuiteExecutionHistory([]);
-    setAdminUsers([]);
-    setAdminCreateName("");
-    setAdminCreateEmail("");
-    setAdminCreatePassword("");
-    setAdminCreateRole("");
-    setAdminUserSavingId("");
     resetExecutionPanel();
     resetBugPanel();
   };
-
-  useEffect(() => {
-    if (screen !== "dashboard" || !canManageSuites) return;
-    loadTestCaseData().catch(() => {
-      // no-op
-    });
-  }, [showArchivedSuites, screen, canManageSuites]);
 
   const resetCreateTestCaseFields = () => {
     setTcTitle("");
@@ -721,9 +672,35 @@ function App() {
     setRunDescription("");
     setRunStartDate("");
     setRunEndDate("");
-    setRunTesterIdsText("");
+    setRunTesterIds([]);
+    setRunSelectedTestCaseIds([]);
+    setRunTestCaseSearchQuery("");
+    setRunTestCaseFilterModule("");
     setSelectedRunId("");
     setRunDetails(null);
+  };
+
+  const resetSuiteFields = () => {
+    setSuiteName("");
+    setSuiteDescription("");
+    setSuiteModule("");
+    setSuiteType("STATIC");
+    setSuiteFilterModules([]);
+    setSuiteFilterPriorities([]);
+    setSuiteFilterTags([]);
+    setSuiteFilterAutoStatus("");
+    setSuiteStaticTestCases([]);
+    setSuiteFilterPreviewCount(null);
+    setEditingSuiteId("");
+    setEditSuiteName("");
+    setEditSuiteDescription("");
+    setEditSuiteModule("");
+    setEditSuiteFilterModules([]);
+    setEditSuiteFilterPriorities([]);
+    setEditSuiteFilterTags([]);
+    setEditSuiteFilterAutoStatus("");
+    setSelectedSuiteId("");
+    setSuiteDetails(null);
   };
 
   const resetQuickBugFields = () => {
@@ -921,12 +898,12 @@ function App() {
       setEditingId("");
       setEditTitle("");
       setEditDescription("");
-      setEditPreConditionsText("");
-      setEditTestDataRequirementsText("");
-      setEditEnvironmentRequirementsText("");
+      setEditPreConditionsText("[]");
+      setEditTestDataRequirementsText("[]");
+      setEditEnvironmentRequirementsText("[]");
       setEditModule("");
-      setEditPostConditionsText("");
-      setEditMetadataText("");
+      setEditPostConditionsText("[]");
+      setEditMetadataText("{}");
       setEditTagsText("");
       setEditEstimatedDurationMinutes("");
       setEditAutomationStatus("NOT_AUTOMATED");
@@ -941,158 +918,6 @@ function App() {
     } catch (error: any) {
       alert(error?.message || "Edit failed");
     }
-  };
-
-  const parseIdsFromText = (raw: string): string[] =>
-    raw
-      .split(/[\n,]/)
-      .map((item) => item.trim().replace(/^<+|>+$/g, "").replace(/^"+|"+$/g, ""))
-      .filter(Boolean);
-
-  const toggleSelection = (
-    id: string,
-    setter: (updater: (prev: string[]) => string[]) => void
-  ) => {
-    setter((prev: string[]) =>
-      prev.includes(id) ? prev.filter((item: string) => item !== id) : [...prev, id]
-    );
-  };
-
-  const getSuiteFriendlyError = (error: any, fallback: string): string => {
-    const msg = String(error?.message || "").trim();
-    if (!msg) return fallback;
-    if (msg.includes("Circular hierarchy is not allowed")) {
-      return "Invalid parent selection: this creates a circular suite hierarchy.";
-    }
-    if (msg.includes("Archived suite cannot be set as parent")) {
-      return "Selected parent suite is archived. Restore the parent suite first.";
-    }
-    if (msg.includes("Restore parent suite first")) {
-      return "Restore the parent suite first, then restore this child suite.";
-    }
-    if (msg.includes("Archive child suites first")) {
-      return "Archive all child suites first, then archive the parent suite.";
-    }
-    if (msg.includes("testCaseIds must exactly match current suite membership")) {
-      return "Reorder list must include all current suite test cases exactly once.";
-    }
-    if (msg.includes("testCaseIds must not contain duplicates")) {
-      return "Reorder list contains duplicate test case IDs/codes. Remove duplicates and retry.";
-    }
-    if (msg.includes("One or more testCaseIds are invalid/deleted")) {
-      return "Some test case IDs/codes are invalid or deleted. Verify IDs and retry.";
-    }
-    if (msg.includes("Suite has no test cases to execute")) {
-      return "Add test cases to the suite before starting suite execution.";
-    }
-    if (msg.includes("Archive suite before permanent delete")) {
-      return "Archive the suite first, then delete it permanently.";
-    }
-    if (msg.includes("One or more testerIds are invalid")) {
-      return "One or more tester IDs are invalid or inactive.";
-    }
-    if (msg.includes("Sequential suite mode: execute the next pending suite case first")) {
-      return "Sequential suite mode requires executing the next pending case in order.";
-    }
-    if (msg.includes("already in progress by another tester")) {
-      return "This suite case is already in progress by another tester.";
-    }
-    if (msg.includes("This suite case is already executed")) {
-      return "This suite case is already executed.";
-    }
-    return msg || fallback;
-  };
-
-  const loadSuiteDetails = async (suiteId: string) => {
-    if (!suiteId) {
-      setSuiteDetails(null);
-      setSuiteExecutionHistory([]);
-      setSuiteAddCaseSelection([]);
-      return;
-    }
-    const [detail, history] = await Promise.all([getSuiteApi(suiteId), listSuiteExecutionsApi(suiteId)]);
-    setSuiteDetails(detail || null);
-    setSuiteExecutionHistory(Array.isArray(history) ? history : []);
-    setSuiteAddCaseSelection([]);
-    if (Array.isArray(detail?.suiteCases)) {
-      setSuiteReorderIds(detail.suiteCases.map((item: any) => item.testCaseId));
-    }
-  };
-
-  const openExecutionSession = async (testCaseId: string, runId?: string) => {
-    const opened = await openExecutionApi(testCaseId, runId || undefined);
-    let currentSteps = Array.isArray(opened?.stepResults) ? opened.stepResults : [];
-    setExecutionCaseId(testCaseId);
-    setExecutionRunId(runId || "");
-    setExecutionProgress(opened?.draftExecution?.progressPercent || 0);
-    setExecutionNotes(opened?.draftExecution?.notes || "");
-    setExecutionStartedAt(opened?.draftExecution?.startedAt || "");
-    setExecutionCompletedAt(opened?.draftExecution?.completedAt || "");
-    setExecutionDurationSeconds(
-      typeof opened?.draftExecution?.durationSeconds === "number"
-        ? opened.draftExecution.durationSeconds
-        : null
-    );
-    setExecutionEvidence(Array.isArray(opened?.draftExecution?.evidence) ? opened.draftExecution.evidence : []);
-    if (opened?.draftExecution?.id) {
-      setExecutionId(opened.draftExecution.id);
-    } else {
-      const started = await startExecutionApi({
-        testCaseId,
-        testRunId: runId || null,
-      });
-      setExecutionId(started.id);
-      setExecutionStartedAt(started?.startedAt || "");
-      setExecutionCompletedAt("");
-      setExecutionDurationSeconds(null);
-      setExecutionEvidence([]);
-      // Ensure UI has steps even if initial open response had none.
-      const reopened = await openExecutionApi(testCaseId, runId || undefined);
-      const reopenedSteps = Array.isArray(reopened?.stepResults) ? reopened.stepResults : [];
-      if (reopenedSteps.length > 0) {
-        currentSteps = reopenedSteps;
-        setExecutionProgress(reopened?.draftExecution?.progressPercent || 0);
-        setExecutionNotes(reopened?.draftExecution?.notes || "");
-      }
-    }
-    setExecutionSteps(currentSteps);
-    setExecutionStepStatus("PASSED");
-    setExecutionActualResult("");
-    setExecutionStepNotes("");
-    if (currentSteps.length > 0) {
-      setExecutionSelectedStepNumber(String(currentSteps[0].stepNumber));
-    } else {
-      setExecutionSelectedStepNumber("");
-      throw new Error("No executable steps found for this test case. Add steps and try again.");
-    }
-  };
-
-  const openSuiteExecutionCase = async (suiteExecution: any, suiteCase: any) => {
-    if (!suiteExecution?.id || !suiteExecution?.linkedTestRun?.id) {
-      throw new Error("Linked run not found for this suite execution.");
-    }
-    if (!suiteCase?.testCaseId) {
-      throw new Error("Invalid suite case selected.");
-    }
-    setActiveSuiteExecutionContext({
-      suiteExecutionId: suiteExecution.id,
-      mode: String(suiteExecution.mode || "SEQUENTIAL"),
-      runId: suiteExecution.linkedTestRun.id,
-    });
-    await openExecutionSession(suiteCase.testCaseId, suiteExecution.linkedTestRun.id);
-    setActiveFeature("execute_tests");
-  };
-
-  const moveSuiteCase = (testCaseId: string, direction: "UP" | "DOWN") => {
-    setSuiteReorderIds((prev) => {
-      const current = [...prev];
-      const idx = current.indexOf(testCaseId);
-      if (idx < 0) return prev;
-      const nextIdx = direction === "UP" ? idx - 1 : idx + 1;
-      if (nextIdx < 0 || nextIdx >= current.length) return prev;
-      [current[idx], current[nextIdx]] = [current[nextIdx], current[idx]];
-      return current;
-    });
   };
 
   const parseBugAttachmentsInput = (raw: string): Array<{
@@ -1175,12 +1000,6 @@ function App() {
       setTestRuns([]);
       setSelectedRunId("");
       setRunDetails(null);
-      setAdminUsers([]);
-      setAdminCreateName("");
-      setAdminCreateEmail("");
-      setAdminCreatePassword("");
-      setAdminCreateRole("");
-      setAdminUserSavingId("");
       resetExecutionPanel();
       resetBugPanel();
     }
@@ -1235,32 +1054,14 @@ function App() {
     setAdminCreateEmail("");
     setAdminCreatePassword("");
     setAdminCreateRole("");
+    setAdminEditUserId("");
+    setAdminEditName("");
+    setAdminEditRole("TESTER");
+    setAdminEditActive(true);
     loadAdminUsers().catch(() => {
       setAdminUsers([]);
     });
   }, [screen, isAdmin, activeFeature]);
-
-  useEffect(() => {
-    if (!executionRunId || !executionCaseId) return;
-    const stillValid = executionSelectableCases.some((tc) => tc.id === executionCaseId);
-    if (!stillValid) {
-      setExecutionCaseId("");
-      setExecutionId("");
-      setExecutionSteps([]);
-      setExecutionSelectedStepNumber("");
-      setExecutionProgress(0);
-      setExecutionNotes("");
-      setExecutionActualResult("");
-      setExecutionStepNotes("");
-    }
-  }, [executionRunId, executionCaseId, testRuns, testCases]);
-
-  useEffect(() => {
-    if (!executionRunId) return;
-    if (executionCaseId) return;
-    if (!executionSelectableCases.length) return;
-    setExecutionCaseId(executionSelectableCases[0].id);
-  }, [executionRunId, executionCaseId, executionSelectableCases]);
 
   /* REGISTER */
   const handleRegister = async () => {
@@ -1324,6 +1125,13 @@ function App() {
     setNavOpen(false);
     setActiveFeature("none");
     setScreen("login");
+  };
+
+  const openAdminEditUser = (user: any) => {
+    setAdminEditUserId(user.id);
+    setAdminEditName(user.name || "");
+    setAdminEditRole(user.role || "TESTER");
+    setAdminEditActive(Boolean(user.isActive));
   };
 
   return (
@@ -1620,57 +1428,57 @@ function App() {
                     Admin operations are restricted to user/project/role management, audit logs, system
                     configuration, and backup endpoints.
                   </p>
-
-                  <div className="inlineGrid">
-                    <input
-                      className="input"
-                      placeholder="Name"
-                      value={adminCreateName}
-                      autoComplete="off"
-                      name="admin_create_name"
-                      onChange={(e) => setAdminCreateName(e.target.value)}
-                    />
-                    <input
-                      className="input"
-                      placeholder="Email"
-                      value={adminCreateEmail}
-                      autoComplete="off"
-                      name="admin_create_email"
-                      onChange={(e) => setAdminCreateEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="inlineGrid">
-                    <input
-                      className="input"
-                      type="password"
-                      placeholder="Temporary Password"
-                      value={adminCreatePassword}
-                      autoComplete="new-password"
-                      name="admin_create_password"
-                      onChange={(e) => setAdminCreatePassword(e.target.value)}
-                    />
-                    <select
-                      className="input"
-                      value={adminCreateRole}
-                      onChange={(e) => setAdminCreateRole(e.target.value)}
-                    >
-                      <option value="">Select role</option>
-                      <option value="TESTER">TESTER</option>
-                      <option value="DEVELOPER">DEVELOPER</option>
-                      <option value="ADMIN">ADMIN</option>
-                    </select>
-                  </div>
+                  <h4 style={{ marginTop: "10px" }}>Create User</h4>
+                  <input
+                    className="input"
+                    placeholder="Name"
+                    value={adminCreateName}
+                    autoComplete="off"
+                    name="admin_create_name"
+                    onChange={(e) => setAdminCreateName(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Email"
+                    value={adminCreateEmail}
+                    autoComplete="off"
+                    name="admin_create_email"
+                    onChange={(e) => setAdminCreateEmail(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder="Password"
+                    value={adminCreatePassword}
+                    autoComplete="new-password"
+                    name="admin_create_password"
+                    onChange={(e) => setAdminCreatePassword(e.target.value)}
+                  />
+                  <select
+                    className="input"
+                    value={adminCreateRole}
+                    onChange={(e) => setAdminCreateRole(e.target.value)}
+                  >
+                    <option value="">Select role</option>
+                    <option value="TESTER">TESTER</option>
+                    <option value="DEVELOPER">DEVELOPER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
                   <button
                     className="button"
-                      onClick={async () => {
+                    onClick={async () => {
                       try {
-                        if (!adminCreateName.trim() || !adminCreateEmail.trim() || !adminCreatePassword.trim() || !adminCreateRole) {
-                          alert("Name, email, password, and role are required");
+                        if (!adminCreateName.trim() || !adminCreateEmail.trim() || !adminCreatePassword.trim()) {
+                          alert("Name, email, and password are required");
+                          return;
+                        }
+                        if (!adminCreateRole) {
+                          alert("Please select a role");
                           return;
                         }
                         await createAdminUserApi({
                           name: adminCreateName.trim(),
-                          email: adminCreateEmail.trim().toLowerCase(),
+                          email: adminCreateEmail.trim(),
                           password: adminCreatePassword,
                           role: adminCreateRole,
                         });
@@ -1687,103 +1495,91 @@ function App() {
                   >
                     Create User
                   </button>
-
-                  <div className="panelHeader" style={{ marginTop: "12px" }}>
-                    <h4 style={{ marginBottom: 0 }}>Manage Users</h4>
-                    <button
-                      className="button small"
-                      onClick={async () => {
-                        try {
-                          await loadAdminUsers();
-                        } catch (error: any) {
-                          alert(error?.message || "Load users failed");
-                        }
-                      }}
-                    >
-                      Refresh Users
-                    </button>
-                  </div>
-                  <div className="listCompact">
-                    {adminUsers.length === 0 ? (
-                      <p className="note">No users found.</p>
-                    ) : (
-                      adminUsers.map((user) => {
-                        const isCurrentAdmin = user.id === currentUserId;
-                        const isSaving = adminUserSavingId === user.id;
-                        return (
-                          <div className="row adminUserRow" key={user.id}>
-                            <span className="title">
-                              <strong>{user.name || "Unnamed user"}</strong>
-                              <br />
-                              {user.email}
-                            </span>
-                            <span className="meta">
-                              {isCurrentAdmin ? "Current account" : user.isActive ? "Active" : "Inactive"}
-                            </span>
-                            <select
-                              className="input adminRoleInput"
-                              value={user.role || "TESTER"}
-                              disabled={isSaving}
-                              onChange={async (e) => {
-                                try {
-                                  const nextRole = e.target.value;
-                                  setAdminUserSavingId(user.id);
-                                  await updateAdminRoleApi(user.id, nextRole);
-                                  await loadAdminUsers();
-                                } catch (error: any) {
-                                  alert(error?.message || "Role update failed");
-                                } finally {
-                                  setAdminUserSavingId("");
+                  <h4 style={{ marginTop: "10px" }}>Manage Users</h4>
+                  <button
+                    className="button small"
+                    onClick={async () => {
+                      try {
+                        await loadAdminUsers();
+                      } catch (error: any) {
+                        alert(error?.message || "Load users failed");
+                      }
+                    }}
+                  >
+                    Refresh Users
+                  </button>
+                  {adminUsers.length > 0 && (
+                    <div className="listCompact">
+                      {adminUsers.map((user) => (
+                        <div className="row" key={user.id}>
+                          <span className="title">{user.name} ({user.email})</span>
+                          <span className="meta">{user.role} | {user.isActive ? "Active" : "Inactive"}</span>
+                          <select
+                            className="input"
+                            style={{ width: "140px", marginBottom: 0 }}
+                            value={user.role}
+                            onChange={async (e) => {
+                              try {
+                                await updateAdminRoleApi(user.id, e.target.value);
+                                await loadAdminUsers();
+                              } catch (error: any) {
+                                alert(error?.message || "Role update failed");
+                              }
+                            }}
+                          >
+                            <option value="TESTER">TESTER</option>
+                            <option value="DEVELOPER">DEVELOPER</option>
+                            <option value="ADMIN">ADMIN</option>
+                          </select>
+                          <button
+                            className="button small"
+                            onClick={() => openAdminEditUser(user)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            className="button small"
+                            disabled={user.id === currentUserId}
+                            onClick={async () => {
+                              try {
+                                if (user.id === currentUserId) {
+                                  alert("You cannot change your own active status");
+                                  return;
                                 }
-                              }}
-                            >
-                              <option value="TESTER">TESTER</option>
-                              <option value="DEVELOPER">DEVELOPER</option>
-                              <option value="ADMIN">ADMIN</option>
-                            </select>
-                            <button
-                              className="button small"
-                              disabled={isSaving || isCurrentAdmin}
-                              onClick={async () => {
-                                try {
-                                  setAdminUserSavingId(user.id);
-                                  await updateAdminUserApi(user.id, { isActive: !Boolean(user.isActive) });
-                                  await loadAdminUsers();
-                                } catch (error: any) {
-                                  alert(error?.message || "Status update failed");
-                                } finally {
-                                  setAdminUserSavingId("");
+                                await updateAdminUserApi(user.id, { isActive: !Boolean(user.isActive) });
+                                await loadAdminUsers();
+                              } catch (error: any) {
+                                alert(error?.message || "Update active status failed");
+                              }
+                            }}
+                          >
+                            {user.isActive ? "Deactivate" : "Activate"}
+                          </button>
+                          <button
+                            className="button small danger"
+                            disabled={user.id === currentUserId}
+                            onClick={async () => {
+                              try {
+                                if (user.id === currentUserId) {
+                                  alert("You cannot delete your own admin account");
+                                  return;
                                 }
-                              }}
-                            >
-                              {Boolean(user.isActive) ? "Deactivate" : "Activate"}
-                            </button>
-                            <button
-                              className="button small danger"
-                              disabled={isSaving || isCurrentAdmin}
-                              onClick={async () => {
-                                try {
-                                  const confirmed = window.confirm(
-                                    `Delete user ${user.email}? This action cannot be undone.`
-                                  );
-                                  if (!confirmed) return;
-                                  setAdminUserSavingId(user.id);
-                                  await deleteAdminUserApi(user.id);
-                                  await loadAdminUsers();
-                                } catch (error: any) {
-                                  alert(error?.message || "Delete user failed");
-                                } finally {
-                                  setAdminUserSavingId("");
+                                if (!window.confirm(`Delete user ${user.email}?`)) {
+                                  return;
                                 }
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
+                                await deleteAdminUserApi(user.id);
+                                await loadAdminUsers();
+                              } catch (error: any) {
+                                alert(error?.message || "Delete user failed");
+                              }
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
               )}
 
@@ -2182,23 +1978,168 @@ function App() {
                   value={runEndDate}
                   onChange={(e) => setRunEndDate(e.target.value)}
                 />
-                <textarea
+                <label className="fieldLabel">Assign Testers (Optional)</label>
+                <select
                   className="input"
-                  rows={3}
-                  placeholder="Tester IDs (comma or newline separated)"
-                  value={runTesterIdsText}
-                  onChange={(e) => setRunTesterIdsText(e.target.value)}
+                  multiple
+                  size={Math.min(Math.max(runTesterOptions.length, 3), 8)}
+                  value={runTesterIds}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                    setRunTesterIds(selected);
+                  }}
+                >
+                  {runTesterOptions.map((tester) => (
+                    <option key={tester.id} value={tester.id}>
+                      {tester.name} ({tester.email})
+                    </option>
+                  ))}
+                </select>
+                <div className="note">
+                  {runTesterIds.length > 0
+                    ? `${runTesterIds.length} tester(s) selected`
+                    : "Select one or more testers (optional)"}
+                </div>
+
+                <label className="fieldLabel">Select Test Cases for This Run</label>
+                <input
+                  className="input"
+                  placeholder="Search test cases by title, code, or module..."
+                  value={runTestCaseSearchQuery}
+                  onChange={(e) => setRunTestCaseSearchQuery(e.target.value)}
                 />
+                <select
+                  className="input"
+                  value={runTestCaseFilterModule}
+                  onChange={(e) => setRunTestCaseFilterModule(e.target.value)}
+                >
+                  <option value="">All Modules</option>
+                  {Array.from(new Set(testCases.map((tc: any) => tc.module))).map((module: any) => (
+                    <option key={module} value={module}>
+                      {module}
+                    </option>
+                  ))}
+                </select>
+
+                <div className="note">
+                  {runSelectedTestCaseIds.length} test case(s) selected for this run
+                </div>
+
+                <div style={{ maxHeight: "400px", overflowY: "auto", border: "1px solid #ccc", padding: "8px" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ position: "sticky", top: 0, backgroundColor: "#f0f0f0" }}>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd", width: "40px" }}>
+                          <input
+                            type="checkbox"
+                            checked={
+                              testCases
+                                .filter((tc: any) => {
+                                  const matchesSearch = runTestCaseSearchQuery
+                                    ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                      (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                      (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                                    : true;
+                                  const matchesModule = runTestCaseFilterModule
+                                    ? tc.module === runTestCaseFilterModule
+                                    : true;
+                                  return matchesSearch && matchesModule;
+                                })
+                                .every((tc: any) => runSelectedTestCaseIds.includes(tc.id)) &&
+                              testCases.filter((tc: any) => {
+                                const matchesSearch = runTestCaseSearchQuery
+                                  ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                                  : true;
+                                const matchesModule = runTestCaseFilterModule
+                                  ? tc.module === runTestCaseFilterModule
+                                  : true;
+                                return matchesSearch && matchesModule;
+                              }).length > 0
+                            }
+                            onChange={(e) => {
+                              const filtered = testCases.filter((tc: any) => {
+                                const matchesSearch = runTestCaseSearchQuery
+                                  ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                                    (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                                  : true;
+                                const matchesModule = runTestCaseFilterModule
+                                  ? tc.module === runTestCaseFilterModule
+                                  : true;
+                                return matchesSearch && matchesModule;
+                              });
+                              if (e.target.checked) {
+                                setRunSelectedTestCaseIds(
+                                  Array.from(new Set([...runSelectedTestCaseIds, ...filtered.map((tc: any) => tc.id)]))
+                                );
+                              } else {
+                                const toRemove = new Set(filtered.map((tc: any) => tc.id));
+                                setRunSelectedTestCaseIds(
+                                  runSelectedTestCaseIds.filter((id) => !toRemove.has(id))
+                                );
+                              }
+                            }}
+                          />
+                        </th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Code</th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Title</th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Module</th>
+                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Priority</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {testCases
+                        .filter((tc: any) => {
+                          const matchesSearch = runTestCaseSearchQuery
+                            ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                              (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
+                              (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
+                            : true;
+                          const matchesModule = runTestCaseFilterModule
+                            ? tc.module === runTestCaseFilterModule
+                            : true;
+                          return matchesSearch && matchesModule;
+                        })
+                        .map((tc: any) => (
+                          <tr key={tc.id} style={{ borderBottom: "1px solid #eee" }}>
+                            <td style={{ padding: "8px", textAlign: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={runSelectedTestCaseIds.includes(tc.id)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setRunSelectedTestCaseIds([...runSelectedTestCaseIds, tc.id]);
+                                  } else {
+                                    setRunSelectedTestCaseIds(
+                                      runSelectedTestCaseIds.filter((id) => id !== tc.id)
+                                    );
+                                  }
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: "8px" }}>{tc.testCaseCode}</td>
+                            <td style={{ padding: "8px" }}>{tc.title}</td>
+                            <td style={{ padding: "8px" }}>{tc.module}</td>
+                            <td style={{ padding: "8px" }}>{tc.priority}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+
                 <button
                   className="button"
+                  disabled={!runName.trim() || runSelectedTestCaseIds.length === 0}
                   onClick={async () => {
                     try {
                       if (!runName.trim()) {
                         alert("Run name is required");
                         return;
                       }
-                      if (selectedIds.length === 0) {
-                        alert("Select at least one test case from the list section");
+                      if (runSelectedTestCaseIds.length === 0) {
+                        alert("Select at least one test case");
                         return;
                       }
                       await createTestRunApi({
@@ -2206,25 +2147,31 @@ function App() {
                         description: runDescription || undefined,
                         targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
                         targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
-                        testCaseIds: selectedIds,
-                        testerIds: parseIdsFromText(runTesterIdsText),
+                        testCaseIds: runSelectedTestCaseIds,
+                        testerIds: runTesterIds,
                       });
                       resetRunFields();
                       await loadTestCaseData();
-                      alert("Test run created");
+                      alert("Test run created successfully!");
                     } catch (error: any) {
                       alert(error?.message || "Create test run failed");
                     }
                   }}
+                  style={{
+                    opacity: !runName.trim() || runSelectedTestCaseIds.length === 0 ? 0.5 : 1,
+                    cursor:
+                      !runName.trim() || runSelectedTestCaseIds.length === 0 ? "not-allowed" : "pointer",
+                  }}
                 >
-                  Create Test Run
+                  Create Test Run ({runSelectedTestCaseIds.length} case{runSelectedTestCaseIds.length !== 1 ? "s" : ""})
                 </button>
+
                 <select
                   className="input"
                   value={selectedRunId}
                   onChange={(e) => setSelectedRunId(e.target.value)}
                 >
-                  <option value="">Select Test Run</option>
+                  <option value="">Select Test Run to View</option>
                   {testRuns.map((run) => (
                     <option key={run.id} value={run.id}>
                       {run.name} ({run.progress?.completed || 0}/{run.progress?.total || 0})
@@ -2261,690 +2208,318 @@ function App() {
               </section>
               )}
 
-              {showSuiteManagement && (
+              {showTestSuites && (
               <section className="panel">
-                <h4>Suite Management (4.5)</h4>
-                <label className="note" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={showArchivedSuites}
-                    onChange={(e) => setShowArchivedSuites(e.target.checked)}
-                  />
-                  Show Archived Suites
-                </label>
-                <button
-                  className="button small"
-                  onClick={async () => {
-                    try {
-                      await loadTestCaseData();
-                      if (selectedSuiteId) {
-                        await loadSuiteDetails(selectedSuiteId);
-                      }
-                    } catch (error: any) {
-                      alert(getSuiteFriendlyError(error, "Refresh suites failed"));
-                    }
-                  }}
-                >
-                  Refresh Suites
-                </button>
-                <div className="inlineGrid">
+                <h3>Test Suite Management</h3>
+                <div>{suites.length} suite(s) available</div>
+                
+                <div style={{ 
+                  backgroundColor: editingSuiteId ? "#fff3cd" : "#f8f9fa",
+                  padding: "16px",
+                  borderRadius: "4px",
+                  marginTop: "16px",
+                  border: editingSuiteId ? "2px solid #ff9800" : "1px solid #dee2e6"
+                }}>
+                  <h4>{editingSuiteId ? "✏️ Edit Test Suite" : "➕ Create New Test Suite"}</h4>
                   <input
                     className="input"
                     placeholder="Suite Name"
-                    value={suiteName}
-                    onChange={(e) => setSuiteName(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    placeholder="Module (e.g., Authentication)"
-                    value={suiteModule}
-                    onChange={(e) => setSuiteModule(e.target.value)}
-                  />
-                </div>
-                <textarea
-                  className="input"
-                  rows={2}
-                  placeholder="Suite Description"
-                  value={suiteDescription}
-                  onChange={(e) => setSuiteDescription(e.target.value)}
+                    value={editingSuiteId ? editSuiteName : suiteName}
+                  onChange={(e) => editingSuiteId ? setEditSuiteName(e.target.value) : setSuiteName(e.target.value)}
+                  disabled={!!editingSuiteId}
                 />
-                <div className="inlineGrid">
-                  <select
-                    className="input"
-                    value={suiteParentId}
-                    onChange={(e) => setSuiteParentId(e.target.value)}
-                  >
-                    <option value="">No Parent Suite</option>
-                    {suites
-                      .filter((suite) => !suite.isArchived)
-                      .map((suite) => (
-                        <option key={suite.id} value={suite.id}>
-                          {suite.name}
-                        </option>
-                      ))}
-                  </select>
-                  <input
-                    className="input"
-                    placeholder="Project ID (optional)"
-                    value={suiteProjectId}
-                    onChange={(e) => setSuiteProjectId(e.target.value)}
-                  />
-                </div>
-                <div className="note">Select initial test cases</div>
                 <input
                   className="input"
-                  placeholder="Search test cases by title/code"
-                  value={suiteCreateCaseSearch}
-                  onChange={(e) => setSuiteCreateCaseSearch(e.target.value)}
+                  placeholder="Description"
+                  value={editingSuiteId ? editSuiteDescription : suiteDescription}
+                  onChange={(e) => editingSuiteId ? setEditSuiteDescription(e.target.value) : setSuiteDescription(e.target.value)}
                 />
-                <div className="toolbarActions" style={{ marginBottom: "8px" }}>
-                  <button
-                    className="button small"
-                    onClick={() => {
-                      const term = suiteCreateCaseSearch.trim().toLowerCase();
-                      const visible = testCases.filter((tc) => {
-                        if (!term) return true;
-                        return (
-                          String(tc.title || "").toLowerCase().includes(term) ||
-                          String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                        );
-                      });
-                      setSuiteCreateCaseSelection(visible.map((tc) => tc.id));
-                    }}
-                  >
-                    Select Visible
-                  </button>
-                  <button className="button small" onClick={() => setSuiteCreateCaseSelection([])}>
-                    Clear Selection
-                  </button>
-                </div>
-                <div className="listCompact" style={{ maxHeight: "180px", overflow: "auto", marginBottom: "8px" }}>
-                  {testCases
-                    .filter((tc) => {
-                      const term = suiteCreateCaseSearch.trim().toLowerCase();
-                      if (!term) return true;
-                      return (
-                        String(tc.title || "").toLowerCase().includes(term) ||
-                        String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                      );
-                    })
-                    .map((tc) => (
-                    <label className="row" key={tc.id} style={{ marginBottom: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={suiteCreateCaseSelection.includes(tc.id)}
-                        onChange={() => toggleSelection(tc.id, setSuiteCreateCaseSelection)}
-                      />
-                      <span className="title">
-                        {tc.testCaseCode || tc.id} - {tc.title}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      if (!suiteName.trim()) {
-                        alert("Suite name is required");
-                        return;
-                      }
-                      await createSuiteApi({
-                        name: suiteName,
-                        description: suiteDescription || undefined,
-                        module: suiteModule || undefined,
-                        parentSuiteId: suiteParentId || undefined,
-                        projectId: suiteProjectId || undefined,
-                        testCaseIds: suiteCreateCaseSelection,
-                      });
-                      setSuiteName("");
-                      setSuiteDescription("");
-                      setSuiteModule("");
-                      setSuiteParentId("");
-                      setSuiteProjectId("");
-                      setSuiteCreateCaseSelection([]);
-                      await loadTestCaseData();
-                      alert("Suite created");
-                    } catch (error: any) {
-                      alert(getSuiteFriendlyError(error, "Create suite failed"));
-                    }
-                  }}
-                >
-                  Create Suite
-                </button>
-
-                <select
+                <input
                   className="input"
-                  value={selectedSuiteId}
-                  onChange={(e) => {
-                    setSelectedSuiteId(e.target.value);
-                    setSuiteDetails(null);
-                    setSuiteExecutionHistory([]);
-                    setSuiteExecutionId("");
-                    setSuiteExecutionDetails(null);
-                    setSuiteAddCaseSelection([]);
-                  }}
-                >
-                  <option value="">Select Suite</option>
-                  {suites.map((suite) => (
-                    <option key={suite.id} value={suite.id}>
-                      {suite.name}
-                      {suite.isArchived ? " [ARCHIVED]" : ""} ({suite._count?.suiteCases || 0} cases)
-                    </option>
-                  ))}
-                </select>
-                {selectedSuiteId && (
-                  <div className="row">
-                    <span className="title">
-                      <strong>Selected Suite ID:</strong> {selectedSuiteId}
-                    </span>
-                    <button
-                      className="button small"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(selectedSuiteId);
-                          alert("Suite ID copied");
-                        } catch {
-                          alert(`Suite ID: ${selectedSuiteId}`);
-                        }
-                      }}
-                    >
-                      Copy ID
-                    </button>
-                  </div>
-                )}
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      if (!selectedSuiteId) {
-                        alert("Select a suite");
-                        return;
-                      }
-                      await loadSuiteDetails(selectedSuiteId);
-                    } catch (error: any) {
-                      alert(getSuiteFriendlyError(error, "Load suite details failed"));
-                    }
-                  }}
-                >
-                  View Suite Details
-                </button>
+                  placeholder="Module (optional)"
+                  value={editingSuiteId ? editSuiteModule : suiteModule}
+                  onChange={(e) => editingSuiteId ? setEditSuiteModule(e.target.value) : setSuiteModule(e.target.value)}
+                />
 
-                {suiteDetails && (
-                  <div className="testCaseDetails">
-                    <div><strong>Suite:</strong> {suiteDetails.name}</div>
-                    <div><strong>Module:</strong> {suiteDetails.module || "N/A"}</div>
-                    <div><strong>Archived:</strong> {suiteDetails.isArchived ? "Yes" : "No"}</div>
-                    <div><strong>Cases:</strong> {suiteDetails._count?.suiteCases || 0}</div>
-                    <div><strong>Parent:</strong> {suiteDetails.parentSuite?.name || "None"}</div>
-                    {suiteDetails.isArchived && (
-                      <div><strong>Note:</strong> This suite is archived. Restore it to modify cases or execute.</div>
-                    )}
-                  </div>
-                )}
-
-                {suiteDetails && (
+                {!editingSuiteId && (
                   <>
-                    <div className="note">Add test cases to suite</div>
-                    <input
-                      className="input"
-                      placeholder="Search available test cases"
-                      value={suiteAddCaseSearch}
-                      onChange={(e) => setSuiteAddCaseSearch(e.target.value)}
-                    />
-                    <div className="toolbarActions" style={{ marginBottom: "8px" }}>
-                      <button
-                        className="button small"
-                        disabled={suiteDetails.isArchived}
-                        onClick={() => {
-                          const term = suiteAddCaseSearch.trim().toLowerCase();
-                          const visible = testCases.filter((tc) => {
-                            const alreadyInSuite = (suiteDetails.suiteCases || []).some(
-                              (item: any) => item.testCaseId === tc.id
-                            );
-                            if (alreadyInSuite) return false;
-                            if (!term) return true;
-                            return (
-                              String(tc.title || "").toLowerCase().includes(term) ||
-                              String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                            );
-                          });
-                          setSuiteAddCaseSelection(visible.map((tc) => tc.id));
-                        }}
-                      >
-                        Select Visible
-                      </button>
-                      <button className="button small" onClick={() => setSuiteAddCaseSelection([])}>
-                        Clear Selection
-                      </button>
-                    </div>
-                    <div className="listCompact" style={{ maxHeight: "180px", overflow: "auto", marginBottom: "8px" }}>
-                      {testCases
-                        .filter(
-                          (tc) => {
-                            const alreadyInSuite = (suiteDetails.suiteCases || []).some(
-                              (item: any) => item.testCaseId === tc.id
-                            );
-                            if (alreadyInSuite) return false;
-                            const term = suiteAddCaseSearch.trim().toLowerCase();
-                            if (!term) return true;
-                            return (
-                              String(tc.title || "").toLowerCase().includes(term) ||
-                              String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                            );
-                          }
-                        )
-                        .map((tc) => (
-                          <label className="row" key={tc.id} style={{ marginBottom: 0 }}>
-                            <input
-                              type="checkbox"
-                              checked={suiteAddCaseSelection.includes(tc.id)}
-                              disabled={suiteDetails.isArchived}
-                              onChange={() => toggleSelection(tc.id, setSuiteAddCaseSelection)}
-                            />
-                            <span className="title">
-                              {tc.testCaseCode || tc.id} - {tc.title}
-                            </span>
-                          </label>
-                        ))}
-                    </div>
-                    <button
-                      className="button"
-                      disabled={suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          if (!suiteAddCaseSelection.length) {
-                            alert("Select at least one test case");
-                            return;
-                          }
-                          await addSuiteTestCasesApi(suiteDetails.id, suiteAddCaseSelection);
-                          setSuiteAddCaseSelection([]);
-                          await loadSuiteDetails(suiteDetails.id);
-                          await loadTestCaseData();
-                          alert("Test case(s) added to suite");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Add to suite failed"));
-                        }
-                      }}
-                    >
-                      Add Test Cases
-                    </button>
-
-                    <div className="note">Reorder Suite Cases (no IDs needed)</div>
-                    <div className="listCompact" style={{ maxHeight: "220px", overflow: "auto", marginBottom: "8px" }}>
-                      {suiteReorderIds.map((testCaseId, idx) => {
-                        const caseRow = (suiteDetails.suiteCases || []).find(
-                          (item: any) => item.testCaseId === testCaseId
-                        );
-                        return (
-                          <div className="row" key={testCaseId} style={{ marginBottom: 0 }}>
-                            <span className="title">
-                              #{idx + 1} {caseRow?.testCase?.testCaseCode || testCaseId} -{" "}
-                              {caseRow?.testCase?.title || testCaseId}
-                            </span>
-                            <button
-                              className="button small"
-                              disabled={idx === 0}
-                              onClick={() => moveSuiteCase(testCaseId, "UP")}
-                            >
-                              Up
-                            </button>
-                            <button
-                              className="button small"
-                              disabled={idx === suiteReorderIds.length - 1}
-                              onClick={() => moveSuiteCase(testCaseId, "DOWN")}
-                            >
-                              Down
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <button
-                      className="button"
-                      disabled={suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          if (!suiteReorderIds.length) {
-                            alert("No suite test cases available to reorder");
-                            return;
-                          }
-                          await reorderSuiteTestCasesApi(suiteDetails.id, suiteReorderIds);
-                          await loadSuiteDetails(suiteDetails.id);
-                          alert("Suite order updated");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Reorder failed"));
-                        }
-                      }}
-                    >
-                      Save Reorder
-                    </button>
-
-                    <input
-                      className="input"
-                      placeholder="Clone Name (optional)"
-                      value={suiteCloneName}
-                      onChange={(e) => setSuiteCloneName(e.target.value)}
-                    />
-                    <div className="inlineGrid">
-                      <button
-                        className="button"
-                        disabled={suiteDetails.isArchived}
-                        onClick={async () => {
-                          try {
-                            await cloneSuiteApi(suiteDetails.id, suiteCloneName || undefined);
-                            setSuiteCloneName("");
-                            await loadTestCaseData();
-                            alert("Suite cloned");
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Clone suite failed"));
-                          }
-                        }}
-                      >
-                        Clone Suite
-                      </button>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            if (suiteDetails.isArchived) {
-                              if (!window.confirm("Restore this suite?")) {
-                                return;
-                              }
-                              await restoreSuiteApi(suiteDetails.id);
-                            } else {
-                              if (!window.confirm("Archive this suite? You can restore it later.")) {
-                                return;
-                              }
-                              await archiveSuiteApi(suiteDetails.id);
-                              setShowArchivedSuites(true);
-                            }
-                            await loadSuiteDetails(suiteDetails.id);
-                            await loadTestCaseData();
-                            alert(suiteDetails.isArchived ? "Suite restored" : "Suite archived");
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Archive/restore failed"));
-                          }
-                        }}
-                      >
-                        {suiteDetails.isArchived ? "Restore Suite" : "Archive Suite"}
-                      </button>
-                    </div>
-                    <button
-                      className="button danger"
-                      disabled={!suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          if (!suiteDetails.isArchived) {
-                            alert("Archive the suite first, then delete permanently.");
-                            return;
-                          }
-                          const ok = window.confirm(
-                            "Delete this suite permanently? This cannot be undone and removes suite execution history for this suite."
-                          );
-                          if (!ok) return;
-                          const finalOk = window.confirm("Type confirmation by clicking OK again to permanently delete.");
-                          if (!finalOk) return;
-                          await deleteSuiteApi(suiteDetails.id);
-                          setSelectedSuiteId("");
-                          setSuiteDetails(null);
-                          setSuiteExecutionHistory([]);
-                          setSuiteExecutionId("");
-                          setSuiteExecutionDetails(null);
-                          await loadTestCaseData();
-                          alert("Suite deleted permanently");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Delete suite failed"));
-                        }
-                      }}
-                    >
-                      Delete Suite Permanently
-                    </button>
-
-                    <h4>Suite Cases</h4>
-                    <div className="listCompact">
-                      {(suiteDetails.suiteCases || []).map((item: any) => (
-                        <div className="row" key={item.id}>
-                          <span className="title">
-                            #{item.position} {item.testCase?.testCaseCode || item.testCaseId} -{" "}
-                            {item.testCase?.title || item.testCaseId}
-                          </span>
-                          <button
-                            className="button small danger"
-                            onClick={async () => {
-                              try {
-                                await removeSuiteTestCaseApi(suiteDetails.id, item.testCaseId);
-                                await loadSuiteDetails(suiteDetails.id);
-                                await loadTestCaseData();
-                              } catch (error: any) {
-                                alert(getSuiteFriendlyError(error, "Remove from suite failed"));
-                              }
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    <h4>Execute Suite</h4>
-                    <div className="inlineGrid">
-                      <select
-                        className="input"
-                        value={suiteExecutionMode}
-                        onChange={(e) => setSuiteExecutionMode(e.target.value)}
-                      >
-                        <option value="SEQUENTIAL">SEQUENTIAL</option>
-                        <option value="PARALLEL">PARALLEL</option>
-                      </select>
-                      <textarea
-                        className="input"
-                        rows={2}
-                        placeholder="Tester IDs (comma/newline, optional)"
-                        value={suiteExecutionTesterIdsText}
-                        onChange={(e) => setSuiteExecutionTesterIdsText(e.target.value)}
-                      />
-                    </div>
-                    <button
-                      className="button"
-                      disabled={suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          const started = await startSuiteExecutionApi({
-                            suiteId: suiteDetails.id,
-                            mode: suiteExecutionMode,
-                            testerIds: parseIdsFromText(suiteExecutionTesterIdsText),
-                          });
-                          setSuiteExecutionId(started.id);
-                          const detail = await getSuiteExecutionApi(started.id);
-                          setSuiteExecutionDetails(detail);
-                          await loadSuiteDetails(suiteDetails.id);
-                          alert("Suite execution started");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Start suite execution failed"));
-                        }
-                      }}
-                    >
-                      Start Suite Execution
-                    </button>
-
+                    <label className="fieldLabel">Suite Type</label>
                     <select
                       className="input"
-                      value={suiteExecutionId}
-                      onChange={(e) => setSuiteExecutionId(e.target.value)}
+                      value={suiteType}
+                      onChange={(e) => setSuiteType(e.target.value)}
                     >
-                      <option value="">Select Suite Execution</option>
-                      {suiteExecutionHistory.map((item: any) => (
-                        <option key={item.id} value={item.id}>
-                          {item.id.slice(0, 8)} | {item.status} | {item.passed}/{item.totalCases}
-                        </option>
-                      ))}
+                      <option value="STATIC">STATIC - Fixed Test Cases</option>
+                      <option value="DYNAMIC">DYNAMIC - Filtered Test Cases</option>
                     </select>
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          if (!suiteExecutionId) {
-                            alert("Select suite execution");
-                            return;
-                          }
-                          const detail = await getSuiteExecutionApi(suiteExecutionId);
-                          setSuiteExecutionDetails(detail);
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Load suite execution failed"));
-                        }
-                      }}
-                    >
-                      View Suite Report
-                    </button>
-                    {suiteExecutionHistory.length > 0 && (
-                      <div className="suiteHistoryList">
-                        {suiteExecutionHistory.map((item: any) => {
-                          const total = Number(item.totalCases || 0);
-                          const completed =
-                            Number(item.passed || 0) +
-                            Number(item.failed || 0) +
-                            Number(item.blocked || 0) +
-                            Number(item.skipped || 0);
-                          const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                          const pending = Math.max(0, total - completed);
-                          return (
-                            <div
-                              key={item.id}
-                              className={`suiteHistoryItem ${suiteExecutionId === item.id ? "active" : ""}`}
-                            >
-                              <div className="suiteHistoryTop">
-                                <span className="suiteHistoryId">#{item.id.slice(0, 8)}</span>
-                                <span className="suitePendingBadge">Pending: {pending}</span>
-                              </div>
-                              <div className="suiteProgressTrack">
-                                <div className="suiteProgressFill" style={{ width: `${percent}%` }} />
-                              </div>
-                              <div className="suiteHistoryMeta">
-                                <span>{item.status}</span>
-                                <span>{completed}/{total} ({percent}%)</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
                   </>
                 )}
 
-                {suiteExecutionDetails && (
-                  <div className="testCaseDetails">
-                    <div><strong>Execution Status:</strong> {suiteExecutionDetails.status}</div>
-                    <div><strong>Mode:</strong> {suiteExecutionDetails.mode}</div>
-                    <div>
-                      <strong>Summary:</strong> Total {suiteExecutionDetails.totalCases} | Passed{" "}
-                      {suiteExecutionDetails.passed} | Failed {suiteExecutionDetails.failed} | Blocked{" "}
-                      {suiteExecutionDetails.blocked} | Skipped {suiteExecutionDetails.skipped}
+                {suiteType === "STATIC" && !editingSuiteId && (
+                  <>
+                    <label className="fieldLabel">Select Test Cases for Suite</label>
+                    <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #ccc", padding: "8px" }}>
+                      {testCases.map((tc: any) => (
+                        <div key={tc.id} style={{ display: "flex", alignItems: "center", marginBottom: "8px" }}>
+                          <input
+                            type="checkbox"
+                            checked={suiteStaticTestCases.includes(tc.id)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSuiteStaticTestCases([...suiteStaticTestCases, tc.id]);
+                              } else {
+                                setSuiteStaticTestCases(suiteStaticTestCases.filter((id) => id !== tc.id));
+                              }
+                            }}
+                          />
+                          <span style={{ marginLeft: "8px" }}>{tc.testCaseCode || "N/A"} - {tc.title}</span>
+                        </div>
+                      ))}
                     </div>
-                    <div><strong>Pass Rate:</strong> {suiteExecutionDetails.passRate ?? 0}%</div>
-                    <div><strong>Linked Run:</strong> {suiteExecutionDetails.linkedTestRun?.name || "N/A"}</div>
-                    <div style={{ marginTop: "8px" }}>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const freshDetail = await getSuiteExecutionApi(suiteExecutionDetails.id);
-                            setSuiteExecutionDetails(freshDetail);
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Refresh suite report failed"));
-                          }
-                        }}
-                      >
-                        Refresh Suite Report
-                      </button>
-                      <button
-                        className="button small"
-                        disabled={
-                          (Number(suiteExecutionDetails.totalCases) > 0 &&
-                            Number(suiteExecutionDetails.passed || 0) +
-                              Number(suiteExecutionDetails.failed || 0) +
-                              Number(suiteExecutionDetails.blocked || 0) +
-                              Number(suiteExecutionDetails.skipped || 0) >=
-                              Number(suiteExecutionDetails.totalCases)) ||
-                          !suiteExecutionDetails.id
-                        }
-                        onClick={async () => {
-                          try {
-                            const freshDetail = await getSuiteExecutionApi(suiteExecutionDetails.id);
-                            setSuiteExecutionDetails(freshDetail);
-                            const completed =
-                              Number(freshDetail?.passed || 0) +
-                              Number(freshDetail?.failed || 0) +
-                              Number(freshDetail?.blocked || 0) +
-                              Number(freshDetail?.skipped || 0);
-                            const total = Number(freshDetail?.totalCases || 0);
-                            if (total > 0 && completed >= total) {
-                              alert("No pending suite cases. Suite execution is already complete.");
-                              return;
-                            }
-                            const cases = Array.isArray(freshDetail?.cases)
-                              ? freshDetail.cases
-                              : [];
-                            const nextPending = cases.find((item: any) => item.status === "NOT_RUN");
-                            if (!nextPending) {
-                              alert("No pending suite cases. All cases are already executed.");
-                              return;
-                            }
-                            const linkedRunId = freshDetail?.linkedTestRun?.id || "";
-                            if (!linkedRunId) {
-                              alert("Linked run not found for this suite execution.");
-                              return;
-                            }
-                            await openSuiteExecutionCase(freshDetail, nextPending);
-                            alert("Opened next pending suite case in Execute Tests.");
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Open next pending case failed"));
-                          }
-                        }}
-                      >
-                        {String(suiteExecutionDetails.mode || "").toUpperCase() === "PARALLEL"
-                          ? "Open Any Pending Case"
-                          : "Execute Next Pending Case"}
-                      </button>
-                    </div>
-                    <div style={{ marginTop: "10px" }}>
-                      <strong>Suite Cases</strong>
-                      <div className="listCompact" style={{ marginTop: "6px" }}>
-                        {(suiteExecutionDetails.cases || []).map((item: any) => (
-                          <div className="row" key={item.id}>
-                            <span className="title">
-                              #{item.position} {item.testCase?.testCaseCode || item.testCaseId} -{" "}
-                              {item.testCase?.title || item.testCaseId}
-                            </span>
-                            <span className="meta">{item.status}</span>
-                            <button
-                              className="button small"
-                              disabled={item.status !== "NOT_RUN"}
-                              onClick={async () => {
-                                try {
-                                  const fresh = await getSuiteExecutionApi(suiteExecutionDetails.id);
-                                  setSuiteExecutionDetails(fresh);
-                                  const freshCase = (fresh?.cases || []).find((c: any) => c.id === item.id);
-                                  if (!freshCase) {
-                                    alert("Suite case not found in latest report.");
-                                    return;
-                                  }
-                                  if (freshCase.status !== "NOT_RUN") {
-                                    alert("This suite case is already executed.");
-                                    return;
-                                  }
-                                  await openSuiteExecutionCase(fresh, freshCase);
-                                } catch (error: any) {
-                                  alert(getSuiteFriendlyError(error, "Open suite case failed"));
-                                }
-                              }}
-                            >
-                              Open
-                            </button>
-                          </div>
-                        ))}
+                    <div className="note">{suiteStaticTestCases.length} test case(s) selected</div>
+                  </>
+                )}
+
+                {suiteType === "DYNAMIC" && !editingSuiteId && (
+                  <>
+                    <label className="fieldLabel">Filter Criteria for Dynamic Suite</label>
+                    <label style={{ fontSize: "0.9em" }}>Modules (multi-select)</label>
+                    <select
+                      className="input"
+                      multiple
+                      size={3}
+                      value={suiteFilterModules}
+                      onChange={(e) => {
+                        const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                        setSuiteFilterModules(selected);
+                      }}
+                    >
+                      {Array.from(new Set(testCases.map((tc: any) => tc.module).filter(Boolean))).map((mod: any) => (
+                        <option key={mod} value={mod}>{mod}</option>
+                      ))}
+                    </select>
+
+                    <label style={{ fontSize: "0.9em", marginTop: "8px", display: "block" }}>Priorities</label>
+                    <select
+                      className="input"
+                      multiple
+                      size={3}
+                      value={suiteFilterPriorities}
+                      onChange={(e) => {
+                        const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                        setSuiteFilterPriorities(selected);
+                      }}
+                    >
+                      {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((pri) => (
+                        <option key={pri} value={pri}>{pri}</option>
+                      ))}
+                    </select>
+
+                    {suiteFilterPreviewCount !== null && (
+                      <div className="note">
+                        <strong>Preview:</strong> {suiteFilterPreviewCount} test case(s) match this filter
                       </div>
+                    )}
+
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          const filterJson = {
+                            modules: suiteFilterModules.length > 0 ? suiteFilterModules : undefined,
+                            priorities: suiteFilterPriorities.length > 0 ? suiteFilterPriorities : undefined,
+                            tags: suiteFilterTags.length > 0 ? suiteFilterTags : undefined,
+                            ...(suiteFilterAutoStatus && { automationStatus: suiteFilterAutoStatus }),
+                          };
+                          const result = await previewDynamicFilterApi(filterJson);
+                          setSuiteFilterPreviewCount(result.matchingCount || 0);
+                        } catch (error: any) {
+                          alert(error?.message || "Preview failed");
+                        }
+                      }}
+                      style={{ marginTop: "8px" }}
+                    >
+                      Preview Filter
+                    </button>
+                  </>
+                )}
+
+                <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      try {
+                        const fieldName = editingSuiteId ? editSuiteName : suiteName;
+                        if (!fieldName.trim()) {
+                          alert("Suite name is required");
+                          return;
+                        }
+
+                        if (editingSuiteId) {
+                          // EDIT MODE
+                          await updateSuiteApi(editingSuiteId, {
+                            description: editSuiteDescription || null,
+                            module: editSuiteModule || null,
+                          });
+                          resetSuiteFields();
+                          const suiteList = await listSuitesApi();
+                          setSuites(Array.isArray(suiteList) ? suiteList : []);
+                          alert("Test suite updated successfully!");
+                        } else {
+                          // CREATE MODE
+                          if (suiteType === "STATIC" && suiteStaticTestCases.length === 0) {
+                            alert("Select at least one test case for STATIC suite");
+                            return;
+                          }
+
+                          if (suiteType === "DYNAMIC" && suiteFilterPreviewCount === null) {
+                            alert("Preview filter first to ensure there are matching test cases");
+                            return;
+                          }
+
+                          const filterJson = {
+                            modules: suiteFilterModules.length > 0 ? suiteFilterModules : undefined,
+                            priorities: suiteFilterPriorities.length > 0 ? suiteFilterPriorities : undefined,
+                            tags: suiteFilterTags.length > 0 ? suiteFilterTags : undefined,
+                            ...(suiteFilterAutoStatus && { automationStatus: suiteFilterAutoStatus }),
+                          };
+
+                          await createSuiteApi({
+                            name: suiteName,
+                            description: suiteDescription || undefined,
+                            module: suiteModule || undefined,
+                            type: suiteType,
+                            testCaseIds: suiteType === "STATIC" ? suiteStaticTestCases : [],
+                            filterJson: suiteType === "DYNAMIC" ? filterJson : null,
+                          });
+
+                          resetSuiteFields();
+                          const suiteList = await listSuitesApi();
+                          setSuites(Array.isArray(suiteList) ? suiteList : []);
+                          alert("Test suite created successfully!");
+                        }
+                      } catch (error: any) {
+                        alert(error?.message || (editingSuiteId ? "Update suite failed" : "Create suite failed"));
+                      }
+                    }}
+                  >
+                    {editingSuiteId ? "Save Changes" : "Create Test Suite"}
+                  </button>
+                  {editingSuiteId && (
+                    <button
+                      className="button"
+                      style={{ backgroundColor: "#666" }}
+                      onClick={() => resetSuiteFields()}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </div>
+                </div>
+
+                {!editingSuiteId && (
+                  <>
+                    <h4 style={{ marginTop: "24px" }}>Test Suites List</h4>
+                    <div style={{ maxHeight: "400px", overflowY: "auto" }}>
+                      {suites.map((suite: any) => (
+                        <div key={suite.id} style={{ padding: "8px", border: "1px solid #ddd", marginBottom: "8px" }}>
+                          <div><strong>{suite.name}</strong> ({suite.type})</div>
+                          {suite.description && <div style={{ fontSize: "0.9em" }}>{suite.description}</div>}
+                          <div style={{ fontSize: "0.85em", color: "#666" }}>
+                        Cases: {suite._count?.suiteCases || 0} | Module: {suite.module || "N/A"}
+                      </div>
+                      <button
+                        className="button small"
+                        onClick={async () => {
+                          try {
+                            const detail = await getSuiteApi(suite.id);
+                            setSuiteDetails(detail);
+                            setSelectedSuiteId(suite.id);
+                          } catch (error: any) {
+                            alert(error?.message || "Load suite failed");
+                          }
+                        }}
+                        style={{ marginTop: "4px", marginRight: "4px" }}
+                      >
+                        View
+                      </button>
+                      <button
+                        className="button small"
+                        onClick={() => {
+                          setEditingSuiteId(suite.id);
+                          setEditSuiteName(suite.name);
+                          setEditSuiteDescription(suite.description || "");
+                          setEditSuiteModule(suite.module || "");
+                        }}
+                        style={{ marginTop: "4px", marginRight: "4px" }}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        className="button small"
+                        onClick={async () => {
+                          try {
+                            if (suite.isArchived) {
+                              await restoreSuiteApi(suite.id);
+                              alert("Suite restored");
+                            } else {
+                              await archiveSuiteApi(suite.id);
+                              alert("Suite archived");
+                            }
+                            const suiteList = await listSuitesApi();
+                            setSuites(Array.isArray(suiteList) ? suiteList : []);
+                          } catch (error: any) {
+                            alert(error?.message || "Operation failed");
+                          }
+                        }}
+                        style={{ marginTop: "4px" }}
+                      >
+                        {suite.isArchived ? "Restore" : "Archive"}
+                      </button>
                     </div>
+                  ))}
+                    </div>
+                  </>
+                )}
+
+                {suiteDetails && selectedSuiteId && (
+                  <div style={{ marginTop: "24px", padding: "16px", border: "2px solid #007bff", borderRadius: "4px", backgroundColor: "#f0f8ff" }}>
+                    <h4>Suite Details</h4>
+                    <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: "12px", marginBottom: "16px" }}>
+                      <strong>ID:</strong>
+                      <span>{suiteDetails.id}</span>
+                      <strong>Name:</strong>
+                      <span>{suiteDetails.name}</span>
+                      <strong>Description:</strong>
+                      <span>{suiteDetails.description || "N/A"}</span>
+                      <strong>Type:</strong>
+                      <span>{suiteDetails.type}</span>
+                      <strong>Module:</strong>
+                      <span>{suiteDetails.module || "N/A"}</span>
+                      <strong>Test Cases:</strong>
+                      <span>{suiteDetails._count?.suiteCases || 0}</span>
+                      <strong>Status:</strong>
+                      <span>{suiteDetails.isArchived ? "Archived" : "Active"}</span>
+                      <strong>Created:</strong>
+                      <span>{new Date(suiteDetails.createdAt).toLocaleString()}</span>
+                    </div>
+                    {suiteDetails.type === "DYNAMIC" && suiteDetails.filterJson && (
+                      <div style={{ marginBottom: "16px" }}>
+                        <strong>Filter Criteria:</strong>
+                        <pre style={{ backgroundColor: "#fff", padding: "8px", borderRadius: "4px", overflow: "auto" }}>
+                          {JSON.stringify(suiteDetails.filterJson, null, 2)}
+                        </pre>
+                      </div>
+                    )}
+                    <button
+                      className="button small"
+                      onClick={() => {
+                        setSuiteDetails(null);
+                        setSelectedSuiteId("");
+                      }}
+                    >
+                      Close
+                    </button>
                   </div>
                 )}
               </section>
@@ -2955,7 +2530,7 @@ function App() {
                 <h4>Execute Test Case</h4>
                 <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
                   <option value="">Select Test Case</option>
-                  {executionSelectableCases.map((tc) => (
+                  {testCases.map((tc) => (
                     <option key={tc.id} value={tc.id}>
                       {tc.testCaseCode || tc.id} - {tc.title}
                     </option>
@@ -2973,19 +2548,39 @@ function App() {
                   className="button"
                   onClick={async () => {
                     try {
-                      setActiveSuiteExecutionContext(null);
                       if (!executionCaseId) {
                         alert("Select a test case");
                         return;
                       }
-                      if (executionRunId) {
-                        const inRun = executionSelectableCases.some((tc) => tc.id === executionCaseId);
-                        if (!inRun) {
-                          alert("Selected test case is not part of the selected test run.");
-                          return;
-                        }
+                      const opened = await openExecutionApi(executionCaseId, executionRunId || undefined);
+                      const currentSteps = Array.isArray(opened?.stepResults) ? opened.stepResults : [];
+                      setExecutionSteps(currentSteps);
+                      setExecutionProgress(opened?.draftExecution?.progressPercent || 0);
+                      setExecutionNotes(opened?.draftExecution?.notes || "");
+                      setExecutionStartedAt(opened?.draftExecution?.startedAt || "");
+                      setExecutionCompletedAt(opened?.draftExecution?.completedAt || "");
+                      setExecutionDurationSeconds(
+                        typeof opened?.draftExecution?.durationSeconds === "number"
+                          ? opened.draftExecution.durationSeconds
+                          : null
+                      );
+                      setExecutionEvidence(Array.isArray(opened?.draftExecution?.evidence) ? opened.draftExecution.evidence : []);
+                      if (opened?.draftExecution?.id) {
+                        setExecutionId(opened.draftExecution.id);
+                      } else {
+                        const started = await startExecutionApi({
+                          testCaseId: executionCaseId,
+                          testRunId: executionRunId || null,
+                        });
+                        setExecutionId(started.id);
+                        setExecutionStartedAt(started?.startedAt || "");
+                        setExecutionCompletedAt("");
+                        setExecutionDurationSeconds(null);
+                        setExecutionEvidence([]);
                       }
-                      await openExecutionSession(executionCaseId, executionRunId || undefined);
+                      if (currentSteps.length > 0) {
+                        setExecutionSelectedStepNumber(String(currentSteps[0].stepNumber));
+                      }
                     } catch (error: any) {
                       alert(error?.message || "Open execution failed");
                     }
@@ -3110,20 +2705,6 @@ function App() {
                             notes: executionNotes,
                           });
                           await loadTestCaseData();
-                          let freshSuiteExecution: any = null;
-                          if (
-                            activeSuiteExecutionContext?.suiteExecutionId &&
-                            activeSuiteExecutionContext?.runId &&
-                            executionRunId &&
-                            activeSuiteExecutionContext.runId === executionRunId
-                          ) {
-                            try {
-                              freshSuiteExecution = await getSuiteExecutionApi(activeSuiteExecutionContext.suiteExecutionId);
-                              setSuiteExecutionDetails(freshSuiteExecution);
-                            } catch {
-                              // ignore secondary refresh failures
-                            }
-                          }
                           setSelectedExecutionReportId(final.id);
                           setExecutionCompletedAt(final?.completedAt || executionCompletedAt);
                           setExecutionDurationSeconds(
@@ -3134,20 +2715,6 @@ function App() {
                           setExecutionStepStatus("PASSED");
                           setExecutionActualResult("");
                           setExecutionStepNotes("");
-                          if (
-                            freshSuiteExecution &&
-                            String(activeSuiteExecutionContext?.mode || "").toUpperCase() === "SEQUENTIAL"
-                          ) {
-                            const nextPending = (freshSuiteExecution.cases || []).find(
-                              (item: any) => item.status === "NOT_RUN"
-                            );
-                            if (nextPending) {
-                              await openSuiteExecutionCase(freshSuiteExecution, nextPending);
-                              alert(`Execution finalized: ${final.result}. Opened next pending suite case.`);
-                              return;
-                            }
-                            setActiveSuiteExecutionContext(null);
-                          }
                           alert(`Execution finalized: ${final.result}`);
                         } catch (error: any) {
                           alert(error?.message || "Finalize failed");
@@ -4248,6 +3815,72 @@ function App() {
                 </div>
               )}
             </section>
+            )}
+            {adminEditUserId && (
+              <div className="modalBackdrop">
+                <div className="modalCard">
+                  <h4>Edit User</h4>
+                  <label className="fieldLabel" htmlFor="admin-edit-name">Name</label>
+                  <input
+                    id="admin-edit-name"
+                    className="input"
+                    value={adminEditName}
+                    onChange={(e) => setAdminEditName(e.target.value)}
+                  />
+                  <label className="fieldLabel" htmlFor="admin-edit-role">Role</label>
+                  <select
+                    id="admin-edit-role"
+                    className="input"
+                    value={adminEditRole}
+                    onChange={(e) => setAdminEditRole(e.target.value)}
+                  >
+                    <option value="TESTER">TESTER</option>
+                    <option value="DEVELOPER">DEVELOPER</option>
+                    <option value="ADMIN">ADMIN</option>
+                  </select>
+                  <label className="fieldLabel" htmlFor="admin-edit-active">Status</label>
+                  <select
+                    id="admin-edit-active"
+                    className="input"
+                    value={adminEditActive ? "active" : "inactive"}
+                    onChange={(e) => setAdminEditActive(e.target.value === "active")}
+                  >
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                  <div className="toolbarActions">
+                    <button
+                      className="button small"
+                      onClick={async () => {
+                        try {
+                          if (!adminEditName.trim()) {
+                            alert("Name is required");
+                            return;
+                          }
+                          await updateAdminUserApi(adminEditUserId, {
+                            name: adminEditName.trim(),
+                            role: adminEditRole,
+                            isActive: adminEditActive,
+                          });
+                          setAdminEditUserId("");
+                          await loadAdminUsers();
+                          alert("User updated");
+                        } catch (error: any) {
+                          alert(error?.message || "Update user failed");
+                        }
+                      }}
+                    >
+                      Save User
+                    </button>
+                    <button
+                      className="button small danger"
+                      onClick={() => setAdminEditUserId("")}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
               </div>
             </div>

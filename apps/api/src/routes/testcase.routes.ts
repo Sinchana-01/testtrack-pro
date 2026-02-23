@@ -631,16 +631,58 @@ const writeAuditLog = async (
 
 const generateTestCaseCode = async (): Promise<string> => {
   const year = new Date().getFullYear();
-  const count = await prisma.testCase.count();
-  const serial = String(count + 1).padStart(5, "0");
-  return `TC-${year}-${serial}`;
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
+    const count = await prisma.testCase.count();
+    const serial = String(count + 1 + attempts).padStart(5, "0");
+    const code = `TC-${year}-${serial}`;
+    
+    // Check if this code already exists
+    const existing = await prisma.testCase.findUnique({
+      where: { testCaseCode: code }
+    });
+    
+    if (!existing) {
+      return code;
+    }
+    
+    attempts++;
+  }
+  
+  // Fallback: use timestamp + random if retry limit exceeded
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 10000);
+  return `TC-${year}-${String(random).padStart(5, "0")}-${timestamp}`;
 };
 
 const generateBugCode = async (): Promise<string> => {
   const year = new Date().getFullYear();
-  const count = await prisma.issue.count();
-  const serial = String(count + 1).padStart(5, "0");
-  return `BUG-${year}-${serial}`;
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
+    const count = await prisma.issue.count();
+    const serial = String(count + 1 + attempts).padStart(5, "0");
+    const code = `BUG-${year}-${serial}`;
+    
+    // Check if this code already exists
+    const existing = await prisma.issue.findUnique({
+      where: { bugCode: code }
+    });
+    
+    if (!existing) {
+      return code;
+    }
+    
+    attempts++;
+  }
+  
+  // Fallback: use timestamp + random if retry limit exceeded
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 10000);
+  return `BUG-${year}-${String(random).padStart(5, "0")}-${timestamp}`;
 };
 
 const resolveTestCaseRefs = async (
@@ -676,6 +718,12 @@ const resolveTestCaseRefs = async (
 };
 
 router.use(authenticate);
+router.use((req: AuthRequest, res: Response, next) => {
+  if (req.user?.role === Role.ADMIN && !req.path.startsWith("/admin")) {
+    return res.status(403).json({ message: "Admins can only access admin module endpoints." });
+  }
+  return next();
+});
 
 /* =========================
    TESTER/SHARED TEST CASE FLOWS
@@ -723,87 +771,92 @@ router.get(
 );
 
 router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
-  const title = asString(req.body.title);
-  const description = asString(req.body.description);
-  const preConditions = parseJsonValue(req.body.preConditions, []);
-  const testDataRequirements = parseJsonValue(req.body.testDataRequirements, []);
-  const environmentRequirements = parseJsonValue(req.body.environmentRequirements, []);
-  const postConditions = parseJsonValue(req.body.postConditions, []);
-  const metadata = parseJsonValue(req.body.metadata, {});
-  const moduleName = asString(req.body.module);
-  const steps = parseJsonValue(req.body.steps, []);
-  const priority = parseEnum(Priority, req.body.priority) || Priority.MEDIUM;
-  const severity = parseEnum(TestSeverity, req.body.severity) || TestSeverity.MAJOR;
-  const type = parseEnum(TestCaseType, req.body.type) || TestCaseType.FUNCTIONAL;
-  const status = parseEnum(TestCaseStatus, req.body.status) || TestCaseStatus.DRAFT;
-  const tags = asStringArray(req.body.tags);
-  const estimatedDurationMinutes =
-    typeof req.body.estimatedDurationMinutes === "number" ? req.body.estimatedDurationMinutes : null;
-  const automationStatus =
-    parseEnum(AutomationStatus, req.body.automationStatus) || AutomationStatus.NOT_AUTOMATED;
-  const automationScriptLink = asString(req.body.automationScriptLink) || null;
-  const assignedTo = asString(req.body.assignedTo) || null;
-  const projectId = asString(req.body.projectId) || null;
-  const requestedCode = asString(req.body.testCaseCode);
+  try {
+    const title = asString(req.body.title);
+    const description = asString(req.body.description);
+    const preConditions = parseJsonValue(req.body.preConditions, []);
+    const testDataRequirements = parseJsonValue(req.body.testDataRequirements, []);
+    const environmentRequirements = parseJsonValue(req.body.environmentRequirements, []);
+    const postConditions = parseJsonValue(req.body.postConditions, []);
+    const metadata = parseJsonValue(req.body.metadata, {});
+    const moduleName = asString(req.body.module);
+    const steps = parseJsonValue(req.body.steps, []);
+    const priority = parseEnum(Priority, req.body.priority) || Priority.MEDIUM;
+    const severity = parseEnum(TestSeverity, req.body.severity) || TestSeverity.MAJOR;
+    const type = parseEnum(TestCaseType, req.body.type) || TestCaseType.FUNCTIONAL;
+    const status = parseEnum(TestCaseStatus, req.body.status) || TestCaseStatus.DRAFT;
+    const tags = asStringArray(req.body.tags);
+    const estimatedDurationMinutes =
+      typeof req.body.estimatedDurationMinutes === "number" ? req.body.estimatedDurationMinutes : null;
+    const automationStatus =
+      parseEnum(AutomationStatus, req.body.automationStatus) || AutomationStatus.NOT_AUTOMATED;
+    const automationScriptLink = asString(req.body.automationScriptLink) || null;
+    const assignedTo = asString(req.body.assignedTo) || null;
+    const projectId = asString(req.body.projectId) || null;
+    const requestedCode = asString(req.body.testCaseCode);
 
-  if (
-    !title ||
-    !description ||
-    !moduleName ||
-    !steps ||
-    req.body.preConditions === undefined ||
-    req.body.testDataRequirements === undefined ||
-    req.body.environmentRequirements === undefined ||
-    req.body.postConditions === undefined
-  ) {
-    return res.status(400).json({
-      message:
-        "title, description, preConditions, testDataRequirements, environmentRequirements, steps, postConditions, module, priority, severity, type, and status are required",
+    if (
+      !title ||
+      !description ||
+      !moduleName ||
+      !steps ||
+      req.body.preConditions === undefined ||
+      req.body.testDataRequirements === undefined ||
+      req.body.environmentRequirements === undefined ||
+      req.body.postConditions === undefined
+    ) {
+      return res.status(400).json({
+        message:
+          "title, description, preConditions, testDataRequirements, environmentRequirements, steps, postConditions, module, priority, severity, type, and status are required",
+      });
+    }
+    if (title.length > 200) {
+      return res.status(400).json({ message: "Title cannot exceed 200 characters" });
+    }
+    const stepsValidationError = validateStepItems(steps);
+    if (stepsValidationError) {
+      return res.status(400).json({ message: stepsValidationError });
+    }
+
+    const nextCode = requestedCode || (await generateTestCaseCode());
+    const created = await prisma.testCase.create({
+      data: {
+        testCaseCode: nextCode,
+        title,
+        description,
+        preConditions,
+        testDataRequirements,
+        environmentRequirements,
+        postConditions,
+        metadata,
+        module: moduleName,
+        steps,
+        priority,
+        severity,
+        type,
+        status,
+        tags,
+        estimatedDurationMinutes,
+        automationStatus,
+        automationScriptLink,
+        createdBy: req.user!.userId,
+        lastModifiedBy: req.user!.userId,
+        lastModifiedAt: new Date(),
+        assignedTo,
+        projectId,
+      },
     });
-  }
-  if (title.length > 200) {
-    return res.status(400).json({ message: "Title cannot exceed 200 characters" });
-  }
-  const stepsValidationError = validateStepItems(steps);
-  if (stepsValidationError) {
-    return res.status(400).json({ message: stepsValidationError });
-  }
 
-  const nextCode = requestedCode || (await generateTestCaseCode());
-  const created = await prisma.testCase.create({
-    data: {
-      testCaseCode: nextCode,
-      title,
-      description,
-      preConditions,
-      testDataRequirements,
-      environmentRequirements,
-      postConditions,
-      metadata,
-      module: moduleName,
-      steps,
-      priority,
-      severity,
-      type,
-      status,
-      tags,
-      estimatedDurationMinutes,
-      automationStatus,
-      automationScriptLink,
-      createdBy: req.user!.userId,
-      lastModifiedBy: req.user!.userId,
-      lastModifiedAt: new Date(),
-      assignedTo,
-      projectId,
-    },
-  });
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_CASE", "TestCase", created.id, {
+      title: created.title,
+      priority: created.priority,
+    });
 
-  await writeAuditLog(req.user!.userId, "CREATE_TEST_CASE", "TestCase", created.id, {
-    title: created.title,
-    priority: created.priority,
-  });
-
-  return res.status(201).json(created);
+    return res.status(201).json(created);
+  } catch (error: any) {
+    console.error("CREATE_TEST_CASE_ERROR:", error?.message || error);
+    return res.status(500).json({ message: error?.message || "Failed to create test case" });
+  }
 });
 
 router.put("/testcases/:id", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
@@ -1164,6 +1217,24 @@ router.get(
   }
 );
 
+router.delete(
+  "/testcase-templates/:id",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
+    if (!template) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+    if (template.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can only delete templates you created" });
+    }
+
+    await prisma.testCaseTemplate.delete({ where: { id: req.params.id } });
+    await writeAuditLog(req.user!.userId, "DELETE_TEST_CASE_TEMPLATE", "TestCaseTemplate", req.params.id);
+    return res.json({ message: "Template deleted" });
+  }
+);
+
 router.post(
   "/testcases/from-template/:templateId",
   authorizeRoles(Role.TESTER),
@@ -1379,305 +1450,338 @@ router.post(
   "/testcases/import",
   authorizeRoles(Role.TESTER),
   async (req: AuthRequest, res: Response) => {
-    const sourceType = parseEnum(ImportSourceType, asString(req.body.sourceType).toUpperCase());
-    if (!sourceType) {
-      return res.status(400).json({ message: "sourceType is required: JSON, CSV, or EXCEL" });
-    }
-    const preview = Boolean(req.body.preview);
-    const confirmImport = Boolean(req.body.confirm);
-    if (!preview && !confirmImport) {
-      return res.status(400).json({ message: "confirm=true is required for final import" });
-    }
-    const fieldMapping =
-      req.body.fieldMapping && typeof req.body.fieldMapping === "object"
-        ? (req.body.fieldMapping as Record<string, string>)
-        : {};
-    const mapKey = (key: string): string => (fieldMapping[key] || key).toLowerCase();
-
-    const projectId = asString(req.body.projectId) || null;
-    const assignedTo = asString(req.body.assignedTo) || null;
-    const errors: string[] = [];
-    const createdIds: string[] = [];
-
-    let records: Array<{
-      title: string;
-      description: string;
-      preConditions: Prisma.InputJsonValue;
-      testDataRequirements: Prisma.InputJsonValue;
-      environmentRequirements: Prisma.InputJsonValue;
-      postConditions: Prisma.InputJsonValue;
-      metadata: Prisma.InputJsonValue;
-      module: string;
-      steps: Prisma.InputJsonValue;
-      priority?: Priority;
-      severity?: TestSeverity;
-      type?: TestCaseType;
-      status?: TestCaseStatus;
-      tags?: string[];
-      estimatedDurationMinutes?: number | null;
-      automationStatus?: AutomationStatus;
-      automationScriptLink?: string | null;
-    }> = [];
-
-    if (sourceType === ImportSourceType.JSON) {
-      const rawItems = req.body.items;
-      const items =
-        Array.isArray(rawItems)
-          ? rawItems
-          : rawItems && typeof rawItems === "object"
-          ? [rawItems]
-          : [];
-      records = items.map((item: unknown) => {
-        const row = (item ?? {}) as Record<string, unknown>;
-        const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
-        return {
-          title: asString(read("title")),
-          description: asString(read("description")),
-          preConditions: parseJsonValue(read("preConditions"), []),
-          testDataRequirements: parseJsonValue(read("testDataRequirements"), []),
-          environmentRequirements: parseJsonValue(read("environmentRequirements"), []),
-          postConditions: parseJsonValue(read("postConditions"), []),
-          metadata: parseJsonValue(read("metadata"), {}),
-          module: asString(read("module")) || "General",
-          steps: parseJsonValue(read("steps"), []),
-          priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
-          severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
-          type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
-          status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
-          tags: asStringArray(read("tags")),
-          estimatedDurationMinutes:
-            typeof read("estimatedDurationMinutes") === "number"
-              ? (read("estimatedDurationMinutes") as number)
-              : null,
-          automationStatus:
-            parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
-          automationScriptLink: asString(read("automationScriptLink")) || null,
-        };
-      });
-    } else if (sourceType === ImportSourceType.CSV) {
-      const csvText = asString(req.body.csvText);
-      if (!csvText) {
-        return res.status(400).json({ message: "csvText is required for CSV import" });
+    try {
+      const sourceType = parseEnum(ImportSourceType, asString(req.body.sourceType).toUpperCase());
+      if (!sourceType) {
+        return res.status(400).json({ message: "sourceType is required: JSON, CSV, or EXCEL" });
       }
-      const lines = csvText
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-      if (lines.length < 2) {
-        return res.status(400).json({ message: "CSV requires header + at least one row" });
+      const preview = Boolean(req.body.preview);
+      const confirmImport = Boolean(req.body.confirm);
+      if (!preview && !confirmImport) {
+        return res.status(400).json({ message: "confirm=true is required for final import" });
       }
-      const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
-      records = lines.slice(1).map((line) => {
-        const cells = parseCsvLine(line);
-        const map: Record<string, string> = {};
-        headers.forEach((h, idx) => {
-          map[h] = (cells[idx] || "").trim();
+      const fieldMapping =
+        req.body.fieldMapping && typeof req.body.fieldMapping === "object"
+          ? (req.body.fieldMapping as Record<string, string>)
+          : {};
+      const mapKey = (key: string): string => (fieldMapping[key] || key).toLowerCase();
+
+      const projectId = asString(req.body.projectId) || null;
+      const assignedTo = asString(req.body.assignedTo) || null;
+      const errors: string[] = [];
+      const createdIds: string[] = [];
+
+      let records: Array<{
+        title: string;
+        description: string;
+        preConditions: Prisma.InputJsonValue;
+        testDataRequirements: Prisma.InputJsonValue;
+        environmentRequirements: Prisma.InputJsonValue;
+        postConditions: Prisma.InputJsonValue;
+        metadata: Prisma.InputJsonValue;
+        module: string;
+        steps: Prisma.InputJsonValue;
+        priority?: Priority;
+        severity?: TestSeverity;
+        type?: TestCaseType;
+        status?: TestCaseStatus;
+        tags?: string[];
+        estimatedDurationMinutes?: number | null;
+        automationStatus?: AutomationStatus;
+        automationScriptLink?: string | null;
+      }> = [];
+
+      if (sourceType === ImportSourceType.JSON) {
+        const rawItems = req.body.items;
+        const items =
+          Array.isArray(rawItems)
+            ? rawItems
+            : rawItems && typeof rawItems === "object"
+            ? [rawItems]
+            : [];
+        records = items.map((item: unknown) => {
+          const row = (item ?? {}) as Record<string, unknown>;
+          const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
+          return {
+            title: asString(read("title")),
+            description: asString(read("description")),
+            preConditions: parseJsonValue(read("preConditions"), []),
+            testDataRequirements: parseJsonValue(read("testDataRequirements"), []),
+            environmentRequirements: parseJsonValue(read("environmentRequirements"), []),
+            postConditions: parseJsonValue(read("postConditions"), []),
+            metadata: parseJsonValue(read("metadata"), {}),
+            module: asString(read("module")) || "General",
+            steps: parseJsonValue(read("steps"), []),
+            priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
+            severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
+            type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
+            status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
+            tags: asStringArray(read("tags")),
+            estimatedDurationMinutes:
+              typeof read("estimatedDurationMinutes") === "number"
+                ? (read("estimatedDurationMinutes") as number)
+                : null,
+            automationStatus:
+              parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
+            automationScriptLink: asString(read("automationScriptLink")) || null,
+          };
         });
-        const read = (canonical: string): string => map[mapKey(canonical)] || "";
-        let parsedSteps: Prisma.InputJsonValue = [];
-        try {
-          parsedSteps = read("steps") ? (JSON.parse(read("steps")) as Prisma.InputJsonValue) : [];
-        } catch {
-          parsedSteps = (read("steps") || []) as Prisma.InputJsonValue;
+      } else if (sourceType === ImportSourceType.CSV) {
+        const csvText = asString(req.body.csvText);
+        if (!csvText) {
+          return res.status(400).json({ message: "csvText is required for CSV import" });
         }
-        return {
-          title: read("title"),
-          description: read("description"),
-          preConditions: read("preConditions") ? parseJsonValue(read("preConditions"), []) : [],
-          testDataRequirements: read("testDataRequirements")
-            ? parseJsonValue(read("testDataRequirements"), [])
-            : [],
-          environmentRequirements: read("environmentRequirements")
-            ? parseJsonValue(read("environmentRequirements"), [])
-            : [],
-          postConditions: read("postConditions") ? parseJsonValue(read("postConditions"), []) : [],
-          metadata: read("metadata") ? parseJsonValue(read("metadata"), {}) : {},
-          module: read("module") || "General",
-          steps: parsedSteps,
-          priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
-          severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
-          type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
-          status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
-          tags: read("tags")
-            ? read("tags")
-                .split("|")
-                .map((item) => item.trim())
-                .filter(Boolean)
-            : [],
-          estimatedDurationMinutes: read("estimatedDurationMinutes")
-            ? Number(read("estimatedDurationMinutes"))
-            : null,
-          automationStatus:
-            parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
-          automationScriptLink: read("automationScriptLink") || null,
-        };
-      });
-    } else {
-      const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
-      records = rows.map((item: unknown) => {
-        const row = (item ?? {}) as Record<string, unknown>;
-        const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
-        return {
-          title: asString(read("title")),
-          description: asString(read("description")),
-          preConditions: parseJsonValue(read("preConditions"), []),
-          testDataRequirements: parseJsonValue(read("testDataRequirements"), []),
-          environmentRequirements: parseJsonValue(read("environmentRequirements"), []),
-          postConditions: parseJsonValue(read("postConditions"), []),
-          metadata: parseJsonValue(read("metadata"), {}),
-          module: asString(read("module")) || "General",
-          steps: parseJsonValue(read("steps"), []),
-          priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
-          severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
-          type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
-          status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
-          tags: asStringArray(read("tags")),
-          estimatedDurationMinutes:
-            typeof read("estimatedDurationMinutes") === "number"
-              ? (read("estimatedDurationMinutes") as number)
+        const lines = csvText
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (lines.length < 2) {
+          return res.status(400).json({ message: "CSV requires header + at least one row" });
+        }
+        const headers = parseCsvLine(lines[0]).map((h) => h.toLowerCase());
+        records = lines.slice(1).map((line) => {
+          const cells = parseCsvLine(line);
+          const map: Record<string, string> = {};
+          headers.forEach((h, idx) => {
+            map[h] = (cells[idx] || "").trim();
+          });
+          const read = (canonical: string): string => map[mapKey(canonical)] || "";
+          let parsedSteps: Prisma.InputJsonValue = [];
+          
+          const stepsInput = read("steps");
+          if (stepsInput) {
+            try {
+              // Try parsing as JSON array first
+              parsedSteps = JSON.parse(stepsInput) as Prisma.InputJsonValue;
+            } catch {
+              // If JSON parsing fails, create a simple step from the text
+              if (typeof stepsInput === "string" && stepsInput.trim()) {
+                parsedSteps = [
+                  {
+                    stepNumber: 1,
+                    action: stepsInput,
+                    testData: "N/A",
+                    expectedResult: "Test case executed"
+                  }
+                ];
+              }
+            }
+          }
+          
+          // Ensure steps is always an array with at least one step
+          if (!Array.isArray(parsedSteps) || parsedSteps.length === 0) {
+            parsedSteps = [
+              {
+                stepNumber: 1,
+                action: "Execute test case",
+                testData: "N/A",
+                expectedResult: "Test case completes"
+              }
+            ];
+          }
+          
+          return {
+            title: read("title"),
+            description: read("description"),
+            preConditions: read("preConditions") ? parseJsonValue(read("preConditions"), []) : [],
+            testDataRequirements: read("testDataRequirements")
+              ? parseJsonValue(read("testDataRequirements"), [])
+              : [],
+            environmentRequirements: read("environmentRequirements")
+              ? parseJsonValue(read("environmentRequirements"), [])
+              : [],
+            postConditions: read("postConditions") ? parseJsonValue(read("postConditions"), []) : [],
+            metadata: read("metadata") ? parseJsonValue(read("metadata"), {}) : {},
+            module: read("module") || "General",
+            steps: parsedSteps,
+            priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
+            severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
+            type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
+            status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
+            tags: read("tags")
+              ? read("tags")
+                  .split("|")
+                  .map((item) => item.trim())
+                  .filter(Boolean)
+              : [],
+            estimatedDurationMinutes: read("estimatedDurationMinutes")
+              ? Number(read("estimatedDurationMinutes"))
               : null,
-          automationStatus:
-            parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
-          automationScriptLink: asString(read("automationScriptLink")) || null,
-        };
-      });
-    }
-
-    if (records.length === 0) {
-      return res.status(400).json({
-        message:
-          "No import rows found. Provide at least one row/item for the selected source type before preview/confirm.",
-      });
-    }
-
-    for (let idx = 0; idx < records.length; idx += 1) {
-      const record = records[idx];
-      if (
-        !record.title ||
-        !record.description ||
-        !record.module ||
-        record.steps === undefined ||
-        record.preConditions === undefined ||
-        record.testDataRequirements === undefined ||
-        record.environmentRequirements === undefined ||
-        record.postConditions === undefined
-      ) {
-        errors.push(
-          `Row ${idx + 1}: title, description, preConditions, testDataRequirements, environmentRequirements, module, steps, and postConditions are required`
-        );
-        continue;
-      }
-      if (record.title.length > 200) {
-        errors.push(`Row ${idx + 1}: title exceeds 200 characters`);
-        continue;
-      }
-      const stepsValidationError = validateStepItems(record.steps);
-      if (stepsValidationError) {
-        errors.push(`Row ${idx + 1}: ${stepsValidationError}`);
-        continue;
-      }
-      if (record.estimatedDurationMinutes !== null && Number.isNaN(record.estimatedDurationMinutes)) {
-        errors.push(`Row ${idx + 1}: estimatedDurationMinutes must be a number`);
-      }
-    }
-
-    if (preview) {
-      return res.json({
-        message: "Import preview generated",
-        total: records.length,
-        failed: errors.length,
-        success: records.length - errors.length,
-        errors,
-        preview: records.slice(0, 50),
-      });
-    }
-
-    for (let idx = 0; idx < records.length; idx += 1) {
-      const record = records[idx];
-      if (
-        !record.title ||
-        !record.description ||
-        !record.module ||
-        record.steps === undefined ||
-        record.preConditions === undefined ||
-        record.testDataRequirements === undefined ||
-        record.environmentRequirements === undefined ||
-        record.postConditions === undefined
-      ) {
-        continue;
-      }
-      if (record.title.length > 200) {
-        continue;
-      }
-      const stepsValidationError = validateStepItems(record.steps);
-      if (stepsValidationError) {
-        continue;
-      }
-      if (record.estimatedDurationMinutes !== null && Number.isNaN(record.estimatedDurationMinutes)) {
-        continue;
-      }
-      try {
-        const nextCode = await generateTestCaseCode();
-        const created = await prisma.testCase.create({
-          data: {
-            testCaseCode: nextCode,
-            title: record.title,
-            description: record.description,
-            preConditions: record.preConditions,
-            testDataRequirements: record.testDataRequirements,
-            environmentRequirements: record.environmentRequirements,
-            postConditions: record.postConditions,
-            metadata: record.metadata,
-            module: record.module,
-            steps: record.steps as never,
-            priority: record.priority || Priority.MEDIUM,
-            severity: record.severity || TestSeverity.MAJOR,
-            type: record.type || TestCaseType.FUNCTIONAL,
-            status: record.status || TestCaseStatus.DRAFT,
-            tags: record.tags || [],
-            estimatedDurationMinutes: record.estimatedDurationMinutes ?? null,
-            automationStatus: record.automationStatus || AutomationStatus.NOT_AUTOMATED,
-            automationScriptLink: record.automationScriptLink || null,
-            createdBy: req.user!.userId,
-            lastModifiedBy: req.user!.userId,
-            lastModifiedAt: new Date(),
-            assignedTo,
-            projectId,
-          },
+            automationStatus:
+              parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
+            automationScriptLink: read("automationScriptLink") || null,
+          };
         });
-        createdIds.push(created.id);
-      } catch (error) {
-        errors.push(`Row ${idx + 1}: failed to create`);
+      } else {
+        const rows = Array.isArray(req.body.rows) ? req.body.rows : [];
+        records = rows.map((item: unknown) => {
+          const row = (item ?? {}) as Record<string, unknown>;
+          const read = (canonical: string): unknown => row[fieldMapping[canonical] || canonical];
+          return {
+            title: asString(read("title")),
+            description: asString(read("description")),
+            preConditions: parseJsonValue(read("preConditions"), []),
+            testDataRequirements: parseJsonValue(read("testDataRequirements"), []),
+            environmentRequirements: parseJsonValue(read("environmentRequirements"), []),
+            postConditions: parseJsonValue(read("postConditions"), []),
+            metadata: parseJsonValue(read("metadata"), {}),
+            module: asString(read("module")) || "General",
+            steps: parseJsonValue(read("steps"), []),
+            priority: parseEnum(Priority, read("priority")) || Priority.MEDIUM,
+            severity: parseEnum(TestSeverity, read("severity")) || TestSeverity.MAJOR,
+            type: parseEnum(TestCaseType, read("type")) || TestCaseType.FUNCTIONAL,
+            status: parseEnum(TestCaseStatus, read("status")) || TestCaseStatus.DRAFT,
+            tags: asStringArray(read("tags")),
+            estimatedDurationMinutes:
+              typeof read("estimatedDurationMinutes") === "number"
+                ? (read("estimatedDurationMinutes") as number)
+                : null,
+            automationStatus:
+              parseEnum(AutomationStatus, read("automationStatus")) || AutomationStatus.NOT_AUTOMATED,
+            automationScriptLink: asString(read("automationScriptLink")) || null,
+          };
+        });
       }
-    }
 
-    const job = await prisma.testCaseImportJob.create({
-      data: {
-        importedBy: req.user!.userId,
-        sourceType,
-        totalRecords: records.length,
-        successCount: createdIds.length,
-        failedCount: errors.length,
-        errors: errors.length > 0 ? (errors as never) : undefined,
+      if (records.length === 0) {
+        return res.status(400).json({
+          message:
+            "No import rows found. Provide at least one row/item for the selected source type before preview/confirm.",
+        });
+      }
+
+      for (let idx = 0; idx < records.length; idx += 1) {
+        const record = records[idx];
+        if (
+          !record.title ||
+          !record.description ||
+          !record.module ||
+          record.steps === undefined ||
+          record.preConditions === undefined ||
+          record.testDataRequirements === undefined ||
+          record.environmentRequirements === undefined ||
+          record.postConditions === undefined
+        ) {
+          errors.push(
+            `Row ${idx + 1}: title, description, preConditions, testDataRequirements, environmentRequirements, module, steps, and postConditions are required`
+          );
+          continue;
+        }
+        if (record.title.length > 200) {
+          errors.push(`Row ${idx + 1}: title exceeds 200 characters`);
+          continue;
+        }
+        const stepsValidationError = validateStepItems(record.steps);
+        if (stepsValidationError) {
+          errors.push(`Row ${idx + 1}: ${stepsValidationError}`);
+          continue;
+        }
+        if (record.estimatedDurationMinutes !== null && Number.isNaN(record.estimatedDurationMinutes)) {
+          errors.push(`Row ${idx + 1}: estimatedDurationMinutes must be a number`);
+        }
+      }
+
+      if (preview) {
+        return res.json({
+          message: "Import preview generated",
+          total: records.length,
+          failed: errors.length,
+          success: records.length - errors.length,
+          errors,
+          preview: records.slice(0, 50),
+        });
+      }
+
+      for (let idx = 0; idx < records.length; idx += 1) {
+        const record = records[idx];
+        if (
+          !record.title ||
+          !record.description ||
+          !record.module ||
+          record.steps === undefined ||
+          record.preConditions === undefined ||
+          record.testDataRequirements === undefined ||
+          record.environmentRequirements === undefined ||
+          record.postConditions === undefined
+        ) {
+          continue;
+        }
+        if (record.title.length > 200) {
+          continue;
+        }
+        const stepsValidationError = validateStepItems(record.steps);
+        if (stepsValidationError) {
+          continue;
+        }
+        if (record.estimatedDurationMinutes !== null && Number.isNaN(record.estimatedDurationMinutes)) {
+          continue;
+        }
+        try {
+          const nextCode = await generateTestCaseCode();
+          const created = await prisma.testCase.create({
+            data: {
+              testCaseCode: nextCode,
+              title: record.title,
+              description: record.description,
+              preConditions: record.preConditions,
+              testDataRequirements: record.testDataRequirements,
+              environmentRequirements: record.environmentRequirements,
+              postConditions: record.postConditions,
+              metadata: record.metadata,
+              module: record.module,
+              steps: record.steps as never,
+              priority: record.priority || Priority.MEDIUM,
+              severity: record.severity || TestSeverity.MAJOR,
+              type: record.type || TestCaseType.FUNCTIONAL,
+              status: record.status || TestCaseStatus.DRAFT,
+              tags: record.tags || [],
+              estimatedDurationMinutes: record.estimatedDurationMinutes ?? null,
+              automationStatus: record.automationStatus || AutomationStatus.NOT_AUTOMATED,
+              automationScriptLink: record.automationScriptLink || null,
+              createdBy: req.user!.userId,
+              lastModifiedBy: req.user!.userId,
+              lastModifiedAt: new Date(),
+              assignedTo,
+              projectId,
+            },
+          });
+          createdIds.push(created.id);
+        } catch (error) {
+          errors.push(`Row ${idx + 1}: failed to create`);
+        }
+      }
+
+      const job = await prisma.testCaseImportJob.create({
+        data: {
+          importedBy: req.user!.userId,
+          sourceType,
+          totalRecords: records.length,
+          successCount: createdIds.length,
+          failedCount: errors.length,
+          errors: errors.length > 0 ? (errors as never) : undefined,
+          createdIds,
+        },
+      });
+
+      await writeAuditLog(req.user!.userId, "IMPORT_TEST_CASES", "TestCaseImportJob", job.id, {
+        total: records.length,
+        success: createdIds.length,
+        failed: errors.length,
+      });
+
+      return res.status(201).json({
+        message: "Import completed",
+        importJobId: job.id,
+        total: records.length,
+        success: createdIds.length,
+        failed: errors.length,
+        errors,
         createdIds,
-      },
-    });
-
-    await writeAuditLog(req.user!.userId, "IMPORT_TEST_CASES", "TestCaseImportJob", job.id, {
-      total: records.length,
-      success: createdIds.length,
-      failed: errors.length,
-    });
-
-    return res.status(201).json({
-      message: "Import completed",
-      importJobId: job.id,
-      total: records.length,
-      success: createdIds.length,
-      failed: errors.length,
-      errors,
-      createdIds,
-    });
+      });
+    } catch (error: any) {
+      console.error("IMPORT_TEST_CASES_ERROR:", error?.message || error);
+      return res.status(500).json({ message: error?.message || "Failed to import test cases" });
+    }
   }
 );
 
@@ -2421,6 +2525,19 @@ router.get(
 );
 
 router.get(
+  "/test-runs/available-testers",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (_req: AuthRequest, res: Response) => {
+    const testers = await prisma.user.findMany({
+      where: { role: Role.TESTER, isActive: true },
+      select: { id: true, name: true, email: true },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+    return res.json(testers);
+  }
+);
+
+router.get(
   "/test-runs/:id",
   authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
@@ -2600,7 +2717,14 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
   const parentSuiteId = asString(req.body.parentSuiteId) || null;
   const projectId = asString(req.body.projectId) || null;
   const moduleName = asString(req.body.module) || null;
+  const suiteType = asString(req.body.type) || "STATIC";
+  const filterJson = req.body.filterJson || null;
   const testCaseRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
+
+  // Validate suite type
+  if (suiteType !== "STATIC" && suiteType !== "DYNAMIC") {
+    return res.status(400).json({ message: "Suite type must be STATIC or DYNAMIC" });
+  }
 
   if (parentSuiteId) {
     const parentSuite = await prismaAny.testSuite.findUnique({ where: { id: parentSuiteId } });
@@ -2609,39 +2733,65 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
     }
   }
 
-  const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
-  if (resolvedRefs.unresolved.length > 0) {
-    return res.status(400).json({
-      message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
-    });
-  }
+  // For STATIC suites, validate test case references
+  if (suiteType === "STATIC") {
+    const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
+    if (resolvedRefs.unresolved.length > 0) {
+      return res.status(400).json({
+        message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
+      });
+    }
 
-  const created = await prisma.$transaction(async (tx) => {
-    const suite = await (tx as any).testSuite.create({
+    const created = await prisma.$transaction(async (tx) => {
+      const suite = await (tx as any).testSuite.create({
+        data: {
+          name,
+          description: asString(req.body.description) || null,
+          module: moduleName,
+          type: suiteType,
+          filterJson: null,
+          createdBy: req.user!.userId,
+          projectId,
+          parentSuiteId,
+        },
+      });
+
+      if (resolvedRefs.resolvedIds.length > 0) {
+        const rows = resolvedRefs.resolvedIds.map((testCaseId, idx) => ({
+          suiteId: suite.id,
+          testCaseId,
+          position: idx + 1,
+          addedBy: req.user!.userId,
+        }));
+        await (tx as any).testSuiteCase.createMany({ data: rows });
+      }
+      return suite;
+    });
+
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name, type: suiteType });
+    return res.status(201).json(created);
+  } else {
+    // For DYNAMIC suites, validate and store filter JSON
+    if (!filterJson || typeof filterJson !== "object") {
+      return res.status(400).json({ message: "DYNAMIC suite requires valid filterJson object" });
+    }
+
+    const created = await prismaAny.testSuite.create({
       data: {
         name,
         description: asString(req.body.description) || null,
         module: moduleName,
+        type: suiteType,
+        filterJson,
         createdBy: req.user!.userId,
         projectId,
         parentSuiteId,
       },
     });
 
-    if (resolvedRefs.resolvedIds.length > 0) {
-      const rows = resolvedRefs.resolvedIds.map((testCaseId, idx) => ({
-        suiteId: suite.id,
-        testCaseId,
-        position: idx + 1,
-        addedBy: req.user!.userId,
-      }));
-      await (tx as any).testSuiteCase.createMany({ data: rows });
-    }
-    return suite;
-  });
-
-  await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name });
-  return res.status(201).json(created);
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name, type: suiteType });
+    return res.status(201).json(created);
+  }
 });
 
 router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
@@ -2688,9 +2838,149 @@ router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequ
   return res.json(suite);
 });
 
+// GET /suites/:suiteId/test-cases - Return test cases for suite (handles STATIC and DYNAMIC)
+router.get("/suites/:suiteId/test-cases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const suite = await (prisma as any).testSuite.findUnique({
+    where: { id: req.params.suiteId },
+    select: { id: true, type: true, filterJson: true },
+  });
+  if (!suite) {
+    return res.status(404).json({ message: "Suite not found" });
+  }
+
+  if (suite.type === "STATIC") {
+    // For STATIC suites, return explicitly linked test cases in order
+    const suiteCases = await (prisma as any).testSuiteCase.findMany({
+      where: { suiteId: req.params.suiteId },
+      include: {
+        testCase: {
+          select: {
+            id: true,
+            testCaseCode: true,
+            title: true,
+            module: true,
+            priority: true,
+            status: true,
+            severity: true,
+            type: true,
+            isDeleted: true,
+          },
+        },
+      },
+      orderBy: { position: "asc" },
+    });
+
+    // Filter out soft-deleted test cases
+    const validCases = suiteCases
+      .filter((sc: any) => !sc.testCase.isDeleted)
+      .map((sc: any) => ({
+        ...sc.testCase,
+        position: sc.position,
+        suiteCaseId: sc.id,
+      }));
+
+    return res.json({
+      type: "STATIC",
+      testCases: validCases,
+      count: validCases.length,
+    });
+  } else if (suite.type === "DYNAMIC") {
+    // For DYNAMIC suites, build Prisma where clause from filterJson
+    const filter = suite.filterJson || {};
+    const where: any = { isDeleted: false };
+
+    if (filter.modules && Array.isArray(filter.modules) && filter.modules.length > 0) {
+      where.module = { in: filter.modules };
+    }
+
+    if (filter.priorities && Array.isArray(filter.priorities) && filter.priorities.length > 0) {
+      where.priority = { in: filter.priorities };
+    }
+
+    if (filter.statuses && Array.isArray(filter.statuses) && filter.statuses.length > 0) {
+      where.status = { in: filter.statuses };
+    }
+
+    if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
+      where.tags = { hasSome: filter.tags };
+    }
+
+    if (filter.automationStatus) {
+      where.automationStatus = filter.automationStatus;
+    }
+
+    const testCases = await (prisma as any).testCase.findMany({
+      where,
+      select: {
+        id: true,
+        testCaseCode: true,
+        title: true,
+        module: true,
+        priority: true,
+        status: true,
+        severity: true,
+        type: true,
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+
+    return res.json({
+      type: "DYNAMIC",
+      filter,
+      testCases,
+      count: testCases.length,
+    });
+  }
+
+  return res.status(400).json({ message: "Invalid suite type" });
+});
+
+// POST /suites/preview-filter - Preview test cases matching a dynamic filter
+router.post("/suites/preview-filter", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+  const filterJson = req.body.filterJson || {};
+
+  if (!filterJson || typeof filterJson !== "object") {
+    return res.status(400).json({ message: "filterJson must be a valid object" });
+  }
+
+  const where: any = { isDeleted: false };
+
+  if (filterJson.modules && Array.isArray(filterJson.modules) && filterJson.modules.length > 0) {
+    where.module = { in: filterJson.modules };
+  }
+
+  if (filterJson.priorities && Array.isArray(filterJson.priorities) && filterJson.priorities.length > 0) {
+    where.priority = { in: filterJson.priorities };
+  }
+
+  if (filterJson.statuses && Array.isArray(filterJson.statuses) && filterJson.statuses.length > 0) {
+    where.status = { in: filterJson.statuses };
+  }
+
+  if (filterJson.tags && Array.isArray(filterJson.tags) && filterJson.tags.length > 0) {
+    where.tags = { hasSome: filterJson.tags };
+  }
+
+  if (filterJson.automationStatus) {
+    where.automationStatus = filterJson.automationStatus;
+  }
+
+  const count = await (prisma as any).testCase.count({ where });
+
+  return res.json({
+    filter: filterJson,
+    matchingCount: count,
+  });
+});
+
 router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
+
+  // Prevent type changes after creation
+  if (req.body.type !== undefined && asString(req.body.type) !== suite.type) {
+    return res.status(400).json({ message: "Suite type cannot be changed after creation" });
+  }
 
   const parentSuiteId = req.body.parentSuiteId !== undefined ? asString(req.body.parentSuiteId) || null : undefined;
   if (parentSuiteId !== undefined) {
@@ -2714,15 +3004,26 @@ router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRe
     }
   }
 
+  const updateData: any = {
+    name: asString(req.body.name) || undefined,
+    description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
+    module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
+    projectId: req.body.projectId !== undefined ? asString(req.body.projectId) || null : undefined,
+    parentSuiteId,
+  };
+
+  // Allow updating filterJson for DYNAMIC suites
+  if (suite.type === "DYNAMIC" && req.body.filterJson !== undefined) {
+    if (req.body.filterJson && typeof req.body.filterJson === "object") {
+      updateData.filterJson = req.body.filterJson;
+    } else {
+      return res.status(400).json({ message: "filterJson must be a valid object for DYNAMIC suite" });
+    }
+  }
+
   const updated = await prismaAny.testSuite.update({
     where: { id: suite.id },
-    data: {
-      name: asString(req.body.name) || undefined,
-      description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
-      module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
-      projectId: req.body.projectId !== undefined ? asString(req.body.projectId) || null : undefined,
-      parentSuiteId,
-    },
+    data: updateData,
   });
 
   await writeAuditLog(req.user!.userId, "UPDATE_TEST_SUITE", "TestSuite", updated.id);
@@ -2805,6 +3106,10 @@ router.patch(
     const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
     if (!suite) return res.status(404).json({ message: "Suite not found" });
     if (suite.isArchived) return res.status(400).json({ message: "Cannot reorder archived suite" });
+    if (suite.type !== "STATIC") {
+      return res.status(400).json({ message: "Cannot reorder DYNAMIC suite" });
+    }
+
     const orderedRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
     if (!orderedRefs.length) return res.status(400).json({ message: "testCaseIds are required" });
     const uniqueRefs = [...new Set(orderedRefs)];
@@ -2853,12 +3158,16 @@ router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: A
         name: asString(req.body.name) || `${source.name} (Clone)`,
         description: source.description,
         module: source.module,
+        type: source.type,
+        filterJson: source.type === "DYNAMIC" ? source.filterJson : null,
         createdBy: req.user!.userId,
         projectId: source.projectId,
         parentSuiteId: source.parentSuiteId,
       },
     });
-    if (source.suiteCases.length > 0) {
+
+    // For STATIC suites, duplicate suiteCases with order preserved
+    if (source.type === "STATIC" && source.suiteCases.length > 0) {
       await (tx as any).testSuiteCase.createMany({
         data: source.suiteCases.map((item: any, idx: number) => ({
           suiteId: created.id,
@@ -2868,10 +3177,14 @@ router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: A
         })),
       });
     }
+    // For DYNAMIC suites, filterJson is already set, no need to create suiteCases
+
     return created;
   });
+
   await writeAuditLog(req.user!.userId, "CLONE_TEST_SUITE", "TestSuite", clone.id, {
     sourceSuiteId: source.id,
+    suiteType: source.type,
   });
   return res.status(201).json(clone);
 });
@@ -3890,6 +4203,13 @@ router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthReque
   return res.status(201).json(project);
 });
 
+router.get("/admin/projects", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const projects = await prisma.project.findMany({
+    orderBy: { updatedAt: "desc" },
+  });
+  return res.json(projects);
+});
+
 router.patch("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const project = await prisma.project.update({
     where: { id: req.params.id },
@@ -3939,6 +4259,16 @@ router.post("/admin/system-config", authorizeRoles(Role.ADMIN), async (req: Auth
   return res.json(config);
 });
 
+router.get("/admin/system-config", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const configs = await prisma.systemConfig.findMany({
+    orderBy: { key: "asc" },
+    include: {
+      updater: { select: { id: true, name: true, email: true, role: true } },
+    },
+  });
+  return res.json(configs);
+});
+
 router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const backup = await prisma.backupJob.create({
     data: {
@@ -3958,6 +4288,17 @@ router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthReques
 
   await writeAuditLog(req.user!.userId, "ADMIN_TRIGGER_BACKUP", "BackupJob", completed.id);
   return res.status(201).json(completed);
+});
+
+router.get("/admin/backups", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const backups = await prisma.backupJob.findMany({
+    orderBy: { startedAt: "desc" },
+    include: {
+      triggerUser: { select: { id: true, name: true, email: true, role: true } },
+    },
+    take: 100,
+  });
+  return res.json(backups);
 });
 
 export default router;
