@@ -191,6 +191,26 @@ const deriveRunCaseStatus = (result: ExecutionStatus): TestRunCaseStatus => {
   }
 };
 
+const computeAndPersistRunStatus = async (testRunId: string): Promise<TestRunStatus> => {
+  const rows = await prisma.testRunCase.findMany({
+    where: { testRunId },
+    select: { status: true },
+  });
+  const total = rows.length;
+  const completed = rows.filter((item) => item.status !== TestRunCaseStatus.NOT_RUN).length;
+  const nextStatus =
+    completed === 0 || total === 0
+      ? TestRunStatus.PLANNED
+      : completed < total
+      ? TestRunStatus.IN_PROGRESS
+      : TestRunStatus.COMPLETED;
+  await prisma.testRun.update({
+    where: { id: testRunId },
+    data: { status: nextStatus },
+  });
+  return nextStatus;
+};
+
 const SUITE_EXECUTION_MODE = {
   SEQUENTIAL: "SEQUENTIAL",
   PARALLEL: "PARALLEL",
@@ -374,6 +394,10 @@ type ExecutionMeta = {
   timerStopAt?: string;
   durationSeconds?: number;
   reexecutionOfId?: string;
+  timerState?: "RUNNING" | "PAUSED" | "STOPPED";
+  timerAccumulatedSeconds?: number;
+  timerLastResumedAt?: string;
+  manualDurationSeconds?: number;
 };
 
 const META_PREFIX = "[META]";
@@ -1869,6 +1893,13 @@ router.get(
             completedAt: parsedDraft.meta.timerStopAt || null,
             durationSeconds:
               typeof parsedDraft.meta.durationSeconds === "number" ? parsedDraft.meta.durationSeconds : null,
+            timerState:
+              parsedDraft.meta.timerState ||
+              (parsedDraft.meta.timerStopAt ? "STOPPED" : parsedDraft.meta.timerStartAt ? "RUNNING" : null),
+            manualDurationSeconds:
+              typeof parsedDraft.meta.manualDurationSeconds === "number"
+                ? parsedDraft.meta.manualDurationSeconds
+                : null,
             reexecutionOfId: parsedDraft.meta.reexecutionOfId || null,
             evidence,
             stepResults: mergedSteps,
@@ -2296,6 +2327,7 @@ router.post(
         finalized.id,
         deriveRunCaseStatus(finalResult)
       );
+      await computeAndPersistRunStatus(finalized.testRunId);
     }
 
     await writeAuditLog(req.user!.userId, "FINALIZE_TEST_EXECUTION", "TestExecution", finalized.id, {
@@ -2390,6 +2422,7 @@ router.post(
         execution.id,
         deriveRunCaseStatus(result)
       );
+      await computeAndPersistRunStatus(execution.testRunId);
     }
 
     await writeAuditLog(req.user!.userId, "EXECUTE_TEST_CASE", "TestExecution", execution.id, { result });
@@ -2511,8 +2544,15 @@ router.get(
     const withProgress = runs.map((run: any) => {
       const total = run.testCases.length;
       const completed = run.testCases.filter((item: any) => item.status !== TestRunCaseStatus.NOT_RUN).length;
+      const computedStatus =
+        completed === 0 || total === 0
+          ? TestRunStatus.PLANNED
+          : completed < total
+          ? TestRunStatus.IN_PROGRESS
+          : TestRunStatus.COMPLETED;
       return {
         ...run,
+        status: computedStatus,
         progress: {
           total,
           completed,
@@ -2563,8 +2603,15 @@ router.get(
     }
     const total = run.testCases.length;
     const completed = run.testCases.filter((item: any) => item.status !== TestRunCaseStatus.NOT_RUN).length;
+    const computedStatus =
+      completed === 0 || total === 0
+        ? TestRunStatus.PLANNED
+        : completed < total
+        ? TestRunStatus.IN_PROGRESS
+        : TestRunStatus.COMPLETED;
     return res.json({
       ...run,
+      status: computedStatus,
       progress: {
         total,
         completed,
@@ -2709,7 +2756,7 @@ router.post(
   }
 );
 
-router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const name = asString(req.body.name);
   if (!name) {
     return res.status(400).json({ message: "Suite name is required" });
@@ -2794,7 +2841,7 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
   }
 });
 
-router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const includeArchived = String(req.query.includeArchived || "").toLowerCase() === "true";
   const parentSuiteId = asString(req.query.parentSuiteId);
   const projectId = asString(req.query.projectId);
@@ -2818,7 +2865,7 @@ router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res:
   return res.json(suites);
 });
 
-router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites/:suiteId", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suite = await (prisma as any).testSuite.findUnique({
     where: { id: req.params.suiteId },
     include: {
@@ -2839,7 +2886,7 @@ router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequ
 });
 
 // GET /suites/:suiteId/test-cases - Return test cases for suite (handles STATIC and DYNAMIC)
-router.get("/suites/:suiteId/test-cases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites/:suiteId/test-cases", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suite = await (prisma as any).testSuite.findUnique({
     where: { id: req.params.suiteId },
     select: { id: true, type: true, filterJson: true },
@@ -2888,21 +2935,41 @@ router.get("/suites/:suiteId/test-cases", authorizeRoles(Role.TESTER), async (re
     // For DYNAMIC suites, build Prisma where clause from filterJson
     const filter = suite.filterJson || {};
     const where: any = { isDeleted: false };
+    const modules =
+      Array.isArray((filter as any).modules) && (filter as any).modules.length > 0
+        ? (filter as any).modules
+        : (filter as any).module
+        ? [String((filter as any).module)]
+        : [];
+    const priorities =
+      Array.isArray((filter as any).priorities) && (filter as any).priorities.length > 0
+        ? (filter as any).priorities
+        : (filter as any).priority
+        ? [String((filter as any).priority)]
+        : [];
+    const statuses =
+      Array.isArray((filter as any).statuses) && (filter as any).statuses.length > 0
+        ? (filter as any).statuses
+        : (filter as any).status
+        ? [String((filter as any).status)]
+        : [];
+    const tags =
+      Array.isArray((filter as any).tags) && (filter as any).tags.length > 0 ? (filter as any).tags : [];
 
-    if (filter.modules && Array.isArray(filter.modules) && filter.modules.length > 0) {
-      where.module = { in: filter.modules };
+    if (modules.length > 0) {
+      where.module = { in: modules };
     }
 
-    if (filter.priorities && Array.isArray(filter.priorities) && filter.priorities.length > 0) {
-      where.priority = { in: filter.priorities };
+    if (priorities.length > 0) {
+      where.priority = { in: priorities };
     }
 
-    if (filter.statuses && Array.isArray(filter.statuses) && filter.statuses.length > 0) {
-      where.status = { in: filter.statuses };
+    if (statuses.length > 0) {
+      where.status = { in: statuses };
     }
 
-    if (filter.tags && Array.isArray(filter.tags) && filter.tags.length > 0) {
-      where.tags = { hasSome: filter.tags };
+    if (tags.length > 0) {
+      where.tags = { hasSome: tags };
     }
 
     if (filter.automationStatus) {
@@ -2936,7 +3003,7 @@ router.get("/suites/:suiteId/test-cases", authorizeRoles(Role.TESTER), async (re
 });
 
 // POST /suites/preview-filter - Preview test cases matching a dynamic filter
-router.post("/suites/preview-filter", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/preview-filter", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const filterJson = req.body.filterJson || {};
 
   if (!filterJson || typeof filterJson !== "object") {
@@ -2944,21 +3011,40 @@ router.post("/suites/preview-filter", authorizeRoles(Role.TESTER), async (req: A
   }
 
   const where: any = { isDeleted: false };
+  const modules =
+    Array.isArray(filterJson.modules) && filterJson.modules.length > 0
+      ? filterJson.modules
+      : filterJson.module
+      ? [String(filterJson.module)]
+      : [];
+  const priorities =
+    Array.isArray(filterJson.priorities) && filterJson.priorities.length > 0
+      ? filterJson.priorities
+      : filterJson.priority
+      ? [String(filterJson.priority)]
+      : [];
+  const statuses =
+    Array.isArray(filterJson.statuses) && filterJson.statuses.length > 0
+      ? filterJson.statuses
+      : filterJson.status
+      ? [String(filterJson.status)]
+      : [];
+  const tags = Array.isArray(filterJson.tags) && filterJson.tags.length > 0 ? filterJson.tags : [];
 
-  if (filterJson.modules && Array.isArray(filterJson.modules) && filterJson.modules.length > 0) {
-    where.module = { in: filterJson.modules };
+  if (modules.length > 0) {
+    where.module = { in: modules };
   }
 
-  if (filterJson.priorities && Array.isArray(filterJson.priorities) && filterJson.priorities.length > 0) {
-    where.priority = { in: filterJson.priorities };
+  if (priorities.length > 0) {
+    where.priority = { in: priorities };
   }
 
-  if (filterJson.statuses && Array.isArray(filterJson.statuses) && filterJson.statuses.length > 0) {
-    where.status = { in: filterJson.statuses };
+  if (statuses.length > 0) {
+    where.status = { in: statuses };
   }
 
-  if (filterJson.tags && Array.isArray(filterJson.tags) && filterJson.tags.length > 0) {
-    where.tags = { hasSome: filterJson.tags };
+  if (tags.length > 0) {
+    where.tags = { hasSome: tags };
   }
 
   if (filterJson.automationStatus) {
@@ -2973,7 +3059,7 @@ router.post("/suites/preview-filter", authorizeRoles(Role.TESTER), async (req: A
   });
 });
 
-router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
 
@@ -3030,7 +3116,7 @@ router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRe
   return res.json(updated);
 });
 
-router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suiteId = req.params.suiteId;
   const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
   if (!suite || suite.isArchived) return res.status(404).json({ message: "Suite not found" });
@@ -3077,7 +3163,7 @@ router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), async (re
 
 router.delete(
   "/suites/:suiteId/testcases/:testCaseId",
-  authorizeRoles(Role.TESTER),
+  authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const suiteId = req.params.suiteId;
     const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
@@ -3100,7 +3186,7 @@ router.delete(
 
 router.patch(
   "/suites/:suiteId/testcases/reorder",
-  authorizeRoles(Role.TESTER),
+  authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const suiteId = req.params.suiteId;
     const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
@@ -3144,7 +3230,7 @@ router.patch(
   }
 );
 
-router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const source = await (prisma as any).testSuite.findUnique({
     where: { id: req.params.suiteId },
     include: { suiteCases: { orderBy: { position: "asc" } } },
@@ -3189,7 +3275,7 @@ router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: A
   return res.status(201).json(clone);
 });
 
-router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
   if (suite.isArchived) return res.status(400).json({ message: "Suite is already archived" });
@@ -3207,7 +3293,7 @@ router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER), async (req:
   return res.json(updated);
 });
 
-router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
   if (!suite.isArchived) return res.status(400).json({ message: "Suite is already active" });
@@ -3229,7 +3315,7 @@ router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), async (req:
   return res.json(updated);
 });
 
-router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({
     where: { id: req.params.suiteId },
     select: { id: true, name: true, isArchived: true, _count: { select: { suiteCases: true, childSuites: true } } },
@@ -3251,7 +3337,7 @@ router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthR
   return res.json({ message: "Suite deleted permanently", id: suite.id });
 });
 
-router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suite-executions", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suiteId = asString(req.body.suiteId);
   const mode = parseEnum(SUITE_EXECUTION_MODE, req.body.mode) || SUITE_EXECUTION_MODE.SEQUENTIAL;
   if (!suiteId) return res.status(400).json({ message: "suiteId is required" });
@@ -3261,7 +3347,64 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
     include: { suiteCases: { orderBy: { position: "asc" } } },
   });
   if (!suite || suite.isArchived) return res.status(404).json({ message: "Suite not found" });
-  if (!suite.suiteCases.length) return res.status(400).json({ message: "Suite has no test cases to execute" });
+  let dynamicMatchedIds: string[] = [];
+  if (suite.type === "DYNAMIC") {
+    const filter = suite.filterJson || {};
+    const where: any = { isDeleted: false };
+    const modules =
+      Array.isArray((filter as any).modules) && (filter as any).modules.length > 0
+        ? (filter as any).modules
+        : (filter as any).module
+        ? [String((filter as any).module)]
+        : [];
+    const priorities =
+      Array.isArray((filter as any).priorities) && (filter as any).priorities.length > 0
+        ? (filter as any).priorities
+        : (filter as any).priority
+        ? [String((filter as any).priority)]
+        : [];
+    const statuses =
+      Array.isArray((filter as any).statuses) && (filter as any).statuses.length > 0
+        ? (filter as any).statuses
+        : (filter as any).status
+        ? [String((filter as any).status)]
+        : [];
+    const tags =
+      Array.isArray((filter as any).tags) && (filter as any).tags.length > 0 ? (filter as any).tags : [];
+
+    if (modules.length > 0) where.module = { in: modules };
+    if (priorities.length > 0) where.priority = { in: priorities };
+    if (statuses.length > 0) where.status = { in: statuses };
+    if (tags.length > 0) where.tags = { hasSome: tags };
+    if ((filter as any).automationStatus) where.automationStatus = (filter as any).automationStatus;
+
+    const matched = await prisma.testCase.findMany({
+      where,
+      select: { id: true },
+      orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
+    });
+    dynamicMatchedIds = [...new Set(matched.map((row) => row.id))];
+    if (!dynamicMatchedIds.length) {
+      return res.status(400).json({ message: "Dynamic suite filter matched no test cases" });
+    }
+  } else if (!suite.suiteCases.length) {
+    return res.status(400).json({ message: "Suite has no test cases to execute" });
+  }
+
+  const existingActiveExecution = await (prisma as any).testSuiteExecution.findFirst({
+    where: {
+      suiteId,
+      status: { in: [SUITE_EXECUTION_STATUS.PLANNED, SUITE_EXECUTION_STATUS.RUNNING] },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, linkedTestRunId: true, status: true, mode: true, startedAt: true },
+  });
+  if (existingActiveExecution) {
+    return res.status(409).json({
+      message: "An active suite execution already exists for this suite",
+      existingExecution: existingActiveExecution,
+    });
+  }
 
   const requestedTesterIds = Array.isArray(req.body.testerIds) ? [...new Set(asStringArray(req.body.testerIds))] : [];
   const testerIds =
@@ -3279,6 +3422,40 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
   }
 
   const created = await prisma.$transaction(async (tx) => {
+    let executionSuiteCases: any[] = suite.suiteCases;
+    if (suite.type === "DYNAMIC") {
+      const existingLinks = await (tx as any).testSuiteCase.findMany({
+        where: { suiteId: suite.id, testCaseId: { in: dynamicMatchedIds } },
+        select: { id: true, testCaseId: true, position: true },
+      });
+      const existingSet = new Set(existingLinks.map((row: any) => row.testCaseId));
+      const toCreate = dynamicMatchedIds.filter((testCaseId) => !existingSet.has(testCaseId));
+      if (toCreate.length > 0) {
+        const maxPositionRow = await (tx as any).testSuiteCase.findFirst({
+          where: { suiteId: suite.id },
+          orderBy: { position: "desc" },
+          select: { position: true },
+        });
+        let nextPosition = Number(maxPositionRow?.position || 0);
+        await (tx as any).testSuiteCase.createMany({
+          data: toCreate.map((testCaseId) => ({
+            suiteId: suite.id,
+            testCaseId,
+            position: ++nextPosition,
+            addedBy: req.user!.userId,
+          })),
+        });
+      }
+      const persistedLinks = await (tx as any).testSuiteCase.findMany({
+        where: { suiteId: suite.id, testCaseId: { in: dynamicMatchedIds } },
+        select: { id: true, testCaseId: true, position: true },
+      });
+      const order = new Map(dynamicMatchedIds.map((id, idx) => [id, idx]));
+      executionSuiteCases = persistedLinks.sort(
+        (a: any, b: any) => (order.get(a.testCaseId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.testCaseId) ?? Number.MAX_SAFE_INTEGER)
+      );
+    }
+
     const run = await tx.testRun.create({
       data: {
         name: `${suite.name} Run ${new Date().toISOString().slice(0, 10)}`,
@@ -3290,7 +3467,7 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
       },
     });
     await tx.testRunCase.createMany({
-      data: suite.suiteCases.map((item: any) => ({
+      data: executionSuiteCases.map((item: any) => ({
         testRunId: run.id,
         testCaseId: item.testCaseId,
         status: TestRunCaseStatus.NOT_RUN,
@@ -3309,18 +3486,18 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
         mode,
         status: SUITE_EXECUTION_STATUS.RUNNING,
         linkedTestRunId: run.id,
-        totalCases: suite.suiteCases.length,
+        totalCases: executionSuiteCases.length,
         startedAt: new Date(),
       },
     });
 
     await (tx as any).testSuiteExecutionCase.createMany({
-      data: suite.suiteCases.map((item: any) => ({
+      data: executionSuiteCases.map((item: any, idx: number) => ({
         suiteExecutionId: suiteExecution.id,
         suiteId: suite.id,
         suiteCaseId: item.id,
         testCaseId: item.testCaseId,
-        position: item.position,
+        position: idx + 1,
         status: TestRunCaseStatus.NOT_RUN,
       })),
     });
@@ -3335,7 +3512,7 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
   return res.status(201).json(created);
 });
 
-router.get("/suite-executions/:id", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suite-executions/:id", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   await refreshSuiteExecutionSummary(req.params.id);
   const suiteExecution = await (prisma as any).testSuiteExecution.findUnique({
     where: { id: req.params.id },
@@ -3356,7 +3533,7 @@ router.get("/suite-executions/:id", authorizeRoles(Role.TESTER), async (req: Aut
   return res.json(suiteExecution);
 });
 
-router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const suiteId = req.params.suiteId;
   const executions = await (prisma as any).testSuiteExecution.findMany({
     where: { suiteId },
@@ -3371,7 +3548,7 @@ router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), async (re
 
 router.get(
   "/reports/test-executions",
-  authorizeRoles(Role.TESTER, Role.DEVELOPER),
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const executions = await prisma.testExecution.findMany({
       where: { isDraft: false },
