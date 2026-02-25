@@ -7,6 +7,7 @@ import prisma from "../prisma";
 import { authenticate, AuthRequest } from "../middleware/auth.middleware";
 import { authorizeRoles } from "../middleware/role.middleware";
 import { sendVerificationEmail, sendResetEmail } from "../utils/email";
+import { loginController } from "../controllers/auth.controller";
 
 const router = Router();
 const PASSWORD_REGEX =
@@ -69,6 +70,9 @@ router.post("/register", async (req: Request, res: Response) => {
     const normalizedEmail =
       typeof email === "string" ? email.trim().toLowerCase() : "";
     const requestedRole = role as Role | undefined;
+    if (requestedRole === Role.ADMIN) {
+      return res.status(403).json({ message: "Admin self-registration is not allowed" });
+    }
     const selectedRole =
       requestedRole && PUBLIC_REGISTRATION_ROLES.includes(requestedRole)
         ? requestedRole
@@ -222,69 +226,7 @@ router.get("/verify-email", async (req: Request, res: Response) => {
 /* =========================
    LOGIN
 ========================= */
-router.post("/login", async (req: Request, res: Response) => {
-  try {
-    const { email, password, rememberMe } = req.body;
-    const normalizedEmail =
-      typeof email === "string" ? email.trim().toLowerCase() : "";
-
-    if (!normalizedEmail || !password) {
-      return res
-        .status(400)
-        .json({ message: "Email and password are required" });
-    }
-
-    const user = await prisma.user.findUnique({
-      where: { email: normalizedEmail },
-    });
-
-    if (!user) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    // Account lockout check removed - add lockoutUntil field to User model if needed
-
-    if (!user.isVerified) {
-      return res
-        .status(403)
-        .json({ message: "Please verify your email before logging in" });
-    }
-
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
-      return res.status(401).json({ message: "Invalid credentials" });
-    }
-
-    const accessToken = signAccessToken({
-      id: user.id,
-      role: user.role,
-      tokenVersion: user.tokenVersion,
-    });
-    const refreshToken = signRefreshToken({
-      id: user.id,
-      role: user.role,
-      tokenVersion: user.tokenVersion,
-    });
-
-    return res.status(200).json({
-      message: "Login successful",
-      token: accessToken,
-      accessToken,
-      refreshToken,
-      accessTokenExpiresIn: ACCESS_TOKEN_EXPIRY,
-      refreshTokenExpiresIn: REFRESH_TOKEN_EXPIRY,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-    });
-  } catch (error) {
-    console.error("LOGIN ERROR:", error);
-    return res.status(500).json({ message: "Server error" });
-  }
-});
+router.post("/login", loginController);
 
 /* =========================
    REFRESH ACCESS TOKEN
