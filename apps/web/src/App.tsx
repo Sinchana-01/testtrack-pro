@@ -93,8 +93,8 @@ type DashboardFeature =
   | "templates"
   | "bulk_operations"
   | "import_test_cases"
-  | "test_runs"
   | "test_suites"
+  | "test_runs"
   | "execute_tests"
   | "bug_management"
   | "test_cases"
@@ -561,6 +561,36 @@ function App() {
 
   const loadTestCaseData = async () => {
     setIsRefreshing(true);
+    const bugParams: Record<string, string> = {
+      status: bugFilterStatus,
+      priority: bugFilterPriority,
+      severity: bugFilterSeverity,
+      sortBy: bugSortBy,
+    };
+    const [caseRows, templateRows, runRows, testerRows, executionRows, bugRows] = await Promise.all([
+      getTestCasesApi(),
+      listTemplatesApi(),
+      canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
+      canManageTestRuns ? listAvailableTestersApi() : Promise.resolve([]),
+      canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
+      canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
+      canManageSuites ? listSuitesApi() : Promise.resolve([]),
+    ]);
+    const rows = Array.isArray(caseRows) ? caseRows : [];
+    setTestCases(rows);
+    setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
+    setTemplates(Array.isArray(templateRows) ? templateRows : []);
+    setTestRuns(Array.isArray(runRows) ? runRows : []);
+    const testers = Array.isArray(testerRows) ? testerRows : [];
+    setRunTesterOptions(testers);
+    setRunTesterIds((prev) => prev.filter((id) => testers.some((tester) => tester.id === id)));
+    setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
+    const bugList = Array.isArray(bugRows) ? bugRows : [];
+    setBugs(bugList);
+    setSelectedBug((prev: any) => {
+      if (!prev?.id) return prev;
+      return bugList.find((item) => item.id === prev.id) || null;
+    });
     try {
       if (isAdmin) {
         setTestCases([]);
@@ -913,9 +943,6 @@ function App() {
     setRunStartDate("");
     setRunEndDate("");
     setRunTesterIds([]);
-    setRunSelectedTestCaseIds([]);
-    setRunTestCaseSearchQuery("");
-    setRunTestCaseFilterModule("");
     setSelectedRunId("");
     setRunDetails(null);
   };
@@ -2713,7 +2740,58 @@ function App() {
                   value={runEndDate}
                   onChange={(e) => setRunEndDate(e.target.value)}
                 />
-                <label className="fieldLabel">Assign Testers (Optional)</label>
+                <label className="fieldLabel">Assign Testers</label>
+                <select
+                  className="input"
+                  multiple
+                  size={Math.min(Math.max(runTesterOptions.length, 3), 8)}
+                  value={runTesterIds}
+                  onChange={(e) => {
+                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                    setRunTesterIds(selected);
+                  }}
+                >
+                  {runTesterOptions.map((tester) => (
+                    <option key={tester.id} value={tester.id}>
+                      {tester.name} ({tester.email})
+                    </option>
+                  ))}
+                </select>
+                <div className="note">
+                  {runTesterIds.length > 0
+                    ? `${runTesterIds.length} tester(s) selected`
+                    : "Select one or more testers (optional)"}
+                </div>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!runName.trim()) {
+                        alert("Run name is required");
+                        return;
+                      }
+                      if (selectedIds.length === 0) {
+                        alert("Select at least one test case from the list section");
+                        return;
+                      }
+                      await createTestRunApi({
+                        name: runName,
+                        description: runDescription || undefined,
+                        targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
+                        targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
+                        testCaseIds: selectedIds,
+                        testerIds: runTesterIds,
+                      });
+                      resetRunFields();
+                      await loadTestCaseData();
+                      alert("Test run created");
+                    } catch (error: any) {
+                      alert(error?.message || "Create test run failed");
+                    }
+                  }}
+                >
+                  Create Test Run
+                </button>
                 <select
                   className="input"
                   multiple
