@@ -291,6 +291,14 @@ export async function startExecutionApi(payload: { testCaseId: string; testRunId
   });
 }
 
+export async function startExecutionV2Api(payload: { testCaseId: string; testRunId?: string | null; notes?: string }) {
+  return authJson("/executions/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function saveExecutionStepApi(
   executionId: string,
   stepNumber: number,
@@ -303,7 +311,32 @@ export async function saveExecutionStepApi(
   });
 }
 
+export async function saveExecutionStepV2Api(
+  executionId: string,
+  payload: {
+    stepNumber: number;
+    status: string;
+    actualResult: string;
+    notes?: string;
+    evidence?: Array<{ fileType: string; fileUrl: string; fileName: string; notes?: string }>;
+  }
+) {
+  return authJson(`/executions/${executionId}/step`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function finalizeExecutionApi(executionId: string, payload?: { result?: string; notes?: string }) {
+  return authJson(`/executions/${executionId}/finalize`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function finalizeExecutionV2Api(executionId: string, payload?: { notes?: string }) {
   return authJson(`/executions/${executionId}/finalize`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -350,6 +383,22 @@ export async function stopExecutionTimerApi(executionId: string) {
   return authJson(`/executions/${executionId}/timer/stop`, { method: "POST" });
 }
 
+export async function pauseExecutionTimerApi(executionId: string) {
+  return authJson(`/executions/${executionId}/timer/pause`, { method: "POST" });
+}
+
+export async function resumeExecutionTimerApi(executionId: string) {
+  return authJson(`/executions/${executionId}/timer/resume`, { method: "POST" });
+}
+
+export async function setExecutionManualTimeApi(executionId: string, durationSeconds: number) {
+  return authJson(`/executions/${executionId}/timer/manual-time`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ durationSeconds }),
+  });
+}
+
 export async function listExecutionEvidenceApi(executionId: string) {
   return authJson(`/executions/${executionId}/evidence`);
 }
@@ -380,12 +429,39 @@ export async function createBugFromExecutionApi(
   });
 }
 
+export async function createBugFromExecutionStepApi(
+  executionId: string,
+  payload: { stepNumber: number; environment?: string; severity?: string; assignedTo?: string }
+) {
+  return authJson(`/executions/${executionId}/create-bug`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function reexecuteExecutionApi(executionId: string, payload?: { notes?: string }) {
   return authJson(`/executions/${executionId}/reexecute`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
+}
+
+export async function reexecuteExecutionV2Api(executionId: string, payload?: { notes?: string }) {
+  return authJson(`/executions/${executionId}/re-execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
+  });
+}
+
+export async function listExecutionHistoryApi(executionId: string) {
+  return authJson(`/executions/${executionId}/history`);
+}
+
+export async function compareExecutionsApi(executionId: string, compareToId: string) {
+  return authJson(`/executions/${executionId}/compare/${compareToId}`);
 }
 
 export async function createBugApi(payload: Record<string, unknown>) {
@@ -513,13 +589,35 @@ export async function addSuiteTestCasesApi(suiteId: string, testCaseIds: string[
   });
 }
 
+export async function addSuiteTestCasesV2Api(suiteId: string, testCaseIds: string[]) {
+  return authJson(`/test-suites/${suiteId}/add`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testCaseIds }),
+  });
+}
+
 export async function removeSuiteTestCaseApi(suiteId: string, testCaseId: string) {
   return authJson(`/suites/${suiteId}/testcases/${testCaseId}`, { method: "DELETE" });
+}
+
+export async function removeSuiteTestCaseV2Api(suiteId: string, testCaseId: string) {
+  return authJson(`/test-suites/${suiteId}/remove/${encodeURIComponent(testCaseId)}`, {
+    method: "PUT",
+  });
 }
 
 export async function reorderSuiteTestCasesApi(suiteId: string, testCaseIds: string[]) {
   return authJson(`/suites/${suiteId}/testcases/reorder`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testCaseIds }),
+  });
+}
+
+export async function reorderSuiteTestCasesV2Api(suiteId: string, testCaseIds: string[]) {
+  return authJson(`/test-suites/${suiteId}/reorder`, {
+    method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ testCaseIds }),
   });
@@ -533,12 +631,24 @@ export async function cloneSuiteApi(suiteId: string, name?: string) {
   });
 }
 
+export async function cloneSuiteV2Api(suiteId: string) {
+  return authJson(`/test-suites/${suiteId}/clone`, { method: "POST" });
+}
+
 export async function archiveSuiteApi(suiteId: string) {
   return authJson(`/suites/${suiteId}/archive`, { method: "POST" });
 }
 
+export async function archiveSuiteV2Api(suiteId: string) {
+  return authJson(`/test-suites/${suiteId}/archive`, { method: "PUT" });
+}
+
 export async function restoreSuiteApi(suiteId: string) {
   return authJson(`/suites/${suiteId}/restore`, { method: "POST" });
+}
+
+export async function restoreSuiteV2Api(suiteId: string) {
+  return authJson(`/test-suites/${suiteId}/restore`, { method: "PUT" });
 }
 
 export async function deleteSuiteApi(suiteId: string) {
@@ -559,6 +669,53 @@ export async function getSuiteExecutionApi(id: string) {
 
 export async function listSuiteExecutionsApi(suiteId: string) {
   return authJson(`/suites/${suiteId}/executions`);
+}
+
+export async function executeSuiteRunApi(suiteId: string, runId: string) {
+  return authJson(`/suite/${suiteId}/run/${runId}/execute`, {
+    method: "POST",
+  });
+}
+
+export async function updateSuiteExecutionStatusApi(
+  executionId: string,
+  status: "PASS" | "FAIL" | "BLOCKED" | "SKIPPED" | "NOT_EXECUTED"
+) {
+  return authJson(`/execution/${executionId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function bulkMarkSuiteRunApi(
+  suiteId: string,
+  runId: string,
+  status: "PASS" | "FAIL" | "BLOCKED" | "SKIPPED" | "NOT_EXECUTED"
+) {
+  return authJson(`/suite/${suiteId}/run/${runId}/mark`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function resetSuiteRunApi(suiteId: string, runId: string, mode: "ALL" | "FAILED_ONLY") {
+  return authJson(`/suite/${suiteId}/run/${runId}/reset`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode }),
+  });
+}
+
+export async function syncSuiteRunApi(suiteId: string, runId: string) {
+  return authJson(`/suite/${suiteId}/run/${runId}/sync`, {
+    method: "POST",
+  });
+}
+
+export async function getTestRunSummaryApi(runId: string) {
+  return authJson(`/testruns/${runId}/summary`);
 }
 
 export async function listAdminUsersApi() {
