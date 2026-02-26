@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import Login from "./components/auth/Login";
+import ForgotPassword from "./components/auth/ForgotPassword";
+import Register from "./components/auth/Register";
+import AdminDashboard from "./components/admin/AdminDashboard";
 import {
   bulkTestCaseOperationApi,
   clearSessionTokens,
@@ -111,6 +115,7 @@ const EXECUTION_DRAFT_KEY = "ttp_execution_draft";
 
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
+  const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -159,7 +164,9 @@ function App() {
   const [importPreviewErrors, setImportPreviewErrors] = useState<string[]>([]);
   const [previewReady, setPreviewReady] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [editingId, setEditingId] = useState("");
+  const [selectedItem, setSelectedItem] = useState<any>(null);
+const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null);const [editingId, setEditingId] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editPreConditionsText, setEditPreConditionsText] = useState("");
@@ -309,6 +316,7 @@ function App() {
   const [adminEditName, setAdminEditName] = useState("");
   const [adminEditRole, setAdminEditRole] = useState("TESTER");
   const [adminEditActive, setAdminEditActive] = useState(true);
+ 
   const [adminProjects, setAdminProjects] = useState<any[]>([]);
   const [adminProjectName, setAdminProjectName] = useState("");
   const [adminProjectDescription, setAdminProjectDescription] = useState("");
@@ -334,6 +342,7 @@ function App() {
   const [quickStatusByBugId, setQuickStatusByBugId] = useState<Record<string, string>>({});
   const [navOpen, setNavOpen] = useState(false);
   const [activeFeature, setActiveFeature] = useState<DashboardFeature | "none">("none");
+  const [selectedUser, setSelectedUser] = useState<any>(null);
   const roleName = currentRole.toUpperCase();
   const isTester = roleName === "TESTER";
   const isDeveloper = roleName === "DEVELOPER";
@@ -1596,12 +1605,16 @@ function App() {
     setScreen("login");
   };
 
-  /* LOGIN */
-  const handleLogin = async () => {
+ /* LOGIN */
+const handleLogin = async () => {
+  try {
+    setIsLoading(true);
+
     const res = await loginApi(email, password, rememberMe);
 
     if (res.accessToken && res.refreshToken) {
       const loggedRole = String(res?.user?.role || "").toUpperCase();
+
       setSessionTokens(res.accessToken, res.refreshToken, rememberMe);
       setCurrentRole(res?.user?.role || "");
       setCurrentUserId(res?.user?.id || "");
@@ -1612,20 +1625,34 @@ function App() {
       resetBugPanel();
       setNavOpen(false);
       setScreen("dashboard");
+
       alert("Logged in successfully");
+      setEmail("");
+setPassword("");
+
       try {
         if (loggedRole !== "ADMIN") {
           await loadTestCaseData();
         } else {
-          await Promise.all([loadAdminUsers(), loadAdminWorkspaceData()]);
+          await Promise.all([
+            loadAdminUsers(),
+            loadAdminWorkspaceData(),
+          ]);
         }
       } catch (error: any) {
         // keep login successful even if optional dashboard calls fail
       }
+
     } else {
       alert(res.message || "Invalid email or password");
     }
-  };
+
+  } catch (error: any) {
+    alert(error?.message || "Login failed");
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   /* LOGOUT */
   const handleLogout = () => {
@@ -1651,286 +1678,267 @@ function App() {
     setAdminEditActive(Boolean(user.isActive));
   };
 
-  return (
-    <div className="container">
-      <div className={`card ${screen === "dashboard" ? "cardDashboard" : "cardAuth"}`}>
-        <h2 className="brandTitle">TestTrack Pro</h2>
-        {screen !== "dashboard" && (
-          <p className="authTagline">Quality engineering workspace for testers, developers, and admins.</p>
-        )}
+ return (
+  <div className={screen === "dashboard" ? "dashboardMode" : "container"}>
 
-        {screen === "login" && (
-          <section className="authPanel">
-            <h3>Login</h3>
+    {/* LOGIN FULL SCREEN */}
+    {screen === "login" && (
+      <Login
+        email={email}
+        password={password}
+        rememberMe={rememberMe}
+        isLoading={isLoading}
+        setEmail={setEmail}
+        setPassword={setPassword}
+        setRememberMe={setRememberMe}
+        onLogin={handleLogin}
+        goToRegister={() => setScreen("register")}
+        goToForgot={() => setScreen("forgot")}
+      />
+    )}
 
-            <input
-              className="input"
-              placeholder="Email"
-              value={email}
-              autoComplete="off"
-              onChange={(e) => setEmail(e.target.value)}
-            />
+    {/* REGISTER FULL SCREEN */}
+    {screen === "register" && (
+      <Register
+        name={name}
+        email={email}
+        password={password}
+        confirmPassword={confirmPassword}
+        role={role}
+        isLoading={isLoading}
+        setName={setName}
+        setEmail={setEmail}
+        setPassword={setPassword}
+        setConfirmPassword={setConfirmPassword}
+        setRole={setRole}
+        onRegister={handleRegister}
+        goToLogin={() => setScreen("login")}
+      />
+    )}
 
-            <input
-              className="input"
-              type="password"
-              placeholder="Password"
-              value={password}
-              autoComplete="new-password"
-              onChange={(e) => setPassword(e.target.value)}
-            />
+    {/* FORGOT FULL SCREEN */}
+    {screen === "forgot" && (
+      <ForgotPassword
+        email={email}
+        isLoading={isLoading}
+        setEmail={setEmail}
+        onSubmit={async () => {
+          setIsLoading(true);
+          try {
+            const res = await forgotPasswordApi(email);
+            alert(res.message);
+            setEmail("");
+            setScreen("login");
+          } finally {
+            setIsLoading(false);
+          }
+        }}
+        goToLogin={() => setScreen("login")}
+      />
+    )}
 
-            {/* ✅ REMEMBER ME (ADDED HERE) */}
-            <div className="remember">
-              <input
-                type="checkbox"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-              />
-              <span> Remember me</span>
-            </div>
 
-            <button className="button" onClick={handleLogin}>
-              Login
-            </button>
+          {/* KEEP YOUR OLD DASHBOARD / RESET CONTENT BELOW THIS */}
+       {/* RESET PAGE */}
+{screen === "reset" && (
+  <div className="resetWrapper">
+    <section className="authPanel">
+      <h3>Reset Password</h3>
 
-            <div className="link" onClick={() => setScreen("forgot")}>
-              Forgot password?
-            </div>
+      {!resetToken ? (
+        <div className="note">
+          Invalid reset link. Please request a new one.
+        </div>
+      ) : (
+        <>
+          <input
+            className="input"
+            type="password"
+            placeholder="New password"
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
 
-            <div className="link" onClick={() => setScreen("register")}>
-              New user? Register
-            </div>
-          </section>
-        )}
+          <div className="note">
+            Password must include uppercase, lowercase, number & special character
+          </div>
 
-        {screen === "register" && (
-          <section className="authPanel">
-            <h3>Register</h3>
+          <button
+            className="button"
+            onClick={async () => {
+              if (!isValidPassword(newPassword)) {
+                alert(
+                  "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
+                );
+                return;
+              }
 
-            <input
-              className="input"
-              placeholder="Name"
-              value={name}
-              autoComplete="off"
-              name="register_name"
-              onChange={(e) => setName(e.target.value)}
-            />
+              const res = await resetPasswordApi(resetToken, newPassword);
+              alert(res.message || "Password reset complete");
 
-            <input
-              className="input"
-              placeholder="Email"
-              value={email}
-              autoComplete="off"
-              name="register_email"
-              onChange={(e) => setEmail(e.target.value)}
-            />
+              setNewPassword("");
+              setScreen("login");
+            }}
+          >
+            Set New Password
+          </button>
+        </>
+      )}
 
-            <input
-              className="input"
-              type="password"
-              placeholder="Password"
-              value={password}
-              autoComplete="new-password"
-              name="register_password"
-              onChange={(e) => setPassword(e.target.value)}
-            />
+      <div className="link" onClick={() => setScreen("login")}>
+        Back to login
+      </div>
+    </section>
+  </div>
+)}
 
-            <div className="note">
-              Password must include uppercase, lowercase, number & special character
-            </div>
+{/* DASHBOARD */}
+{screen === "dashboard" && (
+<div className="dashboardWrapper">
 
-            <select
-              className="input"
-              value={role}
-              name="register_role"
-              onChange={(e) => setRole(e.target.value)}
-            >
-              <option value="">Select role</option>
-              <option value="TESTER">TESTER</option>
-              <option value="DEVELOPER">DEVELOPER</option>
-            </select>
+  {/* HEADER */}
+  <div className="dashboardHeader">
+    <div className="headerInner">
+      <div className="hamburger" onClick={() => setNavOpen(!navOpen)}>
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+      <h2>TestTrack Pro</h2>
+    </div>
+  </div>
 
-            <button className="button" onClick={handleRegister}>
-              Register
-            </button>
+  {/* BODY */}
+  <div className="dashboardMain">
 
-            <div className="link" onClick={() => setScreen("login")}>
-              Back to login
-            </div>
-          </section>
-        )}
+    {/* SIDEBAR */}
+    {navOpen && (
+      <aside className="sidebar">
+        {roleFeatures.map((feature) => (
+          <button
+            key={feature.key}
+            className={`featureItem ${activeFeature === feature.key ? "active" : ""}`}
+onClick={() =>
+  setActiveFeature((prev) =>
+    prev === feature.key ? "none" : feature.key
+  )
+}          >
+            {feature.label}
+          </button>
+        ))}
 
-        {screen === "forgot" && (
-          <section className="authPanel">
-            <h3>Forgot Password</h3>
+        <div className="sidebarBottom">
+          <button className="logoutBtn" onClick={handleLogout}>
+            Logout
+          </button>
+          <button
+            className="logoutAllBtn"
+            onClick={async () => {
+              const res = await logoutAllApi();
+              alert(res.message);
+              setScreen("login");
+            }}
+          >
+            Logout All
+          </button>
+        </div>
+      </aside>
+    )}
+{selectedUser && (
+  <div className="modalOverlay">
+    <div className="modalCard">
 
-            <input
-              className="input"
-              placeholder="Registered email"
-              onChange={(e) => setEmail(e.target.value)}
-            />
+      <h3>{selectedUser.name}</h3>
+      <p className="note">{selectedUser.email}</p>
 
-            <button
-              className="button"
-              onClick={async () => {
-                const res = await forgotPasswordApi(email);
-                alert(res.message);
-                setEmail("");
-                setScreen("login");
-              }}
-            >
-              Send Reset Link
-            </button>
+      <div className="modalSection">
+        <label>Change Role</label>
+        <select
+  className="roleSelect"
+  value={selectedUser.role}
+  onChange={async (e) => {
+    try {
+      const newRole = e.target.value;
 
-            <div className="link" onClick={() => setScreen("login")}>
-              Back to login
-            </div>
-          </section>
-        )}
+      await updateAdminRoleApi(selectedUser.id, newRole);
 
-        {screen === "reset" && (
-          <section className="authPanel">
-            <h3>Reset Password</h3>
+      await loadAdminUsers();
 
-            {!resetToken ? (
-              <div className="note">Invalid reset link. Please request a new one.</div>
-            ) : (
-              <>
-                <input
-                  className="input"
-                  type="password"
-                  placeholder="New password"
-                  onChange={(e) => setNewPassword(e.target.value)}
-                />
+      setSelectedUser(null);
 
-                <div className="note">
-                  Password must include uppercase, lowercase, number & special character
-                </div>
+      alert("Role updated successfully");
+    } catch (error: any) {
+      alert(error?.message || "Role update failed");
+    }
+  }}
+>
+  <option value="TESTER">TESTER</option>
+  <option value="DEVELOPER">DEVELOPER</option>
+  <option value="ADMIN">ADMIN</option>
+</select>
+      </div>
 
-                <button
-                  className="button"
-                  onClick={async () => {
-                    if (!isValidPassword(newPassword)) {
-                      alert(
-                        "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
-                      );
-                      return;
-                    }
+      <div className="modalActions">
+        <button
+  className="button small"
+  onClick={async () => {
+    try {
+      await updateAdminUserApi(selectedUser.id, {
+        isActive: !selectedUser.isActive,
+      });
 
-                    const res = await resetPasswordApi(resetToken, newPassword);
-                    alert(res.message || "Password reset complete");
+      await loadAdminUsers();
 
-                    if (
-                      typeof res.message === "string" &&
-                      res.message.toLowerCase().includes("successful")
-                    ) {
-                      setNewPassword("");
-                      window.history.replaceState({}, "", "/");
-                      setScreen("login");
-                    }
-                  }}
-                >
-                  Set New Password
-                </button>
-              </>
-            )}
+      setSelectedUser(null);
 
-            <div
-              className="link"
-              onClick={() => {
-                window.history.replaceState({}, "", "/");
-                setScreen("login");
-              }}
-            >
-              Back to login
-            </div>
-          </section>
-        )}
+      alert("Status updated successfully");
+    } catch (error: any) {
+      alert(error?.message || "Status update failed");
+    }
+  }}
+></button>
+  {selectedUser.isActive ? "Deactivate" : "Activate"}
+<button
+  className="button small danger"
+  onClick={async () => {
+    try {
+      if (!window.confirm("Are you sure you want to delete this user?")) return;
 
-        {screen === "dashboard" && (
-          <div className="dashboard">
-            <div className="toolbar">
-              <div className="toolbarIntro">
-                <button
-                  className="menuButton"
-                  onClick={() => setNavOpen((prev) => !prev)}
-                  title="Open feature menu"
-                >
-                  <span />
-                  <span />
-                  <span />
-                </button>
-                <h3>Test Case Management</h3>
-                <p className="note">
-                  Signed in as <strong>{currentRole || "N/A"}</strong>{" "}
-                  <span className={`roleBadge role-${roleKey}`}>{currentRole || "USER"}</span>
-                </p>
-                <p className="note">{roleSummary}</p>
-              </div>
-              <div className="toolbarActions">
-                <button
-                  className="button small"
-                  disabled={isRefreshing}
-                  onClick={async () => {
-                    try {
-                      if (isAdmin) {
-                        await Promise.all([loadAdminUsers(), loadAdminWorkspaceData()]);
-                      } else {
-                        resetEntryFields();
-                        await loadTestCaseData();
-                      }
-                    } catch (error: any) {
-                      setIsRefreshing(false);
-                      alert(error?.message || "Refresh failed");
-                    }
-                  }}
-                >
-                  {isRefreshing ? "Refreshing..." : "Refresh"}
-                </button>
-                <button className="button small danger" onClick={handleLogout}>
-                  Logout
-                </button>
-                <button
-                  className="button small"
-                  style={{ backgroundColor: "#374151" }}
-                  onClick={async () => {
-                    const res = await logoutAllApi();
-                    alert(res.message || "Logged out from all devices");
-                    clearSessionTokens();
-                    setScreen("login");
-                  }}
-                >
-                  Logout All
-                </button>
-              </div>
-            </div>
+      await deleteAdminUserApi(selectedUser.id);
 
-            <div className={`dashboardBody ${navOpen ? "withSidebar" : "withoutSidebar"}`}>
-              {navOpen && (
-                <aside className="featureSidebar">
-                  <h4>Features</h4>
-                  <div className="featureList">
-                    {roleFeatures.map((feature) => (
-                      <button
-                        key={feature.key}
-                        className={`featureItem ${activeFeature === feature.key ? "active" : ""}`}
-                        onClick={() => setActiveFeature(feature.key)}
-                      >
-                        {feature.label}
-                      </button>
-                    ))}
-                  </div>
-                </aside>
-              )}
+      await loadAdminUsers();
 
+      setSelectedUser(null);
+
+      alert("User deleted successfully");
+    } catch (error: any) {
+      alert(error?.message || "Delete failed");
+    }
+  }}
+>
+  Delete
+</button>
+        <button
+          className="button small"
+          style={{ background: "#374151" }}
+          onClick={() => setSelectedUser(null)}
+        >
+          Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+)}
               <div className="dashboardContent">
-            {activeFeature === "none" && (
-              <section className="panel">
-                <h4>Select A Feature</h4>
-                <p className="note">Open the menu icon and choose a feature to continue.</p>
-              </section>
-            )}
+           {activeFeature ===  "none" && !navOpen && (
+  <section className="panel">
+    <h4>Admin Workspace</h4>
+    <p className="note">
+      Select an admin feature from the left sidebar.
+    </p>
+  </section>
+)}
+
             <div className="dashboardGrid">
               {isDeveloper && showRolePanel && activeFeature === "developer_workspace" && (
                 <section className="panel rolePanel rolePanelDeveloper">
@@ -1946,7 +1954,7 @@ function App() {
                 <section className="panel rolePanel rolePanelAdmin">
                   <h4>Admin Workspace</h4>
                   <p className="note">
-                    Select an admin feature from the left sidebar. Content is displayed on the right.
+                    Select an admin feature from the left sidebar.
                   </p>
                   {activeFeature === "admin_create_users" && (
                     <>
@@ -2185,50 +2193,26 @@ function App() {
                   )}
                     </>
                   )}
-                  {activeFeature === "admin_manage_roles" && (
-                    <>
-                  <h4 style={{ marginTop: "12px" }}>Manage Roles</h4>
-                  <button
-                    className="button small"
-                    onClick={async () => {
-                      try {
-                        await loadAdminUsers();
-                      } catch (error: any) {
-                        alert(error?.message || "Load users failed");
-                      }
-                    }}
-                  >
-                    Refresh Users
-                  </button>
-                  {adminUsers.length > 0 && (
-                    <div className="listCompact">
-                      {adminUsers.map((user) => (
-                        <div className="row" key={`role-${user.id}`}>
-                          <span className="title">{user.name} ({user.email})</span>
-                          <span className="meta">Current: {user.role}</span>
-                          <select
-                            className="input"
-                            style={{ width: "160px", marginBottom: 0 }}
-                            value={user.role}
-                            onChange={async (e) => {
-                              try {
-                                await updateAdminRoleApi(user.id, e.target.value);
-                                await loadAdminUsers();
-                              } catch (error: any) {
-                                alert(error?.message || "Role update failed");
-                              }
-                            }}
-                          >
-                            <option value="TESTER">TESTER</option>
-                            <option value="DEVELOPER">DEVELOPER</option>
-                            <option value="ADMIN">ADMIN</option>
-                          </select>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                    </>
-                  )}
+                     {activeFeature === "admin_manage_roles" && (
+  <section className="panel">
+    <h4>Manage Roles</h4>
+
+    {adminUsers.length > 0 && (
+      <div className="simpleList">
+        {adminUsers.map((user) => (
+          <div
+            key={user.id}
+            className="simpleListItem"
+            onClick={() => setSelectedUser(user)}
+          >
+            <div className="listName">{user.name}</div>
+            <div className="listEmail">{user.email}</div>
+          </div>
+        ))}
+      </div>
+    )}
+  </section>
+)}
                   {activeFeature === "admin_audit_logs" && (
                     <>
                   <h4 style={{ marginTop: "12px" }}>View Audit Logs</h4>
@@ -5805,9 +5789,7 @@ function App() {
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-}
+      </div>)}
+
 
 export default App;
