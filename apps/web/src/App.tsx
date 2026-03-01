@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   bulkTestCaseOperationApi,
   clearSessionTokens,
@@ -286,6 +286,15 @@ function App() {
   const [adminCreatePassword, setAdminCreatePassword] = useState("");
   const [adminCreateRole, setAdminCreateRole] = useState("");
   const [adminUserSavingId, setAdminUserSavingId] = useState("");
+  const [adminUsersVisible, setAdminUsersVisible] = useState(false);
+  const [adminUserModalUser, setAdminUserModalUser] = useState<any | null>(null);
+  const [adminUserModalEditing, setAdminUserModalEditing] = useState(false);
+  const [adminUserModalName, setAdminUserModalName] = useState("");
+  const [adminUserModalRole, setAdminUserModalRole] = useState("TESTER");
+  const [adminUserModalLoading, setAdminUserModalLoading] = useState(false);
+  const [adminUserModalError, setAdminUserModalError] = useState("");
+  const [adminUserToast, setAdminUserToast] = useState("");
+  const adminUserModalRef = useRef<HTMLDivElement | null>(null);
   const [adminProjects, setAdminProjects] = useState<any[]>([]);
   const [adminProjectName, setAdminProjectName] = useState("");
   const [adminProjectDescription, setAdminProjectDescription] = useState("");
@@ -774,6 +783,28 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
     setAdminAuditLogs(Array.isArray(rows) ? rows : []);
   };
 
+  const showAdminToast = (message: string) => {
+    setAdminUserToast(message);
+    window.setTimeout(() => setAdminUserToast(""), 2500);
+  };
+
+  const openAdminUserModal = (user: any) => {
+    if (!user) return;
+    setAdminUserModalUser(user);
+    setAdminUserModalEditing(false);
+    setAdminUserModalName(String(user?.name || "").trim() || "Unnamed user");
+    setAdminUserModalRole(String(user?.role || "TESTER").toUpperCase());
+    setAdminUserModalError("");
+    setAdminUserModalLoading(false);
+  };
+
+  const closeAdminUserModal = () => {
+    if (adminUserModalLoading) return;
+    setAdminUserModalUser(null);
+    setAdminUserModalEditing(false);
+    setAdminUserModalError("");
+  };
+
   const buildBugNotificationItems = (bugRows: any[]): AppNotificationItem[] => {
     if (!Array.isArray(bugRows) || bugRows.length === 0) return [];
     const unresolvedWorkflow = new Set(["NEW", "OPEN", "IN_PROGRESS", "REOPENED"]);
@@ -990,6 +1021,14 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
     setAdminCreatePassword("");
     setAdminCreateRole("");
     setAdminUserSavingId("");
+    setAdminUsersVisible(false);
+    setAdminUserModalUser(null);
+    setAdminUserModalEditing(false);
+    setAdminUserModalName("");
+    setAdminUserModalRole("TESTER");
+    setAdminUserModalLoading(false);
+    setAdminUserModalError("");
+    setAdminUserToast("");
     resetExecutionPanel();
     resetBugPanel();
   };
@@ -1607,6 +1646,46 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
   }, [screen, currentRole, currentUserId, bugs]);
 
   useEffect(() => {
+    if (!adminUserModalUser) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeAdminUserModal();
+        return;
+      }
+
+      if (event.key !== "Tab" || !adminUserModalRef.current) return;
+      const focusable = adminUserModalRef.current.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (event.shiftKey) {
+        if (active === first || !adminUserModalRef.current.contains(active)) {
+          event.preventDefault();
+          last.focus();
+        }
+      } else if (active === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    const modalNode = adminUserModalRef.current;
+    const firstFocusable = modalNode?.querySelector<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    firstFocusable?.focus();
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [adminUserModalUser, adminUserModalLoading]);
+
+  useEffect(() => {
     if (screen !== "dashboard") return;
     if (normalizedFeature !== "bug_management" && normalizedFeature !== "test_cases") return;
     loadTestCaseData().catch(() => {
@@ -1801,6 +1880,14 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
     setExpandedTestCaseId("");
     setSelectedIds([]);
     setEditingId("");
+    setAdminUsersVisible(false);
+    setAdminUserModalUser(null);
+    setAdminUserModalEditing(false);
+    setAdminUserModalName("");
+    setAdminUserModalRole("TESTER");
+    setAdminUserModalLoading(false);
+    setAdminUserModalError("");
+    setAdminUserToast("");
     resetBugPanel();
     setActiveFeature("none");
     setActiveMenuKey("dashboard_home");
@@ -2175,170 +2262,382 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
                   {activeMenuKey === "user_management" && (
                     <>
                       <h4>User Management</h4>
-                      <p className="note">Create, edit, activate/deactivate, and delete user accounts.</p>
-                      <div className="inlineGrid">
-                        <input
-                          className="input"
-                          placeholder="Name"
-                          value={adminCreateName}
-                          autoComplete="off"
-                          name="admin_create_name"
-                          onChange={(e) => setAdminCreateName(e.target.value)}
-                        />
-                        <input
-                          className="input"
-                          placeholder="Email"
-                          value={adminCreateEmail}
-                          autoComplete="off"
-                          name="admin_create_email"
-                          onChange={(e) => setAdminCreateEmail(e.target.value)}
-                        />
-                      </div>
-                      <div className="inlineGrid">
-                        <input
-                          className="input"
-                          type="password"
-                          placeholder="Temporary Password"
-                          value={adminCreatePassword}
-                          autoComplete="new-password"
-                          name="admin_create_password"
-                          onChange={(e) => setAdminCreatePassword(e.target.value)}
-                        />
-                        <select
-                          className="input"
-                          value={adminCreateRole}
-                          onChange={(e) => setAdminCreateRole(e.target.value)}
-                        >
-                          <option value="">Select role</option>
-                          <option value="TESTER">TESTER</option>
-                          <option value="DEVELOPER">DEVELOPER</option>
-                          <option value="ADMIN">ADMIN</option>
-                        </select>
-                      </div>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            if (!adminCreateName.trim() || !adminCreateEmail.trim() || !adminCreatePassword.trim() || !adminCreateRole) {
-                              alert("Name, email, password, and role are required");
-                              return;
-                            }
-                            await createAdminUserApi({
-                              name: adminCreateName.trim(),
-                              email: adminCreateEmail.trim().toLowerCase(),
-                              password: adminCreatePassword,
-                              role: adminCreateRole,
-                            });
-                            setAdminCreateName("");
-                            setAdminCreateEmail("");
-                            setAdminCreatePassword("");
-                            setAdminCreateRole("");
-                            await loadAdminUsers();
-                            alert("User created");
-                          } catch (error: any) {
-                            alert(error?.message || "Create user failed");
-                          }
-                        }}
-                      >
-                        Create User
-                      </button>
-
-                      <div className="panelHeader" style={{ marginTop: "12px" }}>
-                        <h4 style={{ marginBottom: 0 }}>Manage Users</h4>
+                      <p className="note">Open users in a clean table and manage actions safely through a modal.</p>
+                      <div className="panel adminCreateUserPanel">
+                        <div className="panelHeader">
+                          <h4 style={{ marginBottom: 0 }}>Create User</h4>
+                        </div>
+                        <div className="inlineGrid">
+                          <input
+                            className="input"
+                            placeholder="Name"
+                            value={adminCreateName}
+                            autoComplete="off"
+                            name="admin_create_name"
+                            onChange={(e) => setAdminCreateName(e.target.value)}
+                          />
+                          <input
+                            className="input"
+                            placeholder="Email"
+                            value={adminCreateEmail}
+                            autoComplete="off"
+                            name="admin_create_email"
+                            onChange={(e) => setAdminCreateEmail(e.target.value)}
+                          />
+                        </div>
+                        <div className="inlineGrid">
+                          <input
+                            className="input"
+                            type="password"
+                            placeholder="Temporary Password"
+                            value={adminCreatePassword}
+                            autoComplete="new-password"
+                            name="admin_create_password"
+                            onChange={(e) => setAdminCreatePassword(e.target.value)}
+                          />
+                          <select
+                            className="input"
+                            value={adminCreateRole}
+                            onChange={(e) => setAdminCreateRole(e.target.value)}
+                          >
+                            <option value="">Select role</option>
+                            <option value="TESTER">TESTER</option>
+                            <option value="DEVELOPER">DEVELOPER</option>
+                            <option value="ADMIN">ADMIN</option>
+                          </select>
+                        </div>
                         <button
-                          className="button small"
+                          className="button"
+                          disabled={adminUserSavingId === "create-user"}
                           onClick={async () => {
                             try {
-                              await loadAdminUsers();
+                              if (
+                                !adminCreateName.trim() ||
+                                !adminCreateEmail.trim() ||
+                                !adminCreatePassword.trim() ||
+                                !adminCreateRole
+                              ) {
+                                alert("Name, email, password, and role are required");
+                                return;
+                              }
+                              setAdminUserSavingId("create-user");
+                              const created = await createAdminUserApi({
+                                name: adminCreateName.trim(),
+                                email: adminCreateEmail.trim().toLowerCase(),
+                                password: adminCreatePassword,
+                                role: adminCreateRole,
+                              });
+                              setAdminCreateName("");
+                              setAdminCreateEmail("");
+                              setAdminCreatePassword("");
+                              setAdminCreateRole("");
+                              setAdminUsersVisible(true);
+                              if (created?.id) {
+                                setAdminUsers((prev) => {
+                                  const exists = prev.some((row) => row.id === created.id);
+                                  if (exists) return prev;
+                                  return [created, ...prev];
+                                });
+                              } else {
+                                await loadAdminUsers();
+                              }
+                              showAdminToast("User created successfully");
                             } catch (error: any) {
-                              alert(error?.message || "Load users failed");
+                              alert(error?.message || "Create user failed");
+                            } finally {
+                              setAdminUserSavingId("");
                             }
                           }}
                         >
-                          Refresh Users
+                          {adminUserSavingId === "create-user" ? "Creating..." : "Create User"}
                         </button>
                       </div>
-                      <div className="listCompact">
-                        {adminUsers.length === 0 ? (
-                          <p className="note">No users found.</p>
-                        ) : (
-                          adminUsers.map((user) => {
-                            const isCurrentAdmin = user.id === currentUserId;
-                            const isSaving = adminUserSavingId === user.id;
-                            return (
-                              <div className="row adminUserRow" key={user.id}>
-                                <span className="title">
-                                  <strong>{user.name || "Unnamed user"}</strong>
-                                  <br />
-                                  {user.email}
-                                </span>
-                                <span className="meta">
-                                  {isCurrentAdmin ? "Current account" : user.isActive ? "Active" : "Inactive"}
-                                </span>
+                      <div className="adminUsersToolbar">
+                        <button
+                          className="button adminUsersPrimaryBtn"
+                          onClick={async () => {
+                            try {
+                              setAdminUserSavingId("users-load");
+                              await loadAdminUsers();
+                              setAdminUsersVisible(true);
+                              showAdminToast("Users loaded");
+                            } catch (error: any) {
+                              alert(error?.message || "Load users failed");
+                            } finally {
+                              setAdminUserSavingId("");
+                            }
+                          }}
+                          disabled={adminUserSavingId === "users-load"}
+                        >
+                          {adminUserSavingId === "users-load" ? "Loading Users..." : "Users"}
+                        </button>
+                        {adminUsersVisible ? (
+                          <button
+                            className="button small"
+                            onClick={async () => {
+                              try {
+                                setAdminUserSavingId("users-refresh");
+                                await loadAdminUsers();
+                                showAdminToast("Users refreshed");
+                              } catch (error: any) {
+                                alert(error?.message || "Refresh users failed");
+                              } finally {
+                                setAdminUserSavingId("");
+                              }
+                            }}
+                            disabled={adminUserSavingId === "users-refresh"}
+                          >
+                            {adminUserSavingId === "users-refresh" ? "Refreshing..." : "Refresh"}
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {!adminUsersVisible ? (
+                        <p className="note">Click the Users button to fetch and display the user table.</p>
+                      ) : (
+                        <div className="tableWrap adminUsersTableWrap">
+                          <table className="table adminUsersTable">
+                            <thead>
+                              <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {adminUsers.length === 0 ? (
+                                <tr>
+                                  <td colSpan={4} className="note">No users found.</td>
+                                </tr>
+                              ) : (
+                                adminUsers.map((user) => {
+                                  const roleValue = String(user.role || "TESTER").toUpperCase();
+                                  const statusValue = Boolean(user.isActive) ? "ACTIVE" : "INACTIVE";
+                                  return (
+                                    <tr
+                                      key={user.id}
+                                      className="adminUsersRow"
+                                      tabIndex={0}
+                                      role="button"
+                                      aria-label={`Open actions for ${user.name || user.email}`}
+                                      onClick={() => openAdminUserModal(user)}
+                                      onKeyDown={(event) => {
+                                        if (event.key === "Enter" || event.key === " ") {
+                                          event.preventDefault();
+                                          openAdminUserModal(user);
+                                        }
+                                      }}
+                                    >
+                                      <td>{user.name || "Unnamed user"}</td>
+                                      <td className="truncateCell" title={user.email}>{user.email}</td>
+                                      <td>
+                                        <span className={`adminPill role-${roleValue.toLowerCase()}`}>{roleValue}</span>
+                                      </td>
+                                      <td>
+                                        <span className={`adminPill status-${statusValue.toLowerCase()}`}>
+                                          {statusValue}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })
+                              )}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {adminUserModalUser ? (
+                        <div
+                          className="adminUserModalOverlay"
+                          onMouseDown={(event) => {
+                            if (event.target === event.currentTarget) {
+                              closeAdminUserModal();
+                            }
+                          }}
+                        >
+                          <div
+                            className="adminUserModal"
+                            role="dialog"
+                            aria-modal="true"
+                            aria-labelledby="admin-user-modal-title"
+                            ref={adminUserModalRef}
+                          >
+                            <button
+                              type="button"
+                              className="adminUserModalClose"
+                              aria-label="Close user details"
+                              onClick={closeAdminUserModal}
+                              disabled={adminUserModalLoading}
+                            >
+                              X
+                            </button>
+                            <h5 id="admin-user-modal-title">User Details</h5>
+
+                            {adminUserModalError ? (
+                              <div className="adminUserModalError">{adminUserModalError}</div>
+                            ) : null}
+
+                            {!adminUserModalEditing ? (
+                              <div className="adminUserModalDetails">
+                                <p><strong>Name:</strong> {adminUserModalUser.name || "Unnamed user"}</p>
+                                <p><strong>Email:</strong> {adminUserModalUser.email}</p>
+                                <p><strong>Role:</strong> {adminUserModalUser.role || "TESTER"}</p>
+                                <p><strong>Status:</strong> {adminUserModalUser.isActive ? "Active" : "Inactive"}</p>
+                              </div>
+                            ) : (
+                              <div className="adminUserModalForm">
+                                <label className="fieldLabel" htmlFor="admin-modal-name">Name</label>
+                                <input
+                                  id="admin-modal-name"
+                                  className="input"
+                                  value={adminUserModalName}
+                                  onChange={(e) => setAdminUserModalName(e.target.value)}
+                                  disabled={adminUserModalLoading}
+                                />
+                                <label className="fieldLabel" htmlFor="admin-modal-role">Role</label>
                                 <select
-                                  className="input adminRoleInput"
-                                  value={user.role || "TESTER"}
-                                  disabled={isSaving}
-                                  onChange={async (e) => {
-                                    try {
-                                      const nextRole = e.target.value;
-                                      setAdminUserSavingId(user.id);
-                                      await updateAdminRoleApi(user.id, nextRole);
-                                      await loadAdminUsers();
-                                    } catch (error: any) {
-                                      alert(error?.message || "Role update failed");
-                                    } finally {
-                                      setAdminUserSavingId("");
-                                    }
-                                  }}
+                                  id="admin-modal-role"
+                                  className="input"
+                                  value={adminUserModalRole}
+                                  onChange={(e) => setAdminUserModalRole(e.target.value)}
+                                  disabled={adminUserModalLoading}
                                 >
                                   <option value="TESTER">TESTER</option>
                                   <option value="DEVELOPER">DEVELOPER</option>
                                   <option value="ADMIN">ADMIN</option>
                                 </select>
-                                <button
-                                  className="button small"
-                                  disabled={isSaving || isCurrentAdmin}
-                                  onClick={async () => {
-                                    try {
-                                      setAdminUserSavingId(user.id);
-                                      await updateAdminUserApi(user.id, { isActive: !Boolean(user.isActive) });
-                                      await loadAdminUsers();
-                                    } catch (error: any) {
-                                      alert(error?.message || "Status update failed");
-                                    } finally {
-                                      setAdminUserSavingId("");
-                                    }
-                                  }}
-                                >
-                                  {Boolean(user.isActive) ? "Deactivate" : "Activate"}
-                                </button>
-                                <button
-                                  className="button small danger"
-                                  disabled={isSaving || isCurrentAdmin}
-                                  onClick={async () => {
-                                    try {
-                                      const confirmed = window.confirm(
-                                        `Delete user ${user.email}? This action cannot be undone.`
-                                      );
-                                      if (!confirmed) return;
-                                      setAdminUserSavingId(user.id);
-                                      await deleteAdminUserApi(user.id);
-                                      await loadAdminUsers();
-                                    } catch (error: any) {
-                                      alert(error?.message || "Delete user failed");
-                                    } finally {
-                                      setAdminUserSavingId("");
-                                    }
-                                  }}
-                                >
-                                  Delete
-                                </button>
                               </div>
-                            );
-                          })
-                        )}
-                      </div>
+                            )}
+
+                            <div className="adminUserModalActions">
+                              {!adminUserModalEditing ? (
+                                <>
+                                  <button
+                                    className="button small adminActionEdit"
+                                    disabled={adminUserModalLoading}
+                                    onClick={() => {
+                                      setAdminUserModalEditing(true);
+                                      setAdminUserModalName(String(adminUserModalUser?.name || "").trim() || "Unnamed user");
+                                      setAdminUserModalRole(String(adminUserModalUser?.role || "TESTER").toUpperCase());
+                                      setAdminUserModalError("");
+                                    }}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    className="button small adminActionToggle"
+                                    disabled={adminUserModalLoading || adminUserModalUser.id === currentUserId}
+                                    onClick={async () => {
+                                      const actionLabel = adminUserModalUser.isActive ? "Deactivate" : "Activate";
+                                      const confirmed = window.confirm(`${actionLabel} ${adminUserModalUser.email}?`);
+                                      if (!confirmed) return;
+                                      try {
+                                        setAdminUserModalLoading(true);
+                                        setAdminUserModalError("");
+                                        const nextIsActive = !Boolean(adminUserModalUser.isActive);
+                                        await updateAdminUserApi(adminUserModalUser.id, { isActive: nextIsActive });
+                                        setAdminUsers((prev) =>
+                                          prev.map((row) => (row.id === adminUserModalUser.id ? { ...row, isActive: nextIsActive } : row))
+                                        );
+                                        setAdminUserModalUser((prev: any | null) =>
+                                          prev ? { ...prev, isActive: nextIsActive } : prev
+                                        );
+                                        showAdminToast(`User ${nextIsActive ? "activated" : "deactivated"} successfully`);
+                                        closeAdminUserModal();
+                                      } catch (error: any) {
+                                        setAdminUserModalError(error?.message || "Status update failed");
+                                      } finally {
+                                        setAdminUserModalLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    {adminUserModalUser.isActive ? "Deactivate" : "Activate"}
+                                  </button>
+                                  <button
+                                    className="button small adminActionDelete"
+                                    disabled={adminUserModalLoading || adminUserModalUser.id === currentUserId}
+                                    onClick={async () => {
+                                      const firstConfirm = window.confirm(
+                                        `Delete ${adminUserModalUser.email}? This is irreversible.`
+                                      );
+                                      if (!firstConfirm) return;
+                                      const finalToken = window.prompt("Type DELETE to confirm permanent removal.");
+                                      if (finalToken !== "DELETE") return;
+                                      try {
+                                        setAdminUserModalLoading(true);
+                                        setAdminUserModalError("");
+                                        await deleteAdminUserApi(adminUserModalUser.id);
+                                        setAdminUsers((prev) => prev.filter((row) => row.id !== adminUserModalUser.id));
+                                        showAdminToast("User deleted successfully");
+                                        closeAdminUserModal();
+                                      } catch (error: any) {
+                                        setAdminUserModalError(error?.message || "Delete user failed");
+                                      } finally {
+                                        setAdminUserModalLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    Delete
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    className="button small adminActionEdit"
+                                    disabled={adminUserModalLoading || !adminUserModalName.trim()}
+                                    onClick={async () => {
+                                      const nextName = adminUserModalName.trim();
+                                      if (!nextName) {
+                                        setAdminUserModalError("Name is required");
+                                        return;
+                                      }
+                                      try {
+                                        setAdminUserModalLoading(true);
+                                        setAdminUserModalError("");
+                                        await updateAdminUserApi(adminUserModalUser.id, {
+                                          name: nextName,
+                                          role: adminUserModalRole,
+                                        });
+                                        setAdminUsers((prev) =>
+                                          prev.map((row) =>
+                                            row.id === adminUserModalUser.id
+                                              ? { ...row, name: nextName, role: adminUserModalRole }
+                                              : row
+                                          )
+                                        );
+                                        showAdminToast("User updated successfully");
+                                        closeAdminUserModal();
+                                      } catch (error: any) {
+                                        setAdminUserModalError(error?.message || "Save failed");
+                                      } finally {
+                                        setAdminUserModalLoading(false);
+                                      }
+                                    }}
+                                  >
+                                    {adminUserModalLoading ? "Saving..." : "Save"}
+                                  </button>
+                                  <button
+                                    className="button small"
+                                    disabled={adminUserModalLoading}
+                                    onClick={() => {
+                                      setAdminUserModalEditing(false);
+                                      setAdminUserModalName(String(adminUserModalUser?.name || "").trim() || "Unnamed user");
+                                      setAdminUserModalRole(String(adminUserModalUser?.role || "TESTER").toUpperCase());
+                                      setAdminUserModalError("");
+                                    }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {adminUserToast ? <div className="adminUserToast">{adminUserToast}</div> : null}
                     </>
                   )}
 
@@ -2391,48 +2690,7 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
                           </label>
                         ))}
                       </div>
-                      <div className="panelHeader" style={{ marginTop: "12px" }}>
-                        <h4 style={{ marginBottom: 0 }}>Assign User Roles</h4>
-                      </div>
-                      <div className="listCompact">
-                        {adminUsers.length === 0 ? (
-                          <p className="note">No users found to manage roles.</p>
-                        ) : (
-                          adminUsers.map((user) => {
-                            const isSaving = adminUserSavingId === user.id;
-                            return (
-                              <div className="row adminUserRow" key={user.id}>
-                                <span className="title">
-                                  <strong>{user.name || "Unnamed user"}</strong>
-                                  <br />
-                                  {user.email}
-                                </span>
-                                <span className="meta">Current Role: {user.role || "TESTER"}</span>
-                                <select
-                                  className="input adminRoleInput"
-                                  value={user.role || "TESTER"}
-                                  disabled={isSaving}
-                                  onChange={async (e) => {
-                                    try {
-                                      setAdminUserSavingId(user.id);
-                                      await updateAdminRoleApi(user.id, e.target.value);
-                                      await loadAdminUsers();
-                                    } catch (error: any) {
-                                      alert(error?.message || "Role update failed");
-                                    } finally {
-                                      setAdminUserSavingId("");
-                                    }
-                                  }}
-                                >
-                                  <option value="TESTER">TESTER</option>
-                                  <option value="DEVELOPER">DEVELOPER</option>
-                                  <option value="ADMIN">ADMIN</option>
-                                </select>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
+                     
                     </>
                   )}
 
