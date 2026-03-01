@@ -55,6 +55,9 @@ const resolveRequiredPermission = (req: AuthRequest): string | null => {
   if (path.startsWith("/reports")) {
     return "Reports";
   }
+  if (path.startsWith("/issues/from-executions")) {
+    return "Bug Management";
+  }
   if (path.startsWith("/bugs") || path.startsWith("/issues") || path.startsWith("/notifications/bugs")) {
     if (path.startsWith("/developer/bugs")) return "My Assigned Bugs";
     if (method === "GET") return "All Bugs";

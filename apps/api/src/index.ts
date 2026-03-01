@@ -34,7 +34,9 @@ app.use(
   })
 );
 
-app.use(express.json());
+const requestBodyLimit = process.env.REQUEST_BODY_LIMIT || "25mb";
+app.use(express.json({ limit: requestBodyLimit }));
+app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api", testcaseRoutes);

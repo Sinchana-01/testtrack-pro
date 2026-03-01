@@ -354,6 +354,36 @@ export async function stopExecutionTimerApi(executionId: string) {
   return authJson(`/executions/${executionId}/timer/stop`, { method: "POST" });
 }
 
+export async function pauseExecutionTimerApi(executionId: string) {
+  return authJson(`/executions/${executionId}/timer/pause`, { method: "POST" });
+}
+
+export async function resumeExecutionTimerApi(executionId: string) {
+  return authJson(`/executions/${executionId}/timer/resume`, { method: "POST" });
+}
+
+export async function setExecutionManualDurationApi(
+  executionId: string,
+  payload: { durationSeconds?: number; durationMinutes?: number }
+) {
+  return authJson(`/executions/${executionId}/timer/manual`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function executeTestCaseApi(
+  testCaseId: string,
+  payload: { result: string; testRunId?: string; notes?: string; stepResults?: unknown[] }
+) {
+  return authJson(`/testcases/${testCaseId}/execute`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function listExecutionEvidenceApi(executionId: string) {
   return authJson(`/executions/${executionId}/evidence`);
 }
@@ -555,6 +585,14 @@ export async function listSuiteExecutionsApi(suiteId: string) {
 
 export async function listAdminUsersApi() {
   return authJson("/admin/users");
+}
+
+export async function listTesterUsersApi() {
+  return authJson("/users/testers");
+}
+
+export async function listDeveloperUsersApi() {
+  return authJson("/users/developers");
 }
 
 export async function createAdminUserApi(payload: {

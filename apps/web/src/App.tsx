@@ -5,11 +5,8 @@ import {
   cloneTestCaseApi,
   createBugApi,
   createBugCommentApi,
-  createBugFromExecutionApi,
   createSuiteApi,
   createAdminUserApi,
-  createTestRunApi,
-  deleteExecutionEvidenceApi,
   deleteAdminUserApi,
   deleteBugCommentApi,
   createFromTemplateApi,
@@ -19,17 +16,15 @@ import {
   editBugCommentApi,
   deleteTemplateApi,
   deleteTestCaseApi,
-  finalizeExecutionApi,
   forgotPasswordApi,
   getBugApi,
-  getTestRunApi,
   getRefreshToken,
   getMyRolePermissionsApi,
   listBugCommentsApi,
   listBugNotificationsApi,
   listBugsApi,
-  listExecutionEvidenceApi,
   listExecutionReportsApi,
+  listDeveloperUsersApi,
   listAdminProjectsApi,
   listAdminUsersApi,
   listAdminAuditLogsApi,
@@ -42,19 +37,14 @@ import {
   loginApi,
   logoutAllApi,
   openExecutionApi,
-  reexecuteExecutionApi,
   refreshTokenApi,
   registerApi,
   resolveBugApi,
   resetPasswordApi,
-  saveExecutionStepApi,
   setSessionTokens,
-  startExecutionTimerApi,
   startExecutionApi,
   startSuiteExecutionApi,
-  stopExecutionTimerApi,
   quickUpdateDeveloperBugStatusApi,
-  uploadExecutionEvidenceApi,
   updateBugWorkflowApi,
   addSuiteTestCasesApi,
   archiveSuiteApi,
@@ -80,6 +70,9 @@ import Register from "./components/auth/Register";
 import ForgotPassword from "./components/auth/ForgotPassword";
 import ResetPassword from "./components/auth/ResetPassword";
 import DashboardLayout from "./components/layout/DashboardLayout";
+import TestRunManagementSection from "./features/test-runs/TestRunManagementSection";
+import ExecuteTestsSection from "./features/execution/ExecuteTestsSection";
+import SuiteManagementSection from "./features/suites/SuiteManagementSection";
 import { buildNavFromPermissions, permissionCatalog } from "./config/roleNav";
 import "./App.css";
 
@@ -209,16 +202,10 @@ function App() {
   const [selectedTestCaseModalId, setSelectedTestCaseModalId] = useState("");
   const [testCasesLoading, setTestCasesLoading] = useState(false);
   const [testRuns, setTestRuns] = useState<any[]>([]);
-  const [runName, setRunName] = useState("");
-  const [runDescription, setRunDescription] = useState("");
-  const [runStartDate, setRunStartDate] = useState("");
-  const [runEndDate, setRunEndDate] = useState("");
-  const [runTesterIdsText, setRunTesterIdsText] = useState("");
-  const [selectedRunId, setSelectedRunId] = useState("");
-  const [runDetails, setRunDetails] = useState<any>(null);
   const [suites, setSuites] = useState<any[]>([]);
   const [suiteName, setSuiteName] = useState("");
   const [suiteDescription, setSuiteDescription] = useState("");
+  const [suiteCreateType, setSuiteCreateType] = useState<"STATIC" | "DYNAMIC">("STATIC");
   const [suiteModule, setSuiteModule] = useState("");
   const [suiteProjectId, setSuiteProjectId] = useState("");
   const [suiteParentId, setSuiteParentId] = useState("");
@@ -273,6 +260,8 @@ function App() {
   const [bugFilterPriority, setBugFilterPriority] = useState("");
   const [bugFilterSeverity, setBugFilterSeverity] = useState("");
   const [bugSortBy, setBugSortBy] = useState("");
+  const [bugViewMode, setBugViewMode] = useState<"all" | "mine" | "assigned">("all");
+  const [bugSearch, setBugSearch] = useState("");
   const [bugCreateTitle, setBugCreateTitle] = useState("");
   const [bugCreateDescription, setBugCreateDescription] = useState("");
   const [bugCreateStepsToReproduce, setBugCreateStepsToReproduce] = useState("");
@@ -287,6 +276,9 @@ function App() {
   const [bugCreateExecutionId, setBugCreateExecutionId] = useState("");
   const [bugCreateDueDate, setBugCreateDueDate] = useState("");
   const [bugCreateAttachmentsText, setBugCreateAttachmentsText] = useState("");
+  const [developerDirectory, setDeveloperDirectory] = useState<
+    Array<{ id: string; name: string; email: string }>
+  >([]);
   const [bugTransitionToStatus, setBugTransitionToStatus] = useState("");
   const [bugTransitionReason, setBugTransitionReason] = useState("");
   const [bugTransitionDuplicateOf, setBugTransitionDuplicateOf] = useState("");
@@ -476,9 +468,39 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     executionRunId && executionRunCaseIds.size > 0
       ? testCases.filter((tc) => executionRunCaseIds.has(tc.id))
       : testCases;
-  const assignedBugCount = bugs.length;
-  const p1UrgentCount = bugs.filter((item) => item.priority === "P1_URGENT").length;
-  const criticalBugCount = bugs.filter((item) => item.severity === "CRITICAL").length;
+  const bugRowsForDisplay = bugs
+    .filter((item) => {
+      const reporterId = String(item?.reportedBy || item?.reporter?.id || "");
+      const assigneeId = String(item?.assignedTo || item?.assignee?.id || "");
+      if (bugViewMode === "mine") return !!currentUserId && reporterId === currentUserId;
+      if (bugViewMode === "assigned") return !!currentUserId && assigneeId === currentUserId;
+      return true;
+    })
+    .filter((item) => {
+      const query = bugSearch.trim().toLowerCase();
+      if (!query) return true;
+      const searchableText = [
+        item?.bugId,
+        item?.id,
+        item?.title,
+        item?.description,
+        item?.workflowStatus,
+        item?.priority,
+        item?.severity,
+        item?.reporter?.name,
+        item?.reporter?.email,
+        item?.assignee?.name,
+        item?.assignee?.email,
+        item?.testCase?.testCaseCode,
+        item?.testCase?.title,
+      ]
+        .map((value) => String(value || "").toLowerCase())
+        .join(" ");
+      return searchableText.includes(query);
+    });
+  const assignedBugCount = bugRowsForDisplay.length;
+  const p1UrgentCount = bugRowsForDisplay.filter((item) => item.priority === "P1_URGENT").length;
+  const criticalBugCount = bugRowsForDisplay.filter((item) => item.severity === "CRITICAL").length;
   const failedExecutions = executionReports.filter((item) => item.result === "FAILED");
   const testerPendingTests = testCases
     .filter((item) => item.status === "DRAFT" || item.status === "READY_FOR_REVIEW")
@@ -514,12 +536,12 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   })();
   const maxTrendCount = Math.max(...trendBuckets.map((b) => b.count), 1);
   const bugStatusCounts = {
-    NEW: bugs.filter((b) => b.workflowStatus === "NEW").length,
-    OPEN: bugs.filter((b) => b.workflowStatus === "OPEN").length,
-    IN_PROGRESS: bugs.filter((b) => b.workflowStatus === "IN_PROGRESS").length,
-    FIXED: bugs.filter((b) => b.workflowStatus === "FIXED").length,
-    VERIFIED: bugs.filter((b) => b.workflowStatus === "VERIFIED").length,
-    CLOSED: bugs.filter((b) => b.workflowStatus === "CLOSED").length,
+    NEW: bugRowsForDisplay.filter((b) => b.workflowStatus === "NEW").length,
+    OPEN: bugRowsForDisplay.filter((b) => b.workflowStatus === "OPEN").length,
+    IN_PROGRESS: bugRowsForDisplay.filter((b) => b.workflowStatus === "IN_PROGRESS").length,
+    FIXED: bugRowsForDisplay.filter((b) => b.workflowStatus === "FIXED").length,
+    VERIFIED: bugRowsForDisplay.filter((b) => b.workflowStatus === "VERIFIED").length,
+    CLOSED: bugRowsForDisplay.filter((b) => b.workflowStatus === "CLOSED").length,
   };
   const bugStatusTotal = Object.values(bugStatusCounts).reduce((acc, n) => acc + n, 0) || 1;
   const bugStatusPie = `conic-gradient(
@@ -648,46 +670,84 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     }
   };
 
-  const handleExcelFileChange = async (file?: File) => {
+  const handleImportFileChange = async (file?: File) => {
     if (!file) return;
+    if (!importType) {
+      alert("Please select import source type first");
+      return;
+    }
     try {
       const text = await file.text();
-      let rows: any[] = [];
-      try {
+      if (importType === "JSON") {
         const parsed = JSON.parse(text);
         if (Array.isArray(parsed)) {
-          rows = parsed;
+          setImportPayload(JSON.stringify(parsed, null, 2));
+        } else if (parsed && typeof parsed === "object") {
+          setImportPayload(JSON.stringify(parsed, null, 2));
+        } else {
+          alert("JSON import file must contain an object or array.");
+          return;
         }
-      } catch {
+        setImportExcelRows([]);
+        setImportExcelFileName(file.name);
+      } else if (importType === "CSV") {
         const lines = text
           .split(/\r?\n/)
           .map((line) => line.trim())
           .filter(Boolean);
-        if (lines.length >= 2) {
-          const headers = parseCsvLine(lines[0]);
-          rows = lines.slice(1).map((line) => {
-            const cells = parseCsvLine(line);
-            const row: Record<string, string> = {};
-            headers.forEach((h, idx) => {
-              row[h] = cells[idx] || "";
-            });
-            return row;
-          });
+        if (lines.length < 2) {
+          alert("CSV import requires a header row and at least one data row.");
+          return;
         }
+        setImportPayload(text);
+        setImportExcelRows([]);
+        setImportExcelFileName(file.name);
+      } else {
+        let rows: any[] = [];
+        try {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) {
+            rows = parsed;
+          }
+        } catch {
+          const lines = text
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+          if (lines.length >= 2) {
+            const headers = parseCsvLine(lines[0]);
+            rows = lines.slice(1).map((line) => {
+              const cells = parseCsvLine(line);
+              const row: Record<string, string> = {};
+              headers.forEach((h, idx) => {
+                row[h] = cells[idx] || "";
+              });
+              return row;
+            });
+          }
+        }
+        if (!Array.isArray(rows) || rows.length === 0) {
+          alert("Unable to parse file. Use JSON array rows or CSV text for EXCEL import.");
+          return;
+        }
+        setImportExcelRows(rows);
+        setImportExcelFileName(file.name);
+        setImportPayload(JSON.stringify(rows, null, 2));
       }
-      if (!Array.isArray(rows) || rows.length === 0) {
-        alert("Unable to parse file. Use JSON array rows or CSV text for import.");
-        return;
-      }
-      setImportExcelRows(rows);
-      setImportExcelFileName(file.name);
-      setImportPayload(JSON.stringify(rows, null, 2));
       setPreviewReady(false);
       setImportPreview([]);
       setImportPreviewErrors([]);
     } catch (error: any) {
-      alert(error?.message || "Failed to parse Excel file");
+      const context = importType || "import";
+      alert(error?.message || `Failed to parse ${context} file`);
     }
+  };
+
+  const getImportFileAccept = (): string => {
+    if (importType === "JSON") return ".json,application/json,text/json,.txt";
+    if (importType === "CSV") return ".csv,text/csv,.txt";
+    if (importType === "EXCEL") return ".csv,.json,.txt";
+    return ".json,.csv,.txt";
   };
 
   const loadTestCaseData = async () => {
@@ -794,6 +854,21 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   const loadAdminUsers = async () => {
     const rows = await listAdminUsersApi();
     setAdminUsers(Array.isArray(rows) ? rows : []);
+  };
+
+  const loadDeveloperDirectory = async () => {
+    const rows = await listDeveloperUsersApi();
+    const normalized = Array.isArray(rows)
+      ? rows
+          .map((row: any) => ({
+            id: String(row?.id || ""),
+            name: String(row?.name || "").trim(),
+            email: String(row?.email || "").trim(),
+          }))
+          .filter((row) => row.id && row.email)
+      : [];
+    setDeveloperDirectory(normalized);
+    setBugCreateAssignedTo((prev) => (prev && normalized.some((row) => row.id === prev) ? prev : ""));
   };
 
   const loadAdminProjects = async () => {
@@ -1039,15 +1114,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setImportExcelRows([]);
     setImportExcelFileName("");
     setImportPayload("");
-    setRunName("");
-    setRunDescription("");
-    setRunStartDate("");
-    setRunEndDate("");
-    setRunTesterIdsText("");
-    setSelectedRunId("");
-    setRunDetails(null);
     setSuiteName("");
     setSuiteDescription("");
+    setSuiteCreateType("STATIC");
     setSuiteModule("");
     setSuiteProjectId("");
     setSuiteParentId("");
@@ -1124,16 +1193,6 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setImportPreview([]);
     setImportPreviewErrors([]);
     setPreviewReady(false);
-  };
-
-  const resetRunFields = () => {
-    setRunName("");
-    setRunDescription("");
-    setRunStartDate("");
-    setRunEndDate("");
-    setRunTesterIdsText("");
-    setSelectedRunId("");
-    setRunDetails(null);
   };
 
   const resetQuickBugFields = () => {
@@ -1405,6 +1464,12 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     if (msg.includes("Archive suite before permanent delete")) {
       return "Archive the suite first, then delete it permanently.";
     }
+    if (msg.includes("Delete child suites first before deleting parent suite")) {
+      return "Delete or detach all child suites first, then delete the parent suite.";
+    }
+    if (msg.includes("linked records")) {
+      return "Suite has dependent linked records. Remove dependencies first, then try deleting again.";
+    }
     if (msg.includes("One or more testerIds are invalid")) {
       return "One or more tester IDs are invalid or inactive.";
     }
@@ -1637,8 +1702,6 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       setSelectedIds([]);
       setEditingId("");
       setTestRuns([]);
-      setSelectedRunId("");
-      setRunDetails(null);
       setAdminUsers([]);
       setAdminCreateName("");
       setAdminCreateEmail("");
@@ -2046,6 +2109,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     clearSessionTokens();
     setCurrentRole("");
     setCurrentUserId("");
+    setDeveloperDirectory([]);
     setNotificationItems([]);
     setNotificationUnreadCount(0);
     resetAuthFields();
@@ -2121,6 +2185,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         mappedFeature === "developer_workspace"
       ) {
         await loadTestCaseData();
+      }
+      if (mappedFeature === "bug_management" && canCreateBugs) {
+        await loadDeveloperDirectory();
       }
 
       if (isAdmin && mappedFeature === "admin_workspace") {
@@ -3660,13 +3727,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   <option value="CSV">CSV</option>
                   <option value="EXCEL">EXCEL</option>
                 </select>
-                {importType === "EXCEL" && (
+                {importType && (
                   <>
                     <input
                       className="input"
                       type="file"
-                      accept=".json,.csv,.txt"
-                      onChange={(e) => handleExcelFileChange(e.target.files?.[0])}
+                      accept={getImportFileAccept()}
+                      onChange={(e) => handleImportFileChange(e.target.files?.[0])}
                     />
                     {importExcelFileName && (
                       <div className="note">Loaded file: {importExcelFileName}</div>
@@ -3732,1197 +3799,90 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               )}
 
               {showTestRuns && (
-              <section className="panel">
-                <h4>Test Run / Cycle Management</h4>
-                <input
-                  className="input"
-                  placeholder="Run Name (e.g., Sprint 5 Regression)"
-                  value={runName}
-                  onChange={(e) => setRunName(e.target.value)}
+                <TestRunManagementSection
+                  selectedIds={selectedIds}
+                  testRuns={testRuns}
+                  onRefreshData={loadTestCaseData}
                 />
-                <input
-                  className="input"
-                  placeholder="Description"
-                  value={runDescription}
-                  onChange={(e) => setRunDescription(e.target.value)}
-                />
-                <label className="fieldLabel">Target Start Date</label>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={runStartDate}
-                  onChange={(e) => setRunStartDate(e.target.value)}
-                />
-                <label className="fieldLabel">Target End Date</label>
-                <input
-                  className="input"
-                  type="datetime-local"
-                  value={runEndDate}
-                  onChange={(e) => setRunEndDate(e.target.value)}
-                />
-                <textarea
-                  className="input"
-                  rows={3}
-                  placeholder="Tester IDs (comma or newline separated)"
-                  value={runTesterIdsText}
-                  onChange={(e) => setRunTesterIdsText(e.target.value)}
-                />
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      if (!runName.trim()) {
-                        alert("Run name is required");
-                        return;
-                      }
-                      if (selectedIds.length === 0) {
-                        alert("Select at least one test case from the list section");
-                        return;
-                      }
-                      await createTestRunApi({
-                        name: runName,
-                        description: runDescription || undefined,
-                        targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
-                        targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
-                        testCaseIds: selectedIds,
-                        testerIds: parseIdsFromText(runTesterIdsText),
-                      });
-                      resetRunFields();
-                      await loadTestCaseData();
-                      alert("Test run created");
-                    } catch (error: any) {
-                      alert(error?.message || "Create test run failed");
-                    }
-                  }}
-                >
-                  Create Test Run
-                </button>
-                <select
-                  className="input"
-                  value={selectedRunId}
-                  onChange={(e) => setSelectedRunId(e.target.value)}
-                >
-                  <option value="">Select Test Run</option>
-                  {testRuns.map((run) => (
-                    <option key={run.id} value={run.id}>
-                      {run.name} ({run.progress?.completed || 0}/{run.progress?.total || 0})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      if (!selectedRunId) {
-                        alert("Select a test run");
-                        return;
-                      }
-                      const detail = await getTestRunApi(selectedRunId);
-                      setRunDetails(detail);
-                    } catch (error: any) {
-                      alert(error?.message || "Load test run failed");
-                    }
-                  }}
-                >
-                  View Run Progress
-                </button>
-                {runDetails && (
-                  <div className="testCaseDetails">
-                    <div><strong>Run:</strong> {runDetails.name}</div>
-                    <div><strong>Status:</strong> {runDetails.status}</div>
-                    <div>
-                      <strong>Progress:</strong> {runDetails.progress?.completed || 0}/
-                      {runDetails.progress?.total || 0} ({runDetails.progress?.percent || 0}%)
-                    </div>
-                  </div>
-                )}
-              </section>
               )}
 
               {showSuiteManagement && (
-              <section className="panel">
-                <h4>Suite Management (4.5)</h4>
-                <label className="note" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                  <input
-                    type="checkbox"
-                    checked={showArchivedSuites}
-                    onChange={(e) => setShowArchivedSuites(e.target.checked)}
-                  />
-                  Show Archived Suites
-                </label>
-                <button
-                  className="button small"
-                  onClick={async () => {
-                    try {
-                      await loadTestCaseData();
-                      if (selectedSuiteId) {
-                        await loadSuiteDetails(selectedSuiteId);
-                      }
-                    } catch (error: any) {
-                      alert(getSuiteFriendlyError(error, "Refresh suites failed"));
-                    }
-                  }}
-                >
-                  Refresh Suites
-                </button>
-                <div className="inlineGrid">
-                  <input
-                    className="input"
-                    placeholder="Suite Name"
-                    value={suiteName}
-                    onChange={(e) => setSuiteName(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    placeholder="Module (e.g., Authentication)"
-                    value={suiteModule}
-                    onChange={(e) => setSuiteModule(e.target.value)}
-                  />
-                </div>
-                <textarea
-                  className="input"
-                  rows={2}
-                  placeholder="Suite Description"
-                  value={suiteDescription}
-                  onChange={(e) => setSuiteDescription(e.target.value)}
+                <SuiteManagementSection
+                  suites={suites}
+                  testCases={testCases}
+                  testRuns={testRuns}
+                  showArchivedSuites={showArchivedSuites}
+                  setShowArchivedSuites={setShowArchivedSuites}
+                  onRefreshData={loadTestCaseData}
+                  getSuiteFriendlyError={getSuiteFriendlyError}
                 />
-                <div className="inlineGrid">
-                  <select
-                    className="input"
-                    value={suiteParentId}
-                    onChange={(e) => setSuiteParentId(e.target.value)}
-                  >
-                    <option value="">No Parent Suite</option>
-                    {suites
-                      .filter((suite) => !suite.isArchived)
-                      .map((suite) => (
-                        <option key={suite.id} value={suite.id}>
-                          {suite.name}
-                        </option>
-                      ))}
-                  </select>
-                  <input
-                    className="input"
-                    placeholder="Project ID (optional)"
-                    value={suiteProjectId}
-                    onChange={(e) => setSuiteProjectId(e.target.value)}
-                  />
-                </div>
-                <div className="note">Select initial test cases</div>
-                <input
-                  className="input"
-                  placeholder="Search test cases by title/code"
-                  value={suiteCreateCaseSearch}
-                  onChange={(e) => setSuiteCreateCaseSearch(e.target.value)}
-                />
-                <div className="toolbarActions" style={{ marginBottom: "8px" }}>
-                  <button
-                    className="button small"
-                    onClick={() => {
-                      const term = suiteCreateCaseSearch.trim().toLowerCase();
-                      const visible = testCases.filter((tc) => {
-                        if (!term) return true;
-                        return (
-                          String(tc.title || "").toLowerCase().includes(term) ||
-                          String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                        );
-                      });
-                      setSuiteCreateCaseSelection(visible.map((tc) => tc.id));
-                    }}
-                  >
-                    Select Visible
-                  </button>
-                  <button className="button small" onClick={() => setSuiteCreateCaseSelection([])}>
-                    Clear Selection
-                  </button>
-                </div>
-                <div className="listCompact" style={{ maxHeight: "180px", overflow: "auto", marginBottom: "8px" }}>
-                  {testCases
-                    .filter((tc) => {
-                      const term = suiteCreateCaseSearch.trim().toLowerCase();
-                      if (!term) return true;
-                      return (
-                        String(tc.title || "").toLowerCase().includes(term) ||
-                        String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                      );
-                    })
-                    .map((tc) => (
-                    <label className="row" key={tc.id} style={{ marginBottom: 0 }}>
-                      <input
-                        type="checkbox"
-                        checked={suiteCreateCaseSelection.includes(tc.id)}
-                        onChange={() => toggleSelection(tc.id, setSuiteCreateCaseSelection)}
-                      />
-                      <span className="title">
-                        {tc.testCaseCode || tc.id} - {tc.title}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      if (!suiteName.trim()) {
-                        alert("Suite name is required");
-                        return;
-                      }
-                      await createSuiteApi({
-                        name: suiteName,
-                        description: suiteDescription || undefined,
-                        module: suiteModule || undefined,
-                        parentSuiteId: suiteParentId || undefined,
-                        projectId: suiteProjectId || undefined,
-                        testCaseIds: suiteCreateCaseSelection,
-                      });
-                      setSuiteName("");
-                      setSuiteDescription("");
-                      setSuiteModule("");
-                      setSuiteParentId("");
-                      setSuiteProjectId("");
-                      setSuiteCreateCaseSelection([]);
-                      await loadTestCaseData();
-                      alert("Suite created");
-                    } catch (error: any) {
-                      alert(getSuiteFriendlyError(error, "Create suite failed"));
-                    }
-                  }}
-                >
-                  Create Suite
-                </button>
-
-                <select
-                  className="input"
-                  value={selectedSuiteId}
-                  onChange={(e) => {
-                    setSelectedSuiteId(e.target.value);
-                    setSuiteDetails(null);
-                    setSuiteExecutionHistory([]);
-                    setSuiteExecutionId("");
-                    setSuiteExecutionDetails(null);
-                    setSuiteAddCaseSelection([]);
-                  }}
-                >
-                  <option value="">Select Suite</option>
-                  {suites.map((suite) => (
-                    <option key={suite.id} value={suite.id}>
-                      {suite.name}
-                      {suite.isArchived ? " [ARCHIVED]" : ""} ({suite._count?.suiteCases || 0} cases)
-                    </option>
-                  ))}
-                </select>
-                {selectedSuiteId && (
-                  <div className="row">
-                    <span className="title">
-                      <strong>Selected Suite ID:</strong> {selectedSuiteId}
-                    </span>
-                    <button
-                      className="button small"
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(selectedSuiteId);
-                          alert("Suite ID copied");
-                        } catch {
-                          alert(`Suite ID: ${selectedSuiteId}`);
-                        }
-                      }}
-                    >
-                      Copy ID
-                    </button>
-                  </div>
-                )}
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      if (!selectedSuiteId) {
-                        alert("Select a suite");
-                        return;
-                      }
-                      await loadSuiteDetails(selectedSuiteId);
-                    } catch (error: any) {
-                      alert(getSuiteFriendlyError(error, "Load suite details failed"));
-                    }
-                  }}
-                >
-                  View Suite Details
-                </button>
-
-                {suiteDetails && (
-                  <div className="testCaseDetails">
-                    <div><strong>Suite:</strong> {suiteDetails.name}</div>
-                    <div><strong>Module:</strong> {suiteDetails.module || "N/A"}</div>
-                    <div><strong>Archived:</strong> {suiteDetails.isArchived ? "Yes" : "No"}</div>
-                    <div><strong>Cases:</strong> {suiteDetails._count?.suiteCases || 0}</div>
-                    <div><strong>Parent:</strong> {suiteDetails.parentSuite?.name || "None"}</div>
-                    {suiteDetails.isArchived && (
-                      <div><strong>Note:</strong> This suite is archived. Restore it to modify cases or execute.</div>
-                    )}
-                  </div>
-                )}
-
-                {suiteDetails && (
-                  <>
-                    <div className="note">Add test cases to suite</div>
-                    <input
-                      className="input"
-                      placeholder="Search available test cases"
-                      value={suiteAddCaseSearch}
-                      onChange={(e) => setSuiteAddCaseSearch(e.target.value)}
-                    />
-                    <div className="toolbarActions" style={{ marginBottom: "8px" }}>
-                      <button
-                        className="button small"
-                        disabled={suiteDetails.isArchived}
-                        onClick={() => {
-                          const term = suiteAddCaseSearch.trim().toLowerCase();
-                          const visible = testCases.filter((tc) => {
-                            const alreadyInSuite = (suiteDetails.suiteCases || []).some(
-                              (item: any) => item.testCaseId === tc.id
-                            );
-                            if (alreadyInSuite) return false;
-                            if (!term) return true;
-                            return (
-                              String(tc.title || "").toLowerCase().includes(term) ||
-                              String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                            );
-                          });
-                          setSuiteAddCaseSelection(visible.map((tc) => tc.id));
-                        }}
-                      >
-                        Select Visible
-                      </button>
-                      <button className="button small" onClick={() => setSuiteAddCaseSelection([])}>
-                        Clear Selection
-                      </button>
-                    </div>
-                    <div className="listCompact" style={{ maxHeight: "180px", overflow: "auto", marginBottom: "8px" }}>
-                      {testCases
-                        .filter(
-                          (tc) => {
-                            const alreadyInSuite = (suiteDetails.suiteCases || []).some(
-                              (item: any) => item.testCaseId === tc.id
-                            );
-                            if (alreadyInSuite) return false;
-                            const term = suiteAddCaseSearch.trim().toLowerCase();
-                            if (!term) return true;
-                            return (
-                              String(tc.title || "").toLowerCase().includes(term) ||
-                              String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
-                            );
-                          }
-                        )
-                        .map((tc) => (
-                          <label className="row" key={tc.id} style={{ marginBottom: 0 }}>
-                            <input
-                              type="checkbox"
-                              checked={suiteAddCaseSelection.includes(tc.id)}
-                              disabled={suiteDetails.isArchived}
-                              onChange={() => toggleSelection(tc.id, setSuiteAddCaseSelection)}
-                            />
-                            <span className="title">
-                              {tc.testCaseCode || tc.id} - {tc.title}
-                            </span>
-                          </label>
-                        ))}
-                    </div>
-                    <button
-                      className="button"
-                      disabled={suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          if (!suiteAddCaseSelection.length) {
-                            alert("Select at least one test case");
-                            return;
-                          }
-                          await addSuiteTestCasesApi(suiteDetails.id, suiteAddCaseSelection);
-                          setSuiteAddCaseSelection([]);
-                          await loadSuiteDetails(suiteDetails.id);
-                          await loadTestCaseData();
-                          alert("Test case(s) added to suite");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Add to suite failed"));
-                        }
-                      }}
-                    >
-                      Add Test Cases
-                    </button>
-
-                    <div className="note">Reorder Suite Cases (no IDs needed)</div>
-                    <div className="listCompact" style={{ maxHeight: "220px", overflow: "auto", marginBottom: "8px" }}>
-                      {suiteReorderIds.map((testCaseId, idx) => {
-                        const caseRow = (suiteDetails.suiteCases || []).find(
-                          (item: any) => item.testCaseId === testCaseId
-                        );
-                        return (
-                          <div className="row" key={testCaseId} style={{ marginBottom: 0 }}>
-                            <span className="title">
-                              #{idx + 1} {caseRow?.testCase?.testCaseCode || testCaseId} -{" "}
-                              {caseRow?.testCase?.title || testCaseId}
-                            </span>
-                            <button
-                              className="button small"
-                              disabled={idx === 0}
-                              onClick={() => moveSuiteCase(testCaseId, "UP")}
-                            >
-                              Up
-                            </button>
-                            <button
-                              className="button small"
-                              disabled={idx === suiteReorderIds.length - 1}
-                              onClick={() => moveSuiteCase(testCaseId, "DOWN")}
-                            >
-                              Down
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    <button
-                      className="button"
-                      disabled={suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          if (!suiteReorderIds.length) {
-                            alert("No suite test cases available to reorder");
-                            return;
-                          }
-                          await reorderSuiteTestCasesApi(suiteDetails.id, suiteReorderIds);
-                          await loadSuiteDetails(suiteDetails.id);
-                          alert("Suite order updated");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Reorder failed"));
-                        }
-                      }}
-                    >
-                      Save Reorder
-                    </button>
-
-                    <input
-                      className="input"
-                      placeholder="Clone Name (optional)"
-                      value={suiteCloneName}
-                      onChange={(e) => setSuiteCloneName(e.target.value)}
-                    />
-                    <div className="inlineGrid">
-                      <button
-                        className="button"
-                        disabled={suiteDetails.isArchived}
-                        onClick={async () => {
-                          try {
-                            await cloneSuiteApi(suiteDetails.id, suiteCloneName || undefined);
-                            setSuiteCloneName("");
-                            await loadTestCaseData();
-                            alert("Suite cloned");
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Clone suite failed"));
-                          }
-                        }}
-                      >
-                        Clone Suite
-                      </button>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            if (suiteDetails.isArchived) {
-                              if (!window.confirm("Restore this suite?")) {
-                                return;
-                              }
-                              await restoreSuiteApi(suiteDetails.id);
-                            } else {
-                              if (!window.confirm("Archive this suite? You can restore it later.")) {
-                                return;
-                              }
-                              await archiveSuiteApi(suiteDetails.id);
-                              setShowArchivedSuites(true);
-                            }
-                            await loadSuiteDetails(suiteDetails.id);
-                            await loadTestCaseData();
-                            alert(suiteDetails.isArchived ? "Suite restored" : "Suite archived");
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Archive/restore failed"));
-                          }
-                        }}
-                      >
-                        {suiteDetails.isArchived ? "Restore Suite" : "Archive Suite"}
-                      </button>
-                    </div>
-                    <button
-                      className="button danger"
-                      disabled={!suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          if (!suiteDetails.isArchived) {
-                            alert("Archive the suite first, then delete permanently.");
-                            return;
-                          }
-                          const ok = window.confirm(
-                            "Delete this suite permanently? This cannot be undone and removes suite execution history for this suite."
-                          );
-                          if (!ok) return;
-                          const finalOk = window.confirm("Type confirmation by clicking OK again to permanently delete.");
-                          if (!finalOk) return;
-                          await deleteSuiteApi(suiteDetails.id);
-                          setSelectedSuiteId("");
-                          setSuiteDetails(null);
-                          setSuiteExecutionHistory([]);
-                          setSuiteExecutionId("");
-                          setSuiteExecutionDetails(null);
-                          await loadTestCaseData();
-                          alert("Suite deleted permanently");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Delete suite failed"));
-                        }
-                      }}
-                    >
-                      Delete Suite Permanently
-                    </button>
-
-                    <h4>Suite Cases</h4>
-                    <div className="listCompact">
-                      {(suiteDetails.suiteCases || []).map((item: any) => (
-                        <div className="row" key={item.id}>
-                          <span className="title">
-                            #{item.position} {item.testCase?.testCaseCode || item.testCaseId} -{" "}
-                            {item.testCase?.title || item.testCaseId}
-                          </span>
-                          <button
-                            className="button small danger"
-                            onClick={async () => {
-                              try {
-                                await removeSuiteTestCaseApi(suiteDetails.id, item.testCaseId);
-                                await loadSuiteDetails(suiteDetails.id);
-                                await loadTestCaseData();
-                              } catch (error: any) {
-                                alert(getSuiteFriendlyError(error, "Remove from suite failed"));
-                              }
-                            }}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-
-                    <h4>Execute Suite</h4>
-                    <div className="inlineGrid">
-                      <select
-                        className="input"
-                        value={suiteExecutionMode}
-                        onChange={(e) => setSuiteExecutionMode(e.target.value)}
-                      >
-                        <option value="">Select execution mode</option>
-                        <option value="SEQUENTIAL">SEQUENTIAL</option>
-                        <option value="PARALLEL">PARALLEL</option>
-                      </select>
-                      <textarea
-                        className="input"
-                        rows={2}
-                        placeholder="Tester IDs (comma/newline, optional)"
-                        value={suiteExecutionTesterIdsText}
-                        onChange={(e) => setSuiteExecutionTesterIdsText(e.target.value)}
-                      />
-                    </div>
-                    <button
-                      className="button"
-                      disabled={suiteDetails.isArchived}
-                      onClick={async () => {
-                        try {
-                          const started = await startSuiteExecutionApi({
-                            suiteId: suiteDetails.id,
-                            mode: suiteExecutionMode,
-                            testerIds: parseIdsFromText(suiteExecutionTesterIdsText),
-                          });
-                          setSuiteExecutionId(started.id);
-                          const detail = await getSuiteExecutionApi(started.id);
-                          setSuiteExecutionDetails(detail);
-                          await loadSuiteDetails(suiteDetails.id);
-                          alert("Suite execution started");
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Start suite execution failed"));
-                        }
-                      }}
-                    >
-                      Start Suite Execution
-                    </button>
-
-                    <select
-                      className="input"
-                      value={suiteExecutionId}
-                      onChange={(e) => setSuiteExecutionId(e.target.value)}
-                    >
-                      <option value="">Select Suite Execution</option>
-                      {suiteExecutionHistory.map((item: any) => (
-                        <option key={item.id} value={item.id}>
-                          {item.id.slice(0, 8)} | {item.status} | {item.passed}/{item.totalCases}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          if (!suiteExecutionId) {
-                            alert("Select suite execution");
-                            return;
-                          }
-                          const detail = await getSuiteExecutionApi(suiteExecutionId);
-                          setSuiteExecutionDetails(detail);
-                        } catch (error: any) {
-                          alert(getSuiteFriendlyError(error, "Load suite execution failed"));
-                        }
-                      }}
-                    >
-                      View Suite Report
-                    </button>
-                    {suiteExecutionHistory.length > 0 && (
-                      <div className="suiteHistoryList">
-                        {suiteExecutionHistory.map((item: any) => {
-                          const total = Number(item.totalCases || 0);
-                          const completed =
-                            Number(item.passed || 0) +
-                            Number(item.failed || 0) +
-                            Number(item.blocked || 0) +
-                            Number(item.skipped || 0);
-                          const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-                          const pending = Math.max(0, total - completed);
-                          return (
-                            <div
-                              key={item.id}
-                              className={`suiteHistoryItem ${suiteExecutionId === item.id ? "active" : ""}`}
-                            >
-                              <div className="suiteHistoryTop">
-                                <span className="suiteHistoryId">#{item.id.slice(0, 8)}</span>
-                                <span className="suitePendingBadge">Pending: {pending}</span>
-                              </div>
-                              <div className="suiteProgressTrack">
-                                <div className="suiteProgressFill" style={{ width: `${percent}%` }} />
-                              </div>
-                              <div className="suiteHistoryMeta">
-                                <span>{item.status}</span>
-                                <span>{completed}/{total} ({percent}%)</span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {suiteExecutionDetails && (
-                  <div className="testCaseDetails">
-                    <div><strong>Execution Status:</strong> {suiteExecutionDetails.status}</div>
-                    <div><strong>Mode:</strong> {suiteExecutionDetails.mode}</div>
-                    <div>
-                      <strong>Summary:</strong> Total {suiteExecutionDetails.totalCases} | Passed{" "}
-                      {suiteExecutionDetails.passed} | Failed {suiteExecutionDetails.failed} | Blocked{" "}
-                      {suiteExecutionDetails.blocked} | Skipped {suiteExecutionDetails.skipped}
-                    </div>
-                    <div><strong>Pass Rate:</strong> {suiteExecutionDetails.passRate ?? 0}%</div>
-                    <div><strong>Linked Run:</strong> {suiteExecutionDetails.linkedTestRun?.name || "N/A"}</div>
-                    <div style={{ marginTop: "8px" }}>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const freshDetail = await getSuiteExecutionApi(suiteExecutionDetails.id);
-                            setSuiteExecutionDetails(freshDetail);
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Refresh suite report failed"));
-                          }
-                        }}
-                      >
-                        Refresh Suite Report
-                      </button>
-                      <button
-                        className="button small"
-                        disabled={
-                          (Number(suiteExecutionDetails.totalCases) > 0 &&
-                            Number(suiteExecutionDetails.passed || 0) +
-                              Number(suiteExecutionDetails.failed || 0) +
-                              Number(suiteExecutionDetails.blocked || 0) +
-                              Number(suiteExecutionDetails.skipped || 0) >=
-                              Number(suiteExecutionDetails.totalCases)) ||
-                          !suiteExecutionDetails.id
-                        }
-                        onClick={async () => {
-                          try {
-                            const freshDetail = await getSuiteExecutionApi(suiteExecutionDetails.id);
-                            setSuiteExecutionDetails(freshDetail);
-                            const completed =
-                              Number(freshDetail?.passed || 0) +
-                              Number(freshDetail?.failed || 0) +
-                              Number(freshDetail?.blocked || 0) +
-                              Number(freshDetail?.skipped || 0);
-                            const total = Number(freshDetail?.totalCases || 0);
-                            if (total > 0 && completed >= total) {
-                              alert("No pending suite cases. Suite execution is already complete.");
-                              return;
-                            }
-                            const cases = Array.isArray(freshDetail?.cases)
-                              ? freshDetail.cases
-                              : [];
-                            const nextPending = cases.find((item: any) => item.status === "NOT_RUN");
-                            if (!nextPending) {
-                              alert("No pending suite cases. All cases are already executed.");
-                              return;
-                            }
-                            const linkedRunId = freshDetail?.linkedTestRun?.id || "";
-                            if (!linkedRunId) {
-                              alert("Linked run not found for this suite execution.");
-                              return;
-                            }
-                            await openSuiteExecutionCase(freshDetail, nextPending);
-                            alert("Opened next pending suite case in Execute Tests.");
-                          } catch (error: any) {
-                            alert(getSuiteFriendlyError(error, "Open next pending case failed"));
-                          }
-                        }}
-                      >
-                        {String(suiteExecutionDetails.mode || "").toUpperCase() === "PARALLEL"
-                          ? "Open Any Pending Case"
-                          : "Execute Next Pending Case"}
-                      </button>
-                    </div>
-                    <div style={{ marginTop: "10px" }}>
-                      <strong>Suite Cases</strong>
-                      <div className="listCompact" style={{ marginTop: "6px" }}>
-                        {(suiteExecutionDetails.cases || []).map((item: any) => (
-                          <div className="row" key={item.id}>
-                            <span className="title">
-                              #{item.position} {item.testCase?.testCaseCode || item.testCaseId} -{" "}
-                              {item.testCase?.title || item.testCaseId}
-                            </span>
-                            <span className="meta">{item.status}</span>
-                            <button
-                              className="button small"
-                              disabled={item.status !== "NOT_RUN"}
-                              onClick={async () => {
-                                try {
-                                  const fresh = await getSuiteExecutionApi(suiteExecutionDetails.id);
-                                  setSuiteExecutionDetails(fresh);
-                                  const freshCase = (fresh?.cases || []).find((c: any) => c.id === item.id);
-                                  if (!freshCase) {
-                                    alert("Suite case not found in latest report.");
-                                    return;
-                                  }
-                                  if (freshCase.status !== "NOT_RUN") {
-                                    alert("This suite case is already executed.");
-                                    return;
-                                  }
-                                  await openSuiteExecutionCase(fresh, freshCase);
-                                } catch (error: any) {
-                                  alert(getSuiteFriendlyError(error, "Open suite case failed"));
-                                }
-                              }}
-                            >
-                              Open
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </section>
               )}
-
               {showExecute && (
-              <section className="panel">
-                <h4>Execute Test Case</h4>
-                <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
-                  <option value="">Select Test Case</option>
-                  {executionSelectableCases.map((tc) => (
-                    <option key={tc.id} value={tc.id}>
-                      {tc.testCaseCode || tc.id} - {tc.title}
-                    </option>
-                  ))}
-                </select>
-                <select className="input" value={executionRunId} onChange={(e) => setExecutionRunId(e.target.value)}>
-                  <option value="">Optional: Link to Test Run</option>
-                  {testRuns.map((run) => (
-                    <option key={run.id} value={run.id}>
-                      {run.name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className="button"
-                  onClick={async () => {
-                    try {
-                      setActiveSuiteExecutionContext(null);
-                      if (!executionCaseId) {
-                        alert("Select a test case");
-                        return;
-                      }
-                      if (executionRunId) {
-                        const inRun = executionSelectableCases.some((tc) => tc.id === executionCaseId);
-                        if (!inRun) {
-                          alert("Selected test case is not part of the selected test run.");
-                          return;
-                        }
-                      }
-                      await openExecutionSession(executionCaseId, executionRunId || undefined);
-                    } catch (error: any) {
-                      alert(error?.message || "Open execution failed");
-                    }
+                <ExecuteTestsSection
+                  executionCaseId={executionCaseId}
+                  setExecutionCaseId={setExecutionCaseId}
+                  executionSelectableCases={executionSelectableCases}
+                  executionRunId={executionRunId}
+                  setExecutionRunId={setExecutionRunId}
+                  testRuns={testRuns}
+                  setActiveSuiteExecutionContext={setActiveSuiteExecutionContext}
+                  openExecutionSession={openExecutionSession}
+                  executionId={executionId}
+                  executionSteps={executionSteps}
+                  executionProgress={executionProgress}
+                  executionStartedAt={executionStartedAt}
+                  setExecutionStartedAt={setExecutionStartedAt}
+                  executionCompletedAt={executionCompletedAt}
+                  setExecutionCompletedAt={setExecutionCompletedAt}
+                  executionDurationSeconds={executionDurationSeconds}
+                  setExecutionDurationSeconds={setExecutionDurationSeconds}
+                  executionSelectedStepNumber={executionSelectedStepNumber}
+                  setExecutionSelectedStepNumber={setExecutionSelectedStepNumber}
+                  executionStepStatus={executionStepStatus}
+                  setExecutionStepStatus={setExecutionStepStatus}
+                  executionActualResult={executionActualResult}
+                  setExecutionActualResult={setExecutionActualResult}
+                  executionStepNotes={executionStepNotes}
+                  setExecutionStepNotes={setExecutionStepNotes}
+                  executionNotes={executionNotes}
+                  setExecutionNotes={setExecutionNotes}
+                  setExecutionSteps={setExecutionSteps}
+                  setExecutionProgress={setExecutionProgress}
+                  loadTestCaseData={loadTestCaseData}
+                  activeSuiteExecutionContext={activeSuiteExecutionContext}
+                  setSuiteExecutionDetails={setSuiteExecutionDetails}
+                  openSuiteExecutionCase={openSuiteExecutionCase}
+                  setSelectedExecutionReportId={setSelectedExecutionReportId}
+                  setExecutionEvidence={setExecutionEvidence}
+                  executionEvidence={executionEvidence}
+                  evidenceType={evidenceType}
+                  setEvidenceType={setEvidenceType}
+                  evidenceName={evidenceName}
+                  setEvidenceName={setEvidenceName}
+                  evidenceUrl={evidenceUrl}
+                  setEvidenceUrl={setEvidenceUrl}
+                  evidenceNotes={evidenceNotes}
+                  setEvidenceNotes={setEvidenceNotes}
+                  executionReports={executionReports}
+                  selectedExecutionReportId={selectedExecutionReportId}
+                  setSelectedExecutionReportIdState={setSelectedExecutionReportId}
+                  quickBugTitle={quickBugTitle}
+                  setQuickBugTitle={setQuickBugTitle}
+                  quickBugDescription={quickBugDescription}
+                  setQuickBugDescription={setQuickBugDescription}
+                  quickBugSeverity={quickBugSeverity}
+                  setQuickBugSeverity={setQuickBugSeverity}
+                  resetQuickBugFields={resetQuickBugFields}
+                  setExecutionId={setExecutionId}
+                  onQuickBugCreated={async (issue) => {
+                    setActiveMenuKey("bug_management");
+                    setActiveFeature("bug_management");
+                    setBugViewMode("mine");
+                    setSelectedBugId(issue.id);
+                    await loadTestCaseData();
+                    await loadBugDetails(issue.id);
                   }}
-                >
-                  Open Execution Mode
-                </button>
-                {executionId && executionSteps.length > 0 && (
-                  <>
-                    <div className="note">Progress: {executionProgress}% (auto-saved)</div>
-                    <div className="inlineGrid">
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            const timer = await startExecutionTimerApi(executionId);
-                            setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to start timer");
-                          }
-                        }}
-                      >
-                        Start Timer
-                      </button>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            const timer = await stopExecutionTimerApi(executionId);
-                            setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                            setExecutionCompletedAt(timer?.completedAt || "");
-                            setExecutionDurationSeconds(
-                              typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                            );
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to stop timer");
-                          }
-                        }}
-                      >
-                        Stop Timer
-                      </button>
-                    </div>
-                    <div className="note">
-                      Started: {executionStartedAt ? new Date(executionStartedAt).toLocaleString() : "N/A"} | Completed:{" "}
-                      {executionCompletedAt ? new Date(executionCompletedAt).toLocaleString() : "N/A"} | Duration:{" "}
-                      {typeof executionDurationSeconds === "number" ? `${executionDurationSeconds}s` : "N/A"}
-                    </div>
-                    <select
-                      className="input"
-                      value={executionSelectedStepNumber}
-                      onChange={(e) => setExecutionSelectedStepNumber(e.target.value)}
-                    >
-                      <option value="">Select step</option>
-                      {executionSteps.map((step) => (
-                        <option key={step.stepNumber} value={step.stepNumber}>
-                          Step {step.stepNumber}: {step.action} [{step.status}]
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="input"
-                      value={executionStepStatus}
-                      onChange={(e) => setExecutionStepStatus(e.target.value)}
-                    >
-                      <option value="">Select step status</option>
-                      <option value="PASSED">PASSED</option>
-                      <option value="FAILED">FAILED</option>
-                      <option value="BLOCKED">BLOCKED</option>
-                      <option value="SKIPPED">SKIPPED</option>
-                    </select>
-                    <textarea
-                      className="input"
-                      rows={2}
-                      placeholder="Actual result for selected step"
-                      value={executionActualResult}
-                      onChange={(e) => setExecutionActualResult(e.target.value)}
-                    />
-                    <textarea
-                      className="input"
-                      rows={2}
-                      placeholder="Step notes"
-                      value={executionStepNotes}
-                      onChange={(e) => setExecutionStepNotes(e.target.value)}
-                    />
-                    <textarea
-                      className="input"
-                      rows={2}
-                      placeholder="Execution notes"
-                      value={executionNotes}
-                      onChange={(e) => setExecutionNotes(e.target.value)}
-                    />
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          const stepNumber = Number(executionSelectedStepNumber);
-                          if (!Number.isFinite(stepNumber)) {
-                            alert("Select a valid step");
-                            return;
-                          }
-                          const saved = await saveExecutionStepApi(executionId, stepNumber, {
-                            status: executionStepStatus,
-                            actualResult: executionActualResult,
-                            notes: executionStepNotes,
-                            executionNotes,
-                          });
-                          const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
-                          setExecutionSteps(nextSteps);
-                          setExecutionProgress(saved?.progressPercent || 0);
-                          setExecutionActualResult("");
-                          setExecutionStepNotes("");
-                        } catch (error: any) {
-                          alert(error?.message || "Auto-save failed");
-                        }
-                      }}
-                    >
-                      Save Step (Auto-save)
-                    </button>
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          const final = await finalizeExecutionApi(executionId, {
-                            notes: executionNotes,
-                          });
-                          await loadTestCaseData();
-                          let freshSuiteExecution: any = null;
-                          if (
-                            activeSuiteExecutionContext?.suiteExecutionId &&
-                            activeSuiteExecutionContext?.runId &&
-                            executionRunId &&
-                            activeSuiteExecutionContext.runId === executionRunId
-                          ) {
-                            try {
-                              freshSuiteExecution = await getSuiteExecutionApi(activeSuiteExecutionContext.suiteExecutionId);
-                              setSuiteExecutionDetails(freshSuiteExecution);
-                            } catch {
-                              // ignore secondary refresh failures
-                            }
-                          }
-                          setSelectedExecutionReportId(final.id);
-                          setExecutionCompletedAt(final?.completedAt || executionCompletedAt);
-                          setExecutionDurationSeconds(
-                            typeof final?.durationSeconds === "number" ? final.durationSeconds : executionDurationSeconds
-                          );
-                          setExecutionNotes("");
-                          setExecutionSelectedStepNumber("");
-                          setExecutionStepStatus("");
-                          setExecutionActualResult("");
-                          setExecutionStepNotes("");
-                          if (
-                            freshSuiteExecution &&
-                            String(activeSuiteExecutionContext?.mode || "").toUpperCase() === "SEQUENTIAL"
-                          ) {
-                            const nextPending = (freshSuiteExecution.cases || []).find(
-                              (item: any) => item.status === "NOT_RUN"
-                            );
-                            if (nextPending) {
-                              await openSuiteExecutionCase(freshSuiteExecution, nextPending);
-                              alert(`Execution finalized: ${final.result}. Opened next pending suite case.`);
-                              return;
-                            }
-                            setActiveSuiteExecutionContext(null);
-                          }
-                          alert(`Execution finalized: ${final.result}`);
-                        } catch (error: any) {
-                          alert(error?.message || "Finalize failed");
-                        }
-                      }}
-                    >
-                      Finalize Execution
-                    </button>
-                    <h4>Execution Evidence</h4>
-                    <div className="inlineGrid">
-                      <select className="input" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
-                        <option value="">Select evidence type</option>
-                        <option value="IMAGE">IMAGE</option>
-                        <option value="VIDEO">VIDEO</option>
-                        <option value="LOG">LOG</option>
-                        <option value="DOCUMENT">DOCUMENT</option>
-                      </select>
-                      <input
-                        className="input"
-                        placeholder="Evidence file name"
-                        value={evidenceName}
-                        onChange={(e) => setEvidenceName(e.target.value)}
-                      />
-                    </div>
-                    <input
-                      className="input"
-                      placeholder="Evidence URL (storage link)"
-                      value={evidenceUrl}
-                      onChange={(e) => setEvidenceUrl(e.target.value)}
-                    />
-                    <input
-                      className="input"
-                      placeholder="Evidence notes (optional)"
-                      value={evidenceNotes}
-                      onChange={(e) => setEvidenceNotes(e.target.value)}
-                    />
-                    <div className="inlineGrid">
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            if (!evidenceUrl.trim() || !evidenceName.trim()) {
-                              alert("Evidence URL and name are required");
-                              return;
-                            }
-                            const created = await uploadExecutionEvidenceApi(executionId, {
-                              fileType: evidenceType,
-                              fileUrl: evidenceUrl,
-                              fileName: evidenceName,
-                              notes: evidenceNotes,
-                            });
-                            setExecutionEvidence((prev) => [created, ...prev]);
-                            setEvidenceUrl("");
-                            setEvidenceName("");
-                            setEvidenceNotes("");
-                          } catch (error: any) {
-                            alert(error?.message || "Evidence upload failed");
-                          }
-                        }}
-                      >
-                        Add Evidence
-                      </button>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            const rows = await listExecutionEvidenceApi(executionId);
-                            setExecutionEvidence(Array.isArray(rows) ? rows : []);
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to refresh evidence");
-                          }
-                        }}
-                      >
-                        Refresh Evidence
-                      </button>
-                    </div>
-                    {executionEvidence.length > 0 && (
-                      <div className="listCompact">
-                        {executionEvidence.map((item) => (
-                          <div className="row" key={item.id}>
-                            <span className="title">{item.fileName}</span>
-                            <span className="meta">{item.fileType}</span>
-                            <button
-                              className="button small danger"
-                              onClick={async () => {
-                                try {
-                                  await deleteExecutionEvidenceApi(executionId, item.id);
-                                  setExecutionEvidence((prev) => prev.filter((row) => row.id !== item.id));
-                                } catch (error: any) {
-                                  alert(error?.message || "Delete evidence failed");
-                                }
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-                <h4>Quick Bug / Re-execution</h4>
-                <select
-                  className="input"
-                  value={selectedExecutionReportId}
-                  onChange={(e) => setSelectedExecutionReportId(e.target.value)}
-                >
-                  <option value="">Select execution report</option>
-                  {executionReports
-                    .filter((item) => !executionCaseId || item.testCaseId === executionCaseId)
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.testCase?.title || item.testCaseId} | {item.result} | {new Date(item.executedAt).toLocaleString()}
-                      </option>
-                    ))}
-                </select>
-                <input
-                  className="input"
-                  placeholder="Bug title (optional)"
-                  value={quickBugTitle}
-                  onChange={(e) => setQuickBugTitle(e.target.value)}
                 />
-                <input
-                  className="input"
-                  placeholder="Bug description (optional)"
-                  value={quickBugDescription}
-                  onChange={(e) => setQuickBugDescription(e.target.value)}
-                />
-                <select className="input" value={quickBugSeverity} onChange={(e) => setQuickBugSeverity(e.target.value)}>
-                  <option value="">Select severity</option>
-                  <option value="LOW">LOW</option>
-                  <option value="MEDIUM">MEDIUM</option>
-                  <option value="HIGH">HIGH</option>
-                  <option value="CRITICAL">CRITICAL</option>
-                </select>
-                <div className="inlineGrid">
-                  <button
-                    className="button"
-                    onClick={async () => {
-                      try {
-                        if (!selectedExecutionReportId) {
-                          alert("Select an execution report");
-                          return;
-                        }
-                        const issue = await createBugFromExecutionApi(selectedExecutionReportId, {
-                          title: quickBugTitle || undefined,
-                          description: quickBugDescription || undefined,
-                          severity: quickBugSeverity,
-                        });
-                        resetQuickBugFields();
-                        alert(`Bug created: ${issue.id}`);
-                      } catch (error: any) {
-                        alert(error?.message || "Quick bug creation failed");
-                      }
-                    }}
-                  >
-                    Create Quick Bug
-                  </button>
-                  <button
-                    className="button"
-                    onClick={async () => {
-                      try {
-                        if (!selectedExecutionReportId) {
-                          alert("Select an execution report");
-                          return;
-                        }
-                        const restarted = await reexecuteExecutionApi(selectedExecutionReportId, {
-                          notes: "Re-execution requested",
-                        });
-                        setExecutionId(restarted.id);
-                        setExecutionCaseId(restarted.testCaseId);
-                        setExecutionRunId(restarted.testRunId || "");
-                        setExecutionSteps(Array.isArray(restarted.stepResults) ? restarted.stepResults : []);
-                        setExecutionSelectedStepNumber(
-                          Array.isArray(restarted.stepResults) && restarted.stepResults.length > 0
-                            ? String(restarted.stepResults[0].stepNumber)
-                            : ""
-                        );
-                        setExecutionProgress(restarted.progressPercent || 0);
-                        setExecutionNotes(restarted.notes || "");
-                        setExecutionStartedAt(restarted.startedAt || "");
-                        setExecutionCompletedAt("");
-                        setExecutionDurationSeconds(null);
-                        setExecutionEvidence([]);
-                        alert("Re-execution draft created");
-                      } catch (error: any) {
-                        alert(error?.message || "Re-execution failed");
-                      }
-                    }}
-                  >
-                    Re-execute
-                  </button>
-                </div>
-              </section>
               )}
 
               {showBugs && (
@@ -5018,12 +3978,19 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                       onChange={(e) => setBugCreateAffectedVersion(e.target.value)}
                     />
                     <div className="inlineGrid">
-                      <input
+                      <select
                         className="input"
-                        placeholder="Assign to Developer User ID"
                         value={bugCreateAssignedTo}
                         onChange={(e) => setBugCreateAssignedTo(e.target.value)}
-                      />
+                      >
+                        <option value="">Assign to Developer (optional)</option>
+                        {developerDirectory.map((dev) => (
+                          <option key={dev.id} value={dev.id}>
+                            {dev.name ? `${dev.name} - ` : ""}
+                            {dev.email}
+                          </option>
+                        ))}
+                      </select>
                       <input
                         className="input"
                         type="date"
@@ -5120,6 +4087,29 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     Refresh Bugs
                   </button>
                 </div>
+                <div className="note" style={{ marginBottom: "8px" }}>
+                  Created bug reports are shown here. Quick bugs from Execute Tests appear in this list after creation.
+                </div>
+                <div className="inlineGrid">
+                  <input
+                    className="input"
+                    placeholder="Search by bug id, title, status, reporter, assignee, or linked test case"
+                    value={bugSearch}
+                    onChange={(e) => setBugSearch(e.target.value)}
+                  />
+                  <select
+                    className="input"
+                    value={bugViewMode}
+                    onChange={(e) => setBugViewMode(e.target.value as "all" | "mine" | "assigned")}
+                  >
+                    <option value="all">All Visible Bugs</option>
+                    <option value="mine">My Created Bugs</option>
+                    <option value="assigned">Assigned To Me</option>
+                  </select>
+                </div>
+                <div className="note" style={{ marginBottom: "8px" }}>
+                  Showing {bugRowsForDisplay.length} of {bugs.length} bug reports
+                </div>
 
                 <div className="inlineGrid">
                   <select className="input" value={bugFilterStatus} onChange={(e) => setBugFilterStatus(e.target.value)}>
@@ -5178,7 +4168,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                       <div><strong>Critical Severity:</strong> {criticalBugCount}</div>
                     </div>
                     <div className="listCompact">
-                      {bugs.map((item) => (
+                      {bugRowsForDisplay.map((item) => (
                         <div key={item.id}>
                           <div className="row">
                             <span className="title">
@@ -5277,7 +4267,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
 
                 {!isDeveloper && (
                   <div className="listCompact">
-                    {bugs.map((item) => (
+                    {bugRowsForDisplay.map((item) => (
                       <div key={item.id}>
                         <div className="row">
                           <span className="title">
@@ -5904,4 +4894,6 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
 }
 
 export default App;
+
+
 

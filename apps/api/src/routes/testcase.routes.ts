@@ -197,6 +197,12 @@ const SUITE_EXECUTION_MODE = {
 } as const;
 type SuiteExecutionModeValue = (typeof SUITE_EXECUTION_MODE)[keyof typeof SUITE_EXECUTION_MODE];
 
+const SUITE_TYPE = {
+  STATIC: "STATIC",
+  DYNAMIC: "DYNAMIC",
+} as const;
+type SuiteTypeValue = (typeof SUITE_TYPE)[keyof typeof SUITE_TYPE];
+
 const SUITE_EXECUTION_STATUS = {
   PLANNED: "PLANNED",
   RUNNING: "RUNNING",
@@ -369,11 +375,43 @@ const computeDurationSeconds = (start: Date, end: Date): number => {
   return diffMs <= 0 ? 0 : Math.floor(diffMs / 1000);
 };
 
+const toValidDate = (value: string | undefined): Date | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const computeAccumulatedTimerSeconds = (meta: ExecutionMeta, now: Date): number => {
+  const base =
+    typeof meta.timerAccumulatedSeconds === "number" && Number.isFinite(meta.timerAccumulatedSeconds)
+      ? Math.max(0, Math.floor(meta.timerAccumulatedSeconds))
+      : 0;
+
+  if (meta.timerState === "RUNNING") {
+    const lastResumed = toValidDate(meta.timerLastResumedAt) || toValidDate(meta.timerStartAt);
+    if (!lastResumed) return base;
+    return base + computeDurationSeconds(lastResumed, now);
+  }
+
+  // Legacy flow fallback: timer started but no explicit state.
+  if (!meta.timerState && meta.timerStartAt && !meta.timerStopAt) {
+    const start = toValidDate(meta.timerStartAt);
+    if (!start) return base;
+    return base + computeDurationSeconds(start, now);
+  }
+
+  return base;
+};
+
 type ExecutionMeta = {
   timerStartAt?: string;
   timerStopAt?: string;
   durationSeconds?: number;
   reexecutionOfId?: string;
+  timerState?: "RUNNING" | "PAUSED" | "STOPPED";
+  timerAccumulatedSeconds?: number;
+  timerLastResumedAt?: string;
+  manualDurationSeconds?: number;
 };
 
 const META_PREFIX = "[META]";
@@ -1857,6 +1895,16 @@ router.get(
             completedAt: parsedDraft.meta.timerStopAt || null,
             durationSeconds:
               typeof parsedDraft.meta.durationSeconds === "number" ? parsedDraft.meta.durationSeconds : null,
+            timerState: parsedDraft.meta.timerState || null,
+            timerAccumulatedSeconds:
+              typeof parsedDraft.meta.timerAccumulatedSeconds === "number"
+                ? parsedDraft.meta.timerAccumulatedSeconds
+                : null,
+            timerLastResumedAt: parsedDraft.meta.timerLastResumedAt || null,
+            manualDurationSeconds:
+              typeof parsedDraft.meta.manualDurationSeconds === "number"
+                ? parsedDraft.meta.manualDurationSeconds
+                : null,
             reexecutionOfId: parsedDraft.meta.reexecutionOfId || null,
             evidence,
             stepResults: mergedSteps,
@@ -2030,13 +2078,18 @@ router.post(
     }
 
     const parsed = parseExecutionNotes(execution.notes);
-    const startedAt = parsed.meta.timerStartAt || new Date().toISOString();
+    const now = new Date();
+    const startedAt = parsed.meta.timerStartAt || now.toISOString();
+    const accumulatedSeconds = computeAccumulatedTimerSeconds(parsed.meta, now);
     const updated = await prisma.testExecution.update({
       where: { id: execution.id },
       data: {
         notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
           timerStartAt: startedAt,
           timerStopAt: undefined,
+          timerState: "RUNNING",
+          timerAccumulatedSeconds: accumulatedSeconds,
+          timerLastResumedAt: now.toISOString(),
         }),
       },
     });
@@ -2048,7 +2101,156 @@ router.post(
       id: updated.id,
       startedAt,
       completedAt: null,
-      durationSeconds: null,
+      durationSeconds: accumulatedSeconds,
+      timerState: "RUNNING",
+      timerAccumulatedSeconds: accumulatedSeconds,
+      timerLastResumedAt: now.toISOString(),
+    });
+  }
+);
+
+router.post(
+  "/executions/:executionId/timer/pause",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can pause timer only for your own execution" });
+    }
+    if (!execution.isDraft) {
+      return res.status(400).json({ message: "Execution already finalized" });
+    }
+
+    const parsed = parseExecutionNotes(execution.notes);
+    const now = new Date();
+    const startedAt = parsed.meta.timerStartAt || execution.executedAt.toISOString();
+    const accumulatedSeconds = computeAccumulatedTimerSeconds(parsed.meta, now);
+    const updated = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
+          timerStartAt: startedAt,
+          timerState: "PAUSED",
+          timerAccumulatedSeconds: accumulatedSeconds,
+          timerLastResumedAt: undefined,
+          durationSeconds: accumulatedSeconds,
+          timerStopAt: undefined,
+        }),
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "PAUSE_EXECUTION_TIMER", "TestExecution", updated.id, {
+      durationSeconds: accumulatedSeconds,
+    });
+    return res.json({
+      id: updated.id,
+      startedAt,
+      completedAt: null,
+      durationSeconds: accumulatedSeconds,
+      timerState: "PAUSED",
+      timerAccumulatedSeconds: accumulatedSeconds,
+      timerLastResumedAt: null,
+    });
+  }
+);
+
+router.post(
+  "/executions/:executionId/timer/resume",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can resume timer only for your own execution" });
+    }
+    if (!execution.isDraft) {
+      return res.status(400).json({ message: "Execution already finalized" });
+    }
+
+    const parsed = parseExecutionNotes(execution.notes);
+    const now = new Date();
+    const startedAt = parsed.meta.timerStartAt || execution.executedAt.toISOString();
+    const accumulatedSeconds = computeAccumulatedTimerSeconds(parsed.meta, now);
+    const updated = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
+          timerStartAt: startedAt,
+          timerState: "RUNNING",
+          timerAccumulatedSeconds: accumulatedSeconds,
+          timerLastResumedAt: now.toISOString(),
+          timerStopAt: undefined,
+        }),
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "RESUME_EXECUTION_TIMER", "TestExecution", updated.id, {
+      durationSeconds: accumulatedSeconds,
+    });
+    return res.json({
+      id: updated.id,
+      startedAt,
+      completedAt: null,
+      durationSeconds: accumulatedSeconds,
+      timerState: "RUNNING",
+      timerAccumulatedSeconds: accumulatedSeconds,
+      timerLastResumedAt: now.toISOString(),
+    });
+  }
+);
+
+router.post(
+  "/executions/:executionId/timer/manual",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const execution = await prisma.testExecution.findUnique({ where: { id: req.params.executionId } });
+    if (!execution) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, execution.executedBy)) {
+      return res.status(403).json({ message: "You can set duration only for your own execution" });
+    }
+    if (!execution.isDraft) {
+      return res.status(400).json({ message: "Execution already finalized" });
+    }
+
+    const secondsRaw =
+      typeof req.body.durationSeconds === "number"
+        ? req.body.durationSeconds
+        : typeof req.body.durationMinutes === "number"
+        ? Math.round(req.body.durationMinutes * 60)
+        : NaN;
+    if (!Number.isFinite(secondsRaw) || secondsRaw < 0) {
+      return res.status(400).json({ message: "durationSeconds or durationMinutes must be a non-negative number" });
+    }
+    const durationSeconds = Math.floor(secondsRaw);
+    const parsed = parseExecutionNotes(execution.notes);
+    const startedAt = parsed.meta.timerStartAt || execution.executedAt.toISOString();
+    const updated = await prisma.testExecution.update({
+      where: { id: execution.id },
+      data: {
+        notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
+          timerStartAt: startedAt,
+          manualDurationSeconds: durationSeconds,
+          durationSeconds,
+        }),
+      },
+    });
+    await writeAuditLog(req.user!.userId, "SET_EXECUTION_MANUAL_DURATION", "TestExecution", updated.id, {
+      durationSeconds,
+    });
+    return res.json({
+      id: updated.id,
+      startedAt,
+      completedAt: parsed.meta.timerStopAt || null,
+      durationSeconds,
+      manualDurationSeconds: durationSeconds,
+      timerState: parsed.meta.timerState || null,
     });
   }
 );
@@ -2068,13 +2270,20 @@ router.post(
     const parsed = parseExecutionNotes(execution.notes);
     const start = parsed.meta.timerStartAt ? new Date(parsed.meta.timerStartAt) : execution.executedAt;
     const end = new Date();
-    const durationSeconds = computeDurationSeconds(start, end);
+    const accumulatedSeconds = computeAccumulatedTimerSeconds(parsed.meta, end);
+    const durationSeconds =
+      typeof parsed.meta.manualDurationSeconds === "number"
+        ? Math.max(0, Math.floor(parsed.meta.manualDurationSeconds))
+        : accumulatedSeconds;
     const updated = await prisma.testExecution.update({
       where: { id: execution.id },
       data: {
         notes: mergeExecutionNotes(execution.notes, parsed.userNotes, {
           timerStartAt: start.toISOString(),
           timerStopAt: end.toISOString(),
+          timerState: "STOPPED",
+          timerAccumulatedSeconds: accumulatedSeconds,
+          timerLastResumedAt: undefined,
           durationSeconds,
         }),
       },
@@ -2089,6 +2298,9 @@ router.post(
       startedAt: start.toISOString(),
       completedAt: end.toISOString(),
       durationSeconds,
+      timerState: "STOPPED",
+      timerAccumulatedSeconds: accumulatedSeconds,
+      timerLastResumedAt: null,
     });
   }
 );
@@ -2250,10 +2462,19 @@ router.post(
     const finalUserNotes = asString(req.body.notes) || parsed.userNotes;
     const completedAt = new Date();
     const timerStart = parsed.meta.timerStartAt ? new Date(parsed.meta.timerStartAt) : execution.executedAt;
-    const durationSeconds = computeDurationSeconds(timerStart, completedAt);
+    const accumulatedSeconds = computeAccumulatedTimerSeconds(parsed.meta, completedAt);
+    const durationSeconds =
+      typeof parsed.meta.manualDurationSeconds === "number"
+        ? Math.max(0, Math.floor(parsed.meta.manualDurationSeconds))
+        : accumulatedSeconds > 0
+        ? accumulatedSeconds
+        : computeDurationSeconds(timerStart, completedAt);
     const finalNotes = mergeExecutionNotes(execution.notes, finalUserNotes, {
       timerStartAt: timerStart.toISOString(),
       timerStopAt: completedAt.toISOString(),
+      timerState: "STOPPED",
+      timerAccumulatedSeconds: accumulatedSeconds,
+      timerLastResumedAt: undefined,
       durationSeconds,
     });
 
@@ -2685,55 +2906,121 @@ router.post(
 );
 
 router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
-  const name = asString(req.body.name);
-  if (!name) {
-    return res.status(400).json({ message: "Suite name is required" });
-  }
-  const parentSuiteId = asString(req.body.parentSuiteId) || null;
-  const projectId = asString(req.body.projectId) || null;
-  const moduleName = asString(req.body.module) || null;
-  const testCaseRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
-
-  if (parentSuiteId) {
-    const parentSuite = await prismaAny.testSuite.findUnique({ where: { id: parentSuiteId } });
-    if (!parentSuite || parentSuite.isArchived) {
-      return res.status(404).json({ message: "Parent suite not found" });
+  try {
+    const name = asString(req.body.name);
+    if (!name) {
+      return res.status(400).json({ message: "Suite name is required" });
     }
-  }
+    const parentSuiteId = asString(req.body.parentSuiteId) || null;
+    const projectId = asString(req.body.projectId) || null;
+    const moduleName = asString(req.body.module) || null;
+    const suiteType =
+      (parseEnum(SUITE_TYPE, asString(req.body.type).toUpperCase()) || SUITE_TYPE.STATIC) as SuiteTypeValue;
+    const testCaseRefs = Array.isArray(req.body.testCaseIds) ? asStringArray(req.body.testCaseIds) : [];
+    const rawFilter =
+      req.body.filterJson && typeof req.body.filterJson === "object" && !Array.isArray(req.body.filterJson)
+        ? (req.body.filterJson as Record<string, unknown>)
+        : {};
+    const filterModules = Array.isArray(rawFilter.modules) ? asStringArray(rawFilter.modules) : [];
+    const dynamicModules = [...new Set([...filterModules, ...(moduleName ? [moduleName] : [])])].filter(Boolean);
 
-  const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
-  if (resolvedRefs.unresolved.length > 0) {
-    return res.status(400).json({
-      message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
-    });
-  }
+    if (parentSuiteId) {
+      const parentSuite = await prismaAny.testSuite.findUnique({ where: { id: parentSuiteId } });
+      if (!parentSuite || parentSuite.isArchived) {
+        return res.status(404).json({ message: "Parent suite not found" });
+      }
+    }
 
-  const created = await prisma.$transaction(async (tx) => {
-    const suite = await (tx as any).testSuite.create({
-      data: {
+    let resolvedCaseIds: string[] = [];
+    let filterJson: Prisma.InputJsonValue | null = null;
+
+    if (suiteType === SUITE_TYPE.DYNAMIC) {
+      if (dynamicModules.length === 0) {
+        return res.status(400).json({ message: "DYNAMIC suite requires at least one module filter" });
+      }
+      const dynamicModuleSet = new Set(dynamicModules.map((item) => item.toLowerCase()));
+      const matchedCases = await prisma.testCase.findMany({
+        where: {
+          isDeleted: false,
+          module: { not: null },
+        },
+        select: { id: true, module: true },
+        orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
+      });
+      resolvedCaseIds = [
+        ...new Set(
+          matchedCases
+            .filter((row) => dynamicModuleSet.has(asString(row.module).toLowerCase()))
+            .map((row) => row.id)
+        ),
+      ];
+      if (resolvedCaseIds.length === 0) {
+        return res.status(400).json({ message: "Dynamic suite filter matched no test cases" });
+      }
+      filterJson = { modules: dynamicModules };
+    } else {
+      const resolvedRefs = await resolveTestCaseRefs(testCaseRefs);
+      if (resolvedRefs.unresolved.length > 0) {
+        return res.status(400).json({
+          message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
+        });
+      }
+      resolvedCaseIds = resolvedRefs.resolvedIds;
+    }
+
+    const created = await prisma.$transaction(async (tx) => {
+      const baseData: Record<string, unknown> = {
         name,
         description: asString(req.body.description) || null,
         module: moduleName,
         createdBy: req.user!.userId,
         projectId,
         parentSuiteId,
-      },
+      };
+
+      let suite: any;
+      try {
+        suite = await (tx as any).testSuite.create({
+          data: {
+            ...baseData,
+            type: suiteType,
+            filterJson: filterJson || undefined,
+          },
+        });
+      } catch (createError: any) {
+        const msg = asString(createError?.message || createError);
+        const typeFieldNotSupported =
+          msg.includes("Unknown argument `type`") ||
+          msg.includes("Unknown field `type`") ||
+          msg.includes("Unknown argument `filterJson`") ||
+          msg.includes("Unknown field `filterJson`");
+        if (!typeFieldNotSupported) {
+          throw createError;
+        }
+        suite = await (tx as any).testSuite.create({ data: baseData });
+      }
+
+      if (resolvedCaseIds.length > 0) {
+        const rows = resolvedCaseIds.map((testCaseId, idx) => ({
+          suiteId: suite.id,
+          testCaseId,
+          position: idx + 1,
+          addedBy: req.user!.userId,
+        }));
+        await (tx as any).testSuiteCase.createMany({ data: rows });
+      }
+      return suite;
     });
 
-    if (resolvedRefs.resolvedIds.length > 0) {
-      const rows = resolvedRefs.resolvedIds.map((testCaseId, idx) => ({
-        suiteId: suite.id,
-        testCaseId,
-        position: idx + 1,
-        addedBy: req.user!.userId,
-      }));
-      await (tx as any).testSuiteCase.createMany({ data: rows });
-    }
-    return suite;
-  });
-
-  await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, { name: created.name });
-  return res.status(201).json(created);
+    await writeAuditLog(req.user!.userId, "CREATE_TEST_SUITE", "TestSuite", created.id, {
+      name: created.name,
+      requestedType: suiteType,
+    });
+    return res.status(201).json(created);
+  } catch (error: any) {
+    console.error("CREATE_SUITE_ERROR:", error?.message || error);
+    return res.status(500).json({ message: error?.message || "Failed to create suite" });
+  }
 });
 
 router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
@@ -3011,16 +3298,32 @@ router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), async (req:
 router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({
     where: { id: req.params.suiteId },
-    select: { id: true, name: true, isArchived: true, _count: { select: { suiteCases: true, childSuites: true } } },
+    select: {
+      id: true,
+      name: true,
+      isArchived: true,
+      _count: { select: { suiteCases: true, childSuites: true } },
+    },
   });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
   if (!suite.isArchived) {
     return res.status(400).json({ message: "Archive suite before permanent delete" });
   }
+  if ((suite._count?.childSuites || 0) > 0) {
+    return res.status(400).json({ message: "Delete child suites first before deleting parent suite" });
+  }
 
-  await prismaAny.testSuite.delete({
-    where: { id: suite.id },
-  });
+  try {
+    await prismaAny.testSuite.delete({
+      where: { id: suite.id },
+    });
+  } catch (error: any) {
+    // Prisma FK violation - surface a clearer action for UI.
+    if (error?.code === "P2003") {
+      return res.status(400).json({ message: "Suite cannot be deleted due to linked records. Delete dependent records first." });
+    }
+    throw error;
+  }
 
   await writeAuditLog(req.user!.userId, "DELETE_TEST_SUITE", "TestSuite", suite.id, {
     name: suite.name,
@@ -3033,6 +3336,10 @@ router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthR
 router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
   const suiteId = asString(req.body.suiteId);
   const mode = parseEnum(SUITE_EXECUTION_MODE, req.body.mode) || SUITE_EXECUTION_MODE.SEQUENTIAL;
+  const linkedTestRunId = asString(req.body.linkedTestRunId);
+  const reexecuteFromExecutionId = asString(req.body.reexecuteFromExecutionId);
+  const reexecuteFailedOnly =
+    req.body.reexecuteFailedOnly === true || String(req.body.reexecuteFailedOnly || "").toLowerCase() === "true";
   if (!suiteId) return res.status(400).json({ message: "suiteId is required" });
 
   const suite = await (prisma as any).testSuite.findUnique({
@@ -3041,6 +3348,35 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
   });
   if (!suite || suite.isArchived) return res.status(404).json({ message: "Suite not found" });
   if (!suite.suiteCases.length) return res.status(400).json({ message: "Suite has no test cases to execute" });
+
+  let suiteCasesForExecution: any[] = [...suite.suiteCases];
+  if (reexecuteFromExecutionId) {
+    const sourceExecution = await (prisma as any).testSuiteExecution.findUnique({
+      where: { id: reexecuteFromExecutionId },
+      include: {
+        cases: {
+          select: { suiteCaseId: true, status: true },
+        },
+      },
+    });
+    if (!sourceExecution || sourceExecution.suiteId !== suite.id) {
+      return res.status(400).json({ message: "Invalid reexecuteFromExecutionId for this suite" });
+    }
+    const statusBySuiteCaseId = new Map<string, string>(
+      (sourceExecution.cases || []).map((row: any) => [String(row.suiteCaseId), String(row.status || "")])
+    );
+    suiteCasesForExecution = suiteCasesForExecution.filter((row: any) => {
+      if (!reexecuteFailedOnly) return true;
+      return String(statusBySuiteCaseId.get(String(row.id)) || "") === TestRunCaseStatus.FAILED;
+    });
+    if (suiteCasesForExecution.length === 0) {
+      return res.status(400).json({
+        message: reexecuteFailedOnly
+          ? "No failed test cases found in source suite execution"
+          : "No test cases found in source suite execution",
+      });
+    }
+  }
 
   const requestedTesterIds = Array.isArray(req.body.testerIds) ? [...new Set(asStringArray(req.body.testerIds))] : [];
   const testerIds =
@@ -3056,29 +3392,76 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
       return res.status(400).json({ message: "One or more testerIds are invalid/inactive/non-tester users" });
     }
   }
+  if (linkedTestRunId) {
+    const linkedRun = await prisma.testRun.findUnique({
+      where: { id: linkedTestRunId },
+      select: { id: true },
+    });
+    if (!linkedRun) {
+      return res.status(404).json({ message: "Linked test run not found" });
+    }
+  }
 
   const created = await prisma.$transaction(async (tx) => {
-    const run = await tx.testRun.create({
-      data: {
-        name: `${suite.name} Run ${new Date().toISOString().slice(0, 10)}`,
-        description: `Auto-linked run for suite ${suite.name}`,
-        createdBy: req.user!.userId,
-        targetStartDate: req.body.targetStartDate ? new Date(req.body.targetStartDate) : null,
-        targetEndDate: req.body.targetEndDate ? new Date(req.body.targetEndDate) : null,
-        status: TestRunStatus.PLANNED,
-      },
-    });
-    await tx.testRunCase.createMany({
-      data: suite.suiteCases.map((item: any) => ({
-        testRunId: run.id,
-        testCaseId: item.testCaseId,
-        status: TestRunCaseStatus.NOT_RUN,
-      })),
-    });
-    if (testerIds.length > 0) {
-      await tx.testRunAssignment.createMany({
-        data: testerIds.map((testerId) => ({ testRunId: run.id, testerId })),
+    let run: any = null;
+    if (linkedTestRunId) {
+      run = await tx.testRun.findUnique({
+        where: { id: linkedTestRunId },
+        include: { testCases: true, assignments: true },
       });
+      if (!run) {
+        throw new Error("Linked test run not found");
+      }
+      const existingRunCaseIds = new Set<string>((run.testCases || []).map((row: any) => String(row.testCaseId)));
+      const missingRunCases = suiteCasesForExecution
+        .map((item: any) => String(item.testCaseId))
+        .filter((id: string) => !existingRunCaseIds.has(id));
+      if (missingRunCases.length > 0) {
+        await tx.testRunCase.createMany({
+          data: missingRunCases.map((testCaseId: string) => ({
+            testRunId: run.id,
+            testCaseId,
+            status: TestRunCaseStatus.NOT_RUN,
+          })),
+          skipDuplicates: true,
+        });
+      }
+      if (testerIds.length > 0) {
+        await tx.testRunAssignment.createMany({
+          data: testerIds.map((testerId) => ({ testRunId: run.id, testerId })),
+          skipDuplicates: true,
+        });
+      }
+      await tx.testRun.update({
+        where: { id: run.id },
+        data: {
+          status: TestRunStatus.IN_PROGRESS,
+        },
+      });
+    } else {
+      run = await tx.testRun.create({
+        data: {
+          name: `${suite.name} Run ${new Date().toISOString().slice(0, 10)}`,
+          description: `Auto-linked run for suite ${suite.name}`,
+          createdBy: req.user!.userId,
+          targetStartDate: req.body.targetStartDate ? new Date(req.body.targetStartDate) : null,
+          targetEndDate: req.body.targetEndDate ? new Date(req.body.targetEndDate) : null,
+          status: TestRunStatus.PLANNED,
+        },
+      });
+      await tx.testRunCase.createMany({
+        data: suiteCasesForExecution.map((item: any) => ({
+          testRunId: run.id,
+          testCaseId: item.testCaseId,
+          status: TestRunCaseStatus.NOT_RUN,
+        })),
+      });
+      if (testerIds.length > 0) {
+        await tx.testRunAssignment.createMany({
+          data: testerIds.map((testerId) => ({ testRunId: run.id, testerId })),
+          skipDuplicates: true,
+        });
+      }
     }
 
     const suiteExecution = await (tx as any).testSuiteExecution.create({
@@ -3088,13 +3471,13 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
         mode,
         status: SUITE_EXECUTION_STATUS.RUNNING,
         linkedTestRunId: run.id,
-        totalCases: suite.suiteCases.length,
+        totalCases: suiteCasesForExecution.length,
         startedAt: new Date(),
       },
     });
 
     await (tx as any).testSuiteExecutionCase.createMany({
-      data: suite.suiteCases.map((item: any) => ({
+      data: suiteCasesForExecution.map((item: any) => ({
         suiteExecutionId: suiteExecution.id,
         suiteId: suite.id,
         suiteCaseId: item.id,
@@ -3110,6 +3493,9 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
   await writeAuditLog(req.user!.userId, "START_SUITE_EXECUTION", "TestSuiteExecution", created.id, {
     suiteId,
     mode,
+    linkedTestRunId: linkedTestRunId || null,
+    reexecuteFromExecutionId: reexecuteFromExecutionId || null,
+    reexecuteFailedOnly,
   });
   return res.status(201).json(created);
 });
@@ -3124,7 +3510,18 @@ router.get("/suite-executions/:id", authorizeRoles(Role.TESTER), async (req: Aut
       linkedTestRun: { select: { id: true, name: true, status: true } },
       cases: {
         include: {
-          testCase: { select: { id: true, title: true, testCaseCode: true, module: true } },
+          testCase: {
+            select: {
+              id: true,
+              title: true,
+              description: true,
+              testCaseCode: true,
+              module: true,
+              priority: true,
+              status: true,
+              steps: true,
+            },
+          },
           execution: { select: { id: true, result: true, executedAt: true } },
         },
         orderBy: { position: "asc" },
@@ -3409,6 +3806,32 @@ router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   }
   return res.json(enrichIssue(issue));
 });
+
+router.get(
+  "/users/testers",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (_req: AuthRequest, res: Response) => {
+    const rows = await prisma.user.findMany({
+      where: { role: Role.TESTER, isActive: true },
+      select: { id: true, name: true, email: true },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+    return res.json(rows);
+  }
+);
+
+router.get(
+  "/users/developers",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (_req: AuthRequest, res: Response) => {
+    const rows = await prisma.user.findMany({
+      where: { role: Role.DEVELOPER, isActive: true },
+      select: { id: true, name: true, email: true },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+    return res.json(rows);
+  }
+);
 
 router.post("/bugs/:id/attachments", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const issue = await prismaAny.issue.findUnique({ where: { id: req.params.id } });
