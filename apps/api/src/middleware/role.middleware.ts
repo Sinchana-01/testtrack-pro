@@ -117,15 +117,25 @@ const getRolePermissions = async (): Promise<RolePermissionMap> => {
 
 export const authorizeRoles = (...allowedRoles: string[]) => {
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || !allowedRoles.includes(req.user.role)) {
-      return res.status(403).json({ message: "Forbidden: Access denied" });
-    }
-
     try {
+      if (!req.user) {
+        return res.status(403).json({ message: "Forbidden: Access denied" });
+      }
+
       const requiredPermission = resolveRequiredPermission(req);
+      const permissions = await getRolePermissions();
+      const rolePermissions = permissions[req.user.role] || [];
+
+      const staticallyAllowed = allowedRoles.includes(req.user.role);
+      const permissionAllowed = requiredPermission
+        ? rolePermissions.includes(requiredPermission)
+        : false;
+
+      if (!staticallyAllowed && !permissionAllowed) {
+        return res.status(403).json({ message: "Forbidden: Access denied" });
+      }
+
       if (requiredPermission) {
-        const permissions = await getRolePermissions();
-        const rolePermissions = permissions[req.user.role] || [];
         if (!rolePermissions.includes(requiredPermission)) {
           return res.status(403).json({
             message: `Forbidden: Missing permission '${requiredPermission}' for role ${req.user.role}`,

@@ -619,6 +619,10 @@ export async function listAdminSystemConfigsApi() {
   return authJson("/admin/system-config");
 }
 
+export async function getMyRolePermissionsApi() {
+  return authJson("/admin/role-permissions/me");
+}
+
 export async function upsertAdminSystemConfigApi(payload: { key: string; value: string }) {
   return authJson("/admin/system-config", {
     method: "POST",
