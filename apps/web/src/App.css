@@ -758,6 +758,78 @@ body {
   padding: 10px;
 }
 
+.bulkCasePicker {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.bulkCasePickerTrigger {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+}
+
+.bulkCasePickerMenu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 12px 20px rgba(15, 23, 42, 0.15);
+  z-index: 40;
+  padding: 10px;
+}
+
+.bulkCasePickerSearch {
+  margin-bottom: 8px;
+}
+
+.bulkCasePickerList {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 6px;
+  background: #f8fafc;
+}
+
+.bulkCasePickerItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bulkCasePickerItem:hover {
+  background: #e2e8f0;
+}
+
+.bulkCasePickerText {
+  display: inline-block;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.bulkCasePickerFooter {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 /* ================= DASHBOARD LAYOUT OVERRIDES ================= */
 
 .container.dashboardMode {
@@ -772,7 +844,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  width: min(100%, 1400px);
+  width: 100%;
+  max-width: none;
   margin-left: 0;
   margin-right: auto;
 }
@@ -784,6 +857,11 @@ body {
   border-radius: 8px;
   padding: 16px;
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07);
+}
+
+.dashboardPageContent .formWidePanel {
+  width: 100%;
+  max-width: none;
 }
 
 .dashboardPageContent .panel h4 {
@@ -1192,6 +1270,14 @@ body {
   margin-bottom: 12px;
 }
 
+.sectionActionRow {
+  margin-top: 14px;
+}
+
+.sectionCta {
+  margin-top: 14px;
+}
+
 .adminCreateUserPanel {
   margin-bottom: 12px;
 }
@@ -1284,6 +1370,27 @@ body {
   border: 1px solid #dbe7f3;
   box-shadow: 0 16px 40px rgba(2, 6, 23, 0.22);
   padding: 20px;
+}
+
+.testCaseModal {
+  width: min(60vw, 1100px);
+  max-height: 84vh;
+  overflow-y: auto;
+  padding: 22px 24px;
+  border-radius: 10px;
+  box-shadow: 0 20px 44px rgba(2, 6, 23, 0.26);
+}
+
+.testCaseModal .adminUserModalDetails {
+  display: grid;
+  gap: 8px;
+  padding-right: 6px;
+}
+
+.testCaseModal .adminUserModalDetails p {
+  margin: 0;
+  line-height: 1.45;
+  color: #1e293b;
 }
 
 .adminUserModal h5 {
@@ -1381,5 +1488,11 @@ body {
 @media (max-width: 900px) {
   .truncateCell {
     max-width: 180px;
+  }
+
+  .testCaseModal {
+    width: 94vw;
+    max-height: 88vh;
+    padding: 16px;
   }
 }

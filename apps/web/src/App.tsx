@@ -14,8 +14,10 @@ import {
   deleteBugCommentApi,
   createFromTemplateApi,
   createTemplateApi,
+  updateTemplateApi,
   createTestCaseApi,
   editBugCommentApi,
+  deleteTemplateApi,
   deleteTestCaseApi,
   finalizeExecutionApi,
   forgotPasswordApi,
@@ -77,7 +79,8 @@ import Login from "./components/auth/Login";
 import Register from "./components/auth/Register";
 import ForgotPassword from "./components/auth/ForgotPassword";
 import ResetPassword from "./components/auth/ResetPassword";
-import DashboardLayout, { DashboardNavItem } from "./components/layout/DashboardLayout";
+import DashboardLayout from "./components/layout/DashboardLayout";
+import { buildNavFromPermissions, permissionCatalog } from "./config/roleNav";
 import "./App.css";
 
 type Screen = "login" | "register" | "forgot" | "reset" | "dashboard";
@@ -158,9 +161,20 @@ function App() {
   const [bulkModule, setBulkModule] = useState("");
   const [bulkSuiteId, setBulkSuiteId] = useState("");
   const [bulkAssignee, setBulkAssignee] = useState("");
+  const [bulkCasePickerOpen, setBulkCasePickerOpen] = useState(false);
+  const [bulkCaseQuery, setBulkCaseQuery] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [templateCategory, setTemplateCategory] = useState("");
   const [templateSteps, setTemplateSteps] = useState("");
+  const [templatesVisible, setTemplatesVisible] = useState(false);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [selectedTemplateModalId, setSelectedTemplateModalId] = useState("");
+  const [templateModalEditing, setTemplateModalEditing] = useState(false);
+  const [templateEditName, setTemplateEditName] = useState("");
+  const [templateEditCategory, setTemplateEditCategory] = useState("");
+  const [templateEditDescription, setTemplateEditDescription] = useState("");
+  const [templateEditModule, setTemplateEditModule] = useState("");
+  const [templateEditSteps, setTemplateEditSteps] = useState("");
   const [importType, setImportType] = useState("");
   const [importFieldMappingText, setImportFieldMappingText] = useState("");
   const [importExcelRows, setImportExcelRows] = useState<any[]>([]);
@@ -173,6 +187,7 @@ function App() {
   const [editingId, setEditingId] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editStepsText, setEditStepsText] = useState("");
   const [editPreConditionsText, setEditPreConditionsText] = useState("");
   const [editTestDataRequirementsText, setEditTestDataRequirementsText] = useState("");
   const [editEnvironmentRequirementsText, setEditEnvironmentRequirementsText] = useState("");
@@ -190,6 +205,9 @@ function App() {
   const [editStatus, setEditStatus] = useState("");
   const [showTestCaseList, setShowTestCaseList] = useState(false);
   const [expandedTestCaseId, setExpandedTestCaseId] = useState("");
+  const [testCasesVisible, setTestCasesVisible] = useState(false);
+  const [selectedTestCaseModalId, setSelectedTestCaseModalId] = useState("");
+  const [testCasesLoading, setTestCasesLoading] = useState(false);
   const [testRuns, setTestRuns] = useState<any[]>([]);
   const [runName, setRunName] = useState("");
   const [runDescription, setRunDescription] = useState("");
@@ -297,6 +315,7 @@ function App() {
   const [adminUserModalError, setAdminUserModalError] = useState("");
   const [adminUserToast, setAdminUserToast] = useState("");
   const adminUserModalRef = useRef<HTMLDivElement | null>(null);
+  const bulkCasePickerRef = useRef<HTMLDivElement | null>(null);
   const [adminProjects, setAdminProjects] = useState<any[]>([]);
   const [adminProjectName, setAdminProjectName] = useState("");
   const [adminProjectDescription, setAdminProjectDescription] = useState("");
@@ -354,108 +373,8 @@ function App() {
   const canManageUsersPermission = hasPermission("Manage Users");
   const canManageProjectsPermission = hasPermission("Manage Projects");
   const canViewAuditLogsPermission = hasPermission("View Audit Logs");
-  const testerNavItems: DashboardNavItem[] = [
-  { key: "dashboard_home", label: "Dashboard", icon: "D" },
-  { key: "create_test_case", label: "Create Test Case", icon: "+" },
-  { key: "test_cases", label: "Test Cases", icon: "T" },
-  { key: "templates", label: "Templates", icon: "M" },
-  { key: "bulk_operations", label: "Bulk Operations", icon: "B" },
-  { key: "import_test_cases", label: "Import Test Cases", icon: "I" },
-  { key: "suite_management", label: "Test Suites", icon: "S" },
-  { key: "test_runs", label: "Test Run Management", icon: "R" },
-  { key: "execute_tests", label: "Execute Tests", icon: "E" },
-  { key: "bug_management", label: "Bug Management", icon: "!" },
-  { key: "reports", label: "Reports", icon: "P" },
-];
-const developerNavItems: DashboardNavItem[] = [
-  { key: "dashboard_home", label: "Dashboard", icon: "D" },
-  { key: "my_assigned_bugs", label: "My Assigned Bugs", icon: "!" },
-  { key: "all_bugs", label: "All Bugs", icon: "A" },
-  { key: "test_reports", label: "Test Reports", icon: "P" },
-  { key: "performance_report", label: "Performance Report", icon: "F" },
-  { key: "linked_commits", label: "Linked Commits", icon: "C" },
-];
-const adminNavItems: DashboardNavItem[] = [
-  { key: "dashboard_home", label: "Dashboard", icon: "D" },
-  { key: "user_management", label: "User Management", icon: "U" },
-  { key: "role_management", label: "Role Management", icon: "L" },
-  { key: "project_management", label: "Project Management", icon: "J" },
-  { key: "audit_logs", label: "Audit Logs", icon: "A" },
-  { key: "backup_management", label: "Backup Management", icon: "K" },
-];
-const allNavItemsCatalog: DashboardNavItem[] = [
-  ...testerNavItems,
-  ...developerNavItems,
-  ...adminNavItems,
-].filter((item, idx, arr) => arr.findIndex((x) => x.key === item.key) === idx);
-const permissionToMenuKeys: Record<string, string[]> = {
-  "Manage Users": ["user_management"],
-  "Manage Roles": ["role_management"],
-  "Manage Projects": ["project_management"],
-  "View Audit Logs": ["audit_logs"],
-  "Backup Management": ["backup_management"],
-  "Create Test Cases": [
-    "create_test_case",
-    "test_cases",
-    "templates",
-    "bulk_operations",
-    "import_test_cases",
-    "suite_management",
-    "test_runs",
-  ],
-  "Execute Tests": ["execute_tests"],
-  "Bug Management": ["bug_management"],
-  Reports: ["reports"],
-  "My Assigned Bugs": ["my_assigned_bugs"],
-  "All Bugs": ["all_bugs"],
-  "Test Reports": ["test_reports"],
-  "Performance Report": ["performance_report"],
-  "Linked Commits": ["linked_commits"],
-};
-
-const buildNavFromPermissions = (
-  roleKey: string,
-  map: Record<string, string[]>
-): DashboardNavItem[] => {
-  const defaultBase =
-    roleKey === "TESTER" ? testerNavItems : roleKey === "DEVELOPER" ? developerNavItems : adminNavItems;
-  const allByKey = new Map(allNavItemsCatalog.map((item) => [item.key, item]));
-  const allowedPermissions = map[roleKey] || [];
-  const allowedKeys = new Set<string>(defaultBase.map((item) => item.key));
-  allowedKeys.add("dashboard_home");
-
-  allowedPermissions.forEach((permission) => {
-    const keys = permissionToMenuKeys[permission] || [];
-    keys.forEach((key) => allowedKeys.add(key));
-
-    // Allow exact label match for newly added permissions if label exists in sidebar definitions.
-    const matched = allNavItemsCatalog.find(
-      (item) => item.label.toUpperCase() === String(permission).toUpperCase()
-    );
-    if (matched) allowedKeys.add(matched.key);
-  });
-
-  return Array.from(allowedKeys)
-    .map((key) => allByKey.get(key))
-    .filter((item): item is DashboardNavItem => Boolean(item));
-};
+  const rolePermissionsKey = JSON.stringify([...currentRolePermissions].sort());
 const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
-  const permissionCatalog = [
-    "Manage Users",
-    "Manage Projects",
-    "Manage Roles",
-    "View Audit Logs",
-    "Backup Management",
-    "Create Test Cases",
-    "Execute Tests",
-    "Bug Management",
-    "Reports",
-    "My Assigned Bugs",
-    "All Bugs",
-    "Test Reports",
-    "Performance Report",
-    "Linked Commits",
-  ];
 
   const menuFeatureMap: Record<string, DashboardFeature | "none"> = {
     dashboard_home: "none",
@@ -531,6 +450,21 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     canViewBugs &&
     (normalizedFeature === "bug_management" || (isDeveloper && normalizedFeature === "developer_workspace"));
   const showTestCases = normalizedFeature === "test_cases";
+  const selectedTemplateModal = templates.find((tpl) => tpl.id === selectedTemplateModalId) || null;
+  const selectedTestCaseModal = testCases.find((tc) => tc.id === selectedTestCaseModalId) || null;
+  const filteredBulkCaseOptions = testCases.filter((tc) => {
+    const query = bulkCaseQuery.trim().toLowerCase();
+    if (!query) return true;
+    const title = String(tc?.title || "").toLowerCase();
+    const code = String(tc?.testCaseCode || "").toLowerCase();
+    return title.includes(query) || code.includes(query);
+  });
+  const bulkSelectedSummary =
+    selectedIds.length === 0
+      ? "No test case selected"
+      : selectedIds.length === 1
+      ? "1 test case selected"
+      : `${selectedIds.length} test cases selected`;
   const showRolePanel = normalizedFeature === "developer_workspace" || normalizedFeature === "admin_workspace";
   const selectedExecutionRun = testRuns.find((run) => run.id === executionRunId) || null;
   const executionRunCaseIds = new Set(
@@ -758,72 +692,90 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
 
   const loadTestCaseData = async () => {
     setIsRefreshing(true);
-    const shouldFetchTestCases =
-      canCreateAndManageTestCases || canManageSuites || canManageTestRuns || canExecuteTests;
-    const bugParams: Record<string, string> = {
-      status: bugFilterStatus,
-      priority: bugFilterPriority,
-      severity: bugFilterSeverity,
-      sortBy: bugSortBy,
-    };
-    const [caseRows, templateRows, runRows, suiteRows, executionRows, bugRows] = await Promise.all([
-      shouldFetchTestCases ? getTestCasesApi() : Promise.resolve([]),
-      canUseTemplates ? listTemplatesApi() : Promise.resolve([]),
-      canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
-      canManageSuites
-        ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
-        : Promise.resolve([]),
-      canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
-      canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
-    ]);
-    const rows = Array.isArray(caseRows) ? caseRows : [];
-    setTestCases(rows);
-    const projectsFromCases = Array.from(
-      new Map(
-        rows
-          .map((row: any) => row?.project)
-          .filter((project: any) => project?.id)
-          .map((project: any) => [
-            project.id,
-            {
-              id: project.id,
-              name: project.name || "Unnamed Project",
-              description: project.description || "",
-              isActive: project.isActive !== false,
-            },
-          ])
-      ).values()
-    );
-    if (projectsFromCases.length > 0) {
-      setAdminProjects((prev) => {
-        const byId = new Map<string, any>();
-        prev.forEach((p: any) => byId.set(p.id, p));
-        projectsFromCases.forEach((p: any) => {
-          if (!byId.has(p.id)) byId.set(p.id, p);
+    try {
+      const shouldFetchTestCases =
+        canCreateAndManageTestCases || canManageSuites || canManageTestRuns || canExecuteTests;
+      const bugParams: Record<string, string> = {
+        status: bugFilterStatus,
+        priority: bugFilterPriority,
+        severity: bugFilterSeverity,
+        sortBy: bugSortBy,
+      };
+      const [
+        caseRowsResult,
+        templateRowsResult,
+        runRowsResult,
+        suiteRowsResult,
+        executionRowsResult,
+        bugRowsResult,
+      ] = await Promise.allSettled([
+        shouldFetchTestCases ? getTestCasesApi() : Promise.resolve([]),
+        canUseTemplates ? listTemplatesApi() : Promise.resolve([]),
+        canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
+        canManageSuites
+          ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
+          : Promise.resolve([]),
+        canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
+        canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
+      ]);
+
+      const caseRows = caseRowsResult.status === "fulfilled" ? caseRowsResult.value : [];
+      const templateRows = templateRowsResult.status === "fulfilled" ? templateRowsResult.value : [];
+      const runRows = runRowsResult.status === "fulfilled" ? runRowsResult.value : [];
+      const suiteRows = suiteRowsResult.status === "fulfilled" ? suiteRowsResult.value : [];
+      const executionRows = executionRowsResult.status === "fulfilled" ? executionRowsResult.value : [];
+      const bugRows = bugRowsResult.status === "fulfilled" ? bugRowsResult.value : [];
+
+      const rows = Array.isArray(caseRows) ? caseRows : [];
+      setTestCases(rows);
+      const projectsFromCases = Array.from(
+        new Map(
+          rows
+            .map((row: any) => row?.project)
+            .filter((project: any) => project?.id)
+            .map((project: any) => [
+              project.id,
+              {
+                id: project.id,
+                name: project.name || "Unnamed Project",
+                description: project.description || "",
+                isActive: project.isActive !== false,
+              },
+            ])
+        ).values()
+      );
+      if (projectsFromCases.length > 0) {
+        setAdminProjects((prev) => {
+          const byId = new Map<string, any>();
+          prev.forEach((p: any) => byId.set(p.id, p));
+          projectsFromCases.forEach((p: any) => {
+            if (!byId.has(p.id)) byId.set(p.id, p);
+          });
+          return Array.from(byId.values());
         });
-        return Array.from(byId.values());
+      }
+      setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
+      setTemplates(Array.isArray(templateRows) ? templateRows : []);
+      setTestRuns(Array.isArray(runRows) ? runRows : []);
+      const suiteList = Array.isArray(suiteRows) ? suiteRows : [];
+      setSuites(suiteList);
+      if (selectedSuiteId && !suiteList.some((suite: any) => suite.id === selectedSuiteId)) {
+        setSelectedSuiteId("");
+        setSuiteDetails(null);
+        setSuiteExecutionHistory([]);
+        setSuiteExecutionId("");
+        setSuiteExecutionDetails(null);
+      }
+      setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
+      const bugList = Array.isArray(bugRows) ? bugRows : [];
+      setBugs(bugList);
+      setSelectedBug((prev: any) => {
+        if (!prev?.id) return prev;
+        return bugList.find((item) => item.id === prev.id) || null;
       });
+    } finally {
+      setIsRefreshing(false);
     }
-    setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
-    setTemplates(Array.isArray(templateRows) ? templateRows : []);
-    setTestRuns(Array.isArray(runRows) ? runRows : []);
-    const suiteList = Array.isArray(suiteRows) ? suiteRows : [];
-    setSuites(suiteList);
-    if (selectedSuiteId && !suiteList.some((suite: any) => suite.id === selectedSuiteId)) {
-      setSelectedSuiteId("");
-      setSuiteDetails(null);
-      setSuiteExecutionHistory([]);
-      setSuiteExecutionId("");
-      setSuiteExecutionDetails(null);
-    }
-    setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
-    const bugList = Array.isArray(bugRows) ? bugRows : [];
-    setBugs(bugList);
-    setSelectedBug((prev: any) => {
-      if (!prev?.id) return prev;
-      return bugList.find((item) => item.id === prev.id) || null;
-    });
-    setIsRefreshing(false);
   };
 
   const loadBugDetails = async (bugId: string) => {
@@ -858,11 +810,11 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     const payload = await getMyRolePermissionsApi();
     if (payload?.rolePermissions && typeof payload.rolePermissions === "object") {
       const next = payload.rolePermissions as Record<string, unknown>;
-      setRolePermissions({
-        ADMIN: Array.isArray(next.ADMIN) ? (next.ADMIN as string[]) : rolePermissions.ADMIN || [],
-        TESTER: Array.isArray(next.TESTER) ? (next.TESTER as string[]) : rolePermissions.TESTER || [],
-        DEVELOPER: Array.isArray(next.DEVELOPER) ? (next.DEVELOPER as string[]) : rolePermissions.DEVELOPER || [],
-      });
+      setRolePermissions((prev) => ({
+        ADMIN: Array.isArray(next.ADMIN) ? (next.ADMIN as string[]) : prev.ADMIN || [],
+        TESTER: Array.isArray(next.TESTER) ? (next.TESTER as string[]) : prev.TESTER || [],
+        DEVELOPER: Array.isArray(next.DEVELOPER) ? (next.DEVELOPER as string[]) : prev.DEVELOPER || [],
+      }));
     }
   };
 
@@ -886,6 +838,18 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setAdminUserModalUser(null);
     setAdminUserModalEditing(false);
     setAdminUserModalError("");
+  };
+
+  const openTemplateModal = (tpl: any) => {
+    setSelectedTemplateModalId(String(tpl?.id || ""));
+    setTemplateModalEditing(false);
+    setTemplateEditName(String(tpl?.name || ""));
+    setTemplateEditCategory(String(tpl?.category || ""));
+    setTemplateEditDescription(String(tpl?.description || ""));
+    setTemplateEditModule(String(tpl?.module || ""));
+    setTemplateEditSteps(
+      typeof tpl?.steps === "string" ? tpl.steps : JSON.stringify(tpl?.steps ?? [], null, 2)
+    );
   };
 
   const buildBugNotificationItems = (bugRows: any[]): AppNotificationItem[] => {
@@ -1065,6 +1029,8 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setBulkModule("");
     setBulkSuiteId("");
     setBulkAssignee("");
+    setBulkCasePickerOpen(false);
+    setBulkCaseQuery("");
     setTemplateName("");
     setTemplateCategory("");
     setTemplateSteps("");
@@ -1309,6 +1275,11 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setEditingId(tc.id);
     setEditTitle(tc.title || "");
     setEditDescription(tc.description || "");
+    setEditStepsText(
+      typeof tc.steps === "string"
+        ? tc.steps
+        : JSON.stringify(tc.steps ?? [], null, 2)
+    );
     setEditPreConditionsText(JSON.stringify(tc.preConditions ?? [], null, 2));
     setEditTestDataRequirementsText(JSON.stringify(tc.testDataRequirements ?? [], null, 2));
     setEditEnvironmentRequirementsText(JSON.stringify(tc.environmentRequirements ?? [], null, 2));
@@ -1344,6 +1315,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       await updateTestCaseApi(editingId, {
         title: editTitle,
         description: editDescription,
+        steps: parseSteps(editStepsText),
         preConditions: parseSection(editPreConditionsText),
         testDataRequirements: parseSection(editTestDataRequirementsText),
         environmentRequirements: parseSection(editEnvironmentRequirementsText),
@@ -1365,6 +1337,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       setEditingId("");
       setEditTitle("");
       setEditDescription("");
+      setEditStepsText("");
       setEditPreConditionsText("");
       setEditTestDataRequirementsText("");
       setEditEnvironmentRequirementsText("");
@@ -1649,6 +1622,18 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       setActiveMenuKey("dashboard_home");
       setShowTestCaseList(false);
       setExpandedTestCaseId("");
+      setTestCasesVisible(false);
+      setSelectedTestCaseModalId("");
+      setTestCasesLoading(false);
+      setTemplatesVisible(false);
+      setTemplatesLoading(false);
+      setSelectedTemplateModalId("");
+      setTemplateModalEditing(false);
+      setTemplateEditName("");
+      setTemplateEditCategory("");
+      setTemplateEditDescription("");
+      setTemplateEditModule("");
+      setTemplateEditSteps("");
       setSelectedIds([]);
       setEditingId("");
       setTestRuns([]);
@@ -1699,7 +1684,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     loadTestCaseData().catch(() => {
       // no-op: page-level actions already show explicit alerts on manual refresh
     });
-  }, [screen, currentRole]);
+  }, [screen, currentRole, rolePermissionsKey]);
 
   useEffect(() => {
     if (screen !== "dashboard" || !currentRole) return;
@@ -1781,6 +1766,25 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [adminUserModalUser, adminUserModalLoading]);
+
+  useEffect(() => {
+    if (!bulkCasePickerOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!bulkCasePickerRef.current) return;
+      if (!bulkCasePickerRef.current.contains(event.target as Node)) {
+        setBulkCasePickerOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setBulkCasePickerOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [bulkCasePickerOpen]);
 
   useEffect(() => {
     if (screen !== "dashboard") return;
@@ -1944,6 +1948,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         setCurrentUserId(res?.user?.id || "");
         setShowTestCaseList(false);
         setExpandedTestCaseId("");
+        setTestCasesVisible(false);
+        setSelectedTestCaseModalId("");
+        setTestCasesLoading(false);
+        setTemplatesVisible(false);
+        setTemplatesLoading(false);
+        setSelectedTemplateModalId("");
+        setTemplateModalEditing(false);
         setSelectedIds([]);
         setEditingId("");
         resetBugPanel();
@@ -2040,6 +2051,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     resetAuthFields();
     setShowTestCaseList(false);
     setExpandedTestCaseId("");
+    setTestCasesVisible(false);
+    setSelectedTestCaseModalId("");
+    setTestCasesLoading(false);
+    setTemplatesVisible(false);
+    setTemplatesLoading(false);
+    setSelectedTemplateModalId("");
+    setTemplateModalEditing(false);
     setSelectedIds([]);
     setEditingId("");
     setAdminUsersVisible(false);
@@ -2056,8 +2074,35 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setScreen("login");
   };
 
+  const resetTransientDashboardUi = () => {
+    setShowTestCaseList(false);
+    setExpandedTestCaseId("");
+    setTestCasesVisible(false);
+    setSelectedTestCaseModalId("");
+    setTestCasesLoading(false);
+    setTemplatesVisible(false);
+    setTemplatesLoading(false);
+    setSelectedTemplateModalId("");
+    setTemplateModalEditing(false);
+    setBulkCasePickerOpen(false);
+    setBulkCaseQuery("");
+    setSelectedIds([]);
+    setAdminUsersVisible(false);
+    setAdminUserModalUser(null);
+    setAdminUserModalEditing(false);
+    setAdminUserModalName("");
+    setAdminUserModalRole("TESTER");
+    setAdminUserModalLoading(false);
+    setAdminUserModalError("");
+    setShowMentionPopup(false);
+    setMentionQuery("");
+    setSelectedExecutionReportId("");
+    setSelectedBugId("");
+  };
+
   const handleDashboardNavSelect = async (menuKey: string) => {
     const mappedFeature = menuFeatureMap[menuKey] || "none";
+    resetTransientDashboardUi();
     setActiveMenuKey(menuKey);
     setActiveFeature(mappedFeature);
 
@@ -2836,6 +2881,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                                 value: JSON.stringify(rolePermissions),
                               });
                               await loadRolePermissions();
+                              await loadTestCaseData();
                               alert("Role permissions updated");
                             } catch (error: any) {
                               alert(error?.message || "Failed to save role permissions");
@@ -3183,13 +3229,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               )}
 
               {showTemplates && (
-              <section className="panel">
+              <section className="panel formWidePanel">
                 <h4>Templates</h4>
                 <input className="input" placeholder="Template Name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
                 <input className="input" placeholder="Template Category (e.g., Login Tests)" value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)} />
                 <textarea className="input" placeholder="Template steps JSON or lines" rows={3} value={templateSteps} onChange={(e) => setTemplateSteps(e.target.value)} />
                 <button
-                  className="button"
+                  className="button sectionCta"
                   onClick={async () => {
                     try {
                       await createTemplateApi({
@@ -3223,33 +3269,216 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                 >
                   Save Template
                 </button>
-                <div className="listCompact">
-                  {templates.map((tpl) => (
-                    <div className="row" key={tpl.id}>
-                      <span className="title">{tpl.name}</span>
-                      <span className="meta">{tpl.category || "General"}</span>
+                <div className="adminUsersToolbar sectionActionRow">
+                  <button
+                    className="button adminUsersPrimaryBtn"
+                    disabled={templatesLoading}
+                    onClick={async () => {
+                      try {
+                        setTemplatesLoading(true);
+                        await loadTestCaseData();
+                        setTemplatesVisible(true);
+                      } catch (error: any) {
+                        alert(error?.message || "Load templates failed");
+                      } finally {
+                        setTemplatesLoading(false);
+                      }
+                    }}
+                  >
+                    {templatesLoading ? "Loading..." : "Templates"}
+                  </button>
+                  {templatesVisible ? (
+                    <button
+                      className="button small"
+                      disabled={templatesLoading}
+                      onClick={async () => {
+                        try {
+                          setTemplatesLoading(true);
+                          await loadTestCaseData();
+                        } catch (error: any) {
+                          alert(error?.message || "Refresh templates failed");
+                        } finally {
+                          setTemplatesLoading(false);
+                        }
+                      }}
+                    >
+                      Refresh
+                    </button>
+                  ) : null}
+                </div>
+
+                {!templatesVisible ? (
+                  <div className="note">Click the Templates button to fetch and view template list.</div>
+                ) : (
+                  <div className="tableWrap adminUsersTableWrap">
+                    <table className="table adminUsersTable">
+                      <thead>
+                        <tr>
+                          <th>Name</th>
+                          <th>Category</th>
+                          <th>Module</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {templates.length === 0 ? (
+                          <tr>
+                            <td colSpan={4} className="note">No templates found.</td>
+                          </tr>
+                        ) : (
+                          templates.map((tpl) => (
+                            <tr
+                              key={tpl.id}
+                              className="adminUsersRow"
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`Open template ${tpl.name}`}
+                              onClick={() => openTemplateModal(tpl)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  openTemplateModal(tpl);
+                                }
+                              }}
+                            >
+                              <td>{tpl.name || "Untitled template"}</td>
+                              <td>{tpl.category || "General"}</td>
+                              <td>{tpl.module || "General"}</td>
+                              <td>{tpl.status || "DRAFT"}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {selectedTemplateModal && (
+                  <div
+                    className="adminUserModalOverlay"
+                    onMouseDown={(event) => {
+                      if (event.target === event.currentTarget) setSelectedTemplateModalId("");
+                    }}
+                  >
+                    <div className="adminUserModal testCaseModal" role="dialog" aria-modal="true" aria-labelledby="template-modal-title">
                       <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            await createFromTemplateApi(tpl.id, { title: `${tpl.name} - Instance` });
-                            await loadTestCaseData();
-                            alert("Test case created from template");
-                          } catch (error: any) {
-                            alert(error?.message || "Create from template failed");
-                          }
+                        type="button"
+                        className="adminUserModalClose"
+                        aria-label="Close template details"
+                        onClick={() => {
+                          setSelectedTemplateModalId("");
+                          setTemplateModalEditing(false);
                         }}
                       >
-                        Use
+                        X
                       </button>
+                      <h5 id="template-modal-title">Template Details</h5>
+                      {!templateModalEditing ? (
+                        <div className="adminUserModalDetails">
+                          <p><strong>Name:</strong> {selectedTemplateModal.name || "N/A"}</p>
+                          <p><strong>Category:</strong> {selectedTemplateModal.category || "N/A"}</p>
+                          <p><strong>Description:</strong> {selectedTemplateModal.description || "N/A"}</p>
+                          <p><strong>Module:</strong> {selectedTemplateModal.module || "N/A"}</p>
+                          <p><strong>Steps:</strong> {typeof selectedTemplateModal.steps === "string" ? selectedTemplateModal.steps : JSON.stringify(selectedTemplateModal.steps ?? [])}</p>
+                          <p><strong>Priority:</strong> {selectedTemplateModal.priority || "N/A"}</p>
+                          <p><strong>Severity:</strong> {selectedTemplateModal.severity || "N/A"}</p>
+                          <p><strong>Type:</strong> {selectedTemplateModal.type || "N/A"}</p>
+                          <p><strong>Status:</strong> {selectedTemplateModal.status || "N/A"}</p>
+                          <p><strong>Tags:</strong> {(selectedTemplateModal.tags ?? []).join(", ") || "N/A"}</p>
+                          <p><strong>Estimated Duration:</strong> {selectedTemplateModal.estimatedDurationMinutes ?? "N/A"} min</p>
+                          <p><strong>Automation Status:</strong> {selectedTemplateModal.automationStatus || "N/A"}</p>
+                          <p><strong>Automation Script:</strong> {selectedTemplateModal.automationScriptLink || "N/A"}</p>
+                          <p><strong>Metadata:</strong> {JSON.stringify(selectedTemplateModal.metadata ?? {})}</p>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="fieldLabel">Name</label>
+                          <input className="input" value={templateEditName} onChange={(e) => setTemplateEditName(e.target.value)} />
+                          <label className="fieldLabel">Category</label>
+                          <input className="input" value={templateEditCategory} onChange={(e) => setTemplateEditCategory(e.target.value)} />
+                          <label className="fieldLabel">Description</label>
+                          <textarea className="input" rows={2} value={templateEditDescription} onChange={(e) => setTemplateEditDescription(e.target.value)} />
+                          <label className="fieldLabel">Module</label>
+                          <input className="input" value={templateEditModule} onChange={(e) => setTemplateEditModule(e.target.value)} />
+                          <label className="fieldLabel">Steps (JSON or lines)</label>
+                          <textarea className="input" rows={4} value={templateEditSteps} onChange={(e) => setTemplateEditSteps(e.target.value)} />
+                        </div>
+                      )}
+                      <div className="adminUserModalActions">
+                        {!templateModalEditing ? (
+                          <>
+                            <button
+                              className="button small"
+                              onClick={async () => {
+                                try {
+                                  await createFromTemplateApi(selectedTemplateModal.id, { title: `${selectedTemplateModal.name} - Instance` });
+                                  await loadTestCaseData();
+                                  alert("Test case created from template");
+                                } catch (error: any) {
+                                  alert(error?.message || "Create from template failed");
+                                }
+                              }}
+                            >
+                              Use
+                            </button>
+                            <button className="button small adminActionEdit" onClick={() => setTemplateModalEditing(true)}>
+                              Edit
+                            </button>
+                            <button
+                              className="button small adminActionDelete"
+                              onClick={async () => {
+                                try {
+                                  if (!window.confirm("Delete this template?")) return;
+                                  await deleteTemplateApi(selectedTemplateModal.id);
+                                  setSelectedTemplateModalId("");
+                                  setTemplateModalEditing(false);
+                                  await loadTestCaseData();
+                                  alert("Template deleted");
+                                } catch (error: any) {
+                                  alert(error?.message || "Delete template failed");
+                                }
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="button small adminActionEdit"
+                              onClick={async () => {
+                                try {
+                                  await updateTemplateApi(selectedTemplateModal.id, {
+                                    name: templateEditName,
+                                    category: templateEditCategory || null,
+                                    description: templateEditDescription || null,
+                                    module: templateEditModule || null,
+                                    steps: parseSteps(templateEditSteps),
+                                  });
+                                  setTemplateModalEditing(false);
+                                  await loadTestCaseData();
+                                  alert("Template updated");
+                                } catch (error: any) {
+                                  alert(error?.message || "Update template failed");
+                                }
+                              }}
+                            >
+                              Save
+                            </button>
+                            <button className="button small" onClick={() => setTemplateModalEditing(false)}>
+                              Cancel
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                )}
               </section>
               )}
 
               {showBulkOperations && (
-              <section className="panel">
+              <section className="panel formWidePanel">
                 <h4>Bulk Operations</h4>
                 <select className="input" value={bulkOperation} onChange={(e) => setBulkOperation(e.target.value)}>
                   <option value="">Select operation</option>
@@ -3263,6 +3492,69 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   <option value="EXPORT_EXCEL">EXPORT_EXCEL</option>
                   <option value="DELETE">DELETE</option>
                 </select>
+                <label className="fieldLabel">Select Test Cases</label>
+                <div className="bulkCasePicker" ref={bulkCasePickerRef}>
+                  <button
+                    type="button"
+                    className="bulkCasePickerTrigger"
+                    onClick={() => setBulkCasePickerOpen((prev) => !prev)}
+                    aria-expanded={bulkCasePickerOpen}
+                    aria-haspopup="listbox"
+                  >
+                    <span>{bulkSelectedSummary}</span>
+                    <span>{bulkCasePickerOpen ? "▲" : "▼"}</span>
+                  </button>
+                  {bulkCasePickerOpen ? (
+                    <div className="bulkCasePickerMenu" role="listbox" aria-multiselectable="true">
+                      <input
+                        className="input bulkCasePickerSearch"
+                        placeholder="Search by test case code or title"
+                        value={bulkCaseQuery}
+                        onChange={(e) => setBulkCaseQuery(e.target.value)}
+                      />
+                      <div className="bulkCasePickerList">
+                        {filteredBulkCaseOptions.length === 0 ? (
+                          <div className="note">No test cases match your search.</div>
+                        ) : (
+                          filteredBulkCaseOptions.map((tc) => {
+                            const tcId = String(tc?.id || "");
+                            const checked = selectedIds.includes(tcId);
+                            return (
+                              <label key={tcId} className="bulkCasePickerItem">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={(e) => {
+                                    if (e.target.checked) {
+                                      setSelectedIds((prev) => Array.from(new Set([...prev, tcId])));
+                                    } else {
+                                      setSelectedIds((prev) => prev.filter((id) => id !== tcId));
+                                    }
+                                  }}
+                                />
+                                <span className="bulkCasePickerText">
+                                  {tc?.testCaseCode ? `${tc.testCaseCode} - ` : ""}
+                                  {tc?.title || "Untitled test case"}
+                                </span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                      <div className="bulkCasePickerFooter">
+                        <span className="note">Selected: {selectedIds.length}</span>
+                        <button
+                          type="button"
+                          className="button small"
+                          onClick={() => setSelectedIds([])}
+                          disabled={selectedIds.length === 0}
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
                 {bulkOperation === "STATUS" && (
                   <select className="input" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
                     <option value="">Select status</option>
@@ -3302,9 +3594,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   <input className="input" placeholder="Suite ID" value={bulkSuiteId} onChange={(e) => setBulkSuiteId(e.target.value)} />
                 )}
                 <button
-                  className="button"
+                  className="button sectionCta"
                   onClick={async () => {
                     try {
+                      if (!selectedIds.length) {
+                        alert("Please select at least one test case for bulk operation");
+                        return;
+                      }
                       const payload: any = { operation: bulkOperation, ids: selectedIds };
                       if (bulkOperation === "STATUS") payload.status = bulkStatus;
                       if (bulkOperation === "ASSIGN") payload.assignedTo = bulkAssignee;
@@ -3340,6 +3636,8 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                         setBulkModule("");
                         setBulkSuiteId("");
                         setBulkAssignee("");
+                        setBulkCasePickerOpen(false);
+                        setBulkCaseQuery("");
                         await loadTestCaseData();
                         alert("Bulk operation completed");
                       }
@@ -5257,154 +5555,207 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
             <section className="panel fullWidth">
               <div className="panelHeader">
                 <h4>Test Cases</h4>
-                <button
-                  className="button small"
-                  onClick={() => setShowTestCaseList((prev) => !prev)}
-                >
-                  {showTestCaseList ? "Hide List" : "Open List"}
-                </button>
-              </div>
-              {!showTestCaseList && (
-                <div className="note">Click "Open List" to view all test cases.</div>
-              )}
-              {showTestCaseList && (
-                <>
-              {canSeeSelectionControls && (
-              <div className="row">
-                <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <input
-                    type="checkbox"
-                    checked={testCases.length > 0 && selectedIds.length === testCases.length}
-                    onChange={(e) => {
-                      if (e.target.checked) {
-                        setSelectedIds(testCases.map((tc) => tc.id));
-                      } else {
-                        setSelectedIds([]);
+                <div className="adminUsersToolbar">
+                  <button
+                    className="button adminUsersPrimaryBtn"
+                    disabled={testCasesLoading}
+                    onClick={async () => {
+                      try {
+                        setTestCasesLoading(true);
+                        await loadTestCaseData();
+                        setTestCasesVisible(true);
+                      } catch (error: any) {
+                        alert(error?.message || "Load test cases failed");
+                      } finally {
+                        setTestCasesLoading(false);
                       }
                     }}
-                  />
-                  <span className="title">Select all test cases</span>
-                </label>
-              </div>
-              )}
-              {testCases.map((tc) => (
-                <div key={tc.id}>
-                <div className="row">
-                  {canSeeSelectionControls && (
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.includes(tc.id)}
-                        onChange={(e) => {
-                          if (e.target.checked) {
-                            setSelectedIds((prev) => [...prev, tc.id]);
-                          } else {
-                            setSelectedIds((prev) => prev.filter((id) => id !== tc.id));
-                          }
-                        }}
-                      />
-                    </label>
-                  )}
-                  <button
-                    className="linkButton"
-                    onClick={() =>
-                      setExpandedTestCaseId((prev) => (prev === tc.id ? "" : tc.id))
-                    }
                   >
-                    {tc.title}
+                    {testCasesLoading ? "Loading..." : "Test Cases"}
                   </button>
-                  <span className="meta">{tc.testCaseCode} | {tc.module} | {tc.priority}/{tc.status}</span>
-                  {canCreateAndManageTestCases && (
-                    <>
-                      <button
-                        className="button small"
-                        onClick={() => startEditCase(tc)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            await createTemplateApi({
-                              name: `${tc.title} Template`,
-                              category: "From Existing Test Cases",
-                              sourceTestCaseId: tc.id,
-                            });
-                            await loadTestCaseData();
-                            alert("Template created from test case");
-                          } catch (error: any) {
-                            alert(error?.message || "Create template failed");
-                          }
-                        }}
-                      >
-                        Make Template
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const includeAttachments = window.confirm(
-                              "Clone with attachments? Click OK for Yes, Cancel for No."
-                            );
-                            await cloneTestCaseApi(tc.id, { includeAttachments });
-                            await loadTestCaseData();
-                          } catch (error: any) {
-                            alert(error?.message || "Clone failed");
-                          }
-                        }}
-                      >
-                        Clone
-                      </button>
-                      <button
-                        className="button small danger"
-                        onClick={async () => {
-                          try {
-                            if (!window.confirm("Confirm soft-delete for this test case?")) {
-                              return;
-                            }
-                            await deleteTestCaseApi(tc.id);
-                            await loadTestCaseData();
-                          } catch (error: any) {
-                            alert(error?.message || "Delete failed");
-                          }
-                        }}
-                      >
-                        Delete
-                      </button>
-                    </>
-                  )}
+                  {testCasesVisible ? (
+                    <button
+                      className="button small"
+                      disabled={testCasesLoading}
+                      onClick={async () => {
+                        try {
+                          setTestCasesLoading(true);
+                          await loadTestCaseData();
+                        } catch (error: any) {
+                          alert(error?.message || "Refresh test cases failed");
+                        } finally {
+                          setTestCasesLoading(false);
+                        }
+                      }}
+                    >
+                      Refresh
+                    </button>
+                  ) : null}
                 </div>
-                {expandedTestCaseId === tc.id && (
-                  <div className="testCaseDetails">
-                    <div><strong>Test Case ID:</strong> {tc.testCaseCode || "N/A"}</div>
-                    <div><strong>Title:</strong> {tc.title || "N/A"}</div>
-                    <div><strong>Description:</strong> {tc.description || "N/A"}</div>
-                    <div><strong>Pre-conditions:</strong> {JSON.stringify(tc.preConditions ?? [])}</div>
-                    <div><strong>Test Data Requirements:</strong> {JSON.stringify(tc.testDataRequirements ?? [])}</div>
-                    <div><strong>Environment Requirements:</strong> {JSON.stringify(tc.environmentRequirements ?? [])}</div>
-                    <div><strong>Module:</strong> {tc.module || "N/A"}</div>
-                    <div><strong>Priority:</strong> {tc.priority || "N/A"}</div>
-                    <div><strong>Severity:</strong> {tc.severity || "N/A"}</div>
-                    <div><strong>Type:</strong> {tc.type || "N/A"}</div>
-                    <div><strong>Status:</strong> {tc.status || "N/A"}</div>
-                    <div><strong>Version:</strong> {tc.version ?? 1}</div>
-                    <div><strong>Tags:</strong> {(tc.tags ?? []).join(", ") || "N/A"}</div>
-                    <div><strong>Estimated Duration:</strong> {tc.estimatedDurationMinutes ?? "N/A"} min</div>
-                    <div><strong>Automation Status:</strong> {tc.automationStatus || "N/A"}</div>
-                    <div><strong>Automation Script:</strong> {tc.automationScriptLink || "N/A"}</div>
-                    <div><strong>Steps:</strong> {typeof tc.steps === "string" ? tc.steps : JSON.stringify(tc.steps)}</div>
-                    <div><strong>Post-conditions:</strong> {JSON.stringify(tc.postConditions ?? [])}</div>
-                    <div><strong>Metadata:</strong> {JSON.stringify(tc.metadata ?? {})}</div>
-                    <div><strong>Created By:</strong> {tc.creator?.name || tc.createdBy || "N/A"}</div>
-                    <div><strong>Last Modified By:</strong> {tc.lastEditor?.name || tc.lastModifiedBy || "N/A"}</div>
-                    <div><strong>Last Modified At:</strong> {tc.lastModifiedAt ? new Date(tc.lastModifiedAt).toLocaleString() : "N/A"}</div>
-                    <div><strong>Created At:</strong> {tc.createdAt ? new Date(tc.createdAt).toLocaleString() : "N/A"}</div>
+              </div>
+              {!testCasesVisible && (
+                <div className="note">Click the Test Cases button to fetch and view the table.</div>
+              )}
+              {testCasesVisible && (
+                <>
+                  <div className="tableWrap adminUsersTableWrap">
+                    <table className="table adminUsersTable">
+                      <thead>
+                        <tr>
+                          <th>Title</th>
+                          <th>Code</th>
+                          <th>Module</th>
+                          <th>Priority</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testCases.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="note">No test cases found.</td>
+                          </tr>
+                        ) : (
+                          testCases.map((tc) => (
+                            <tr
+                              key={tc.id}
+                              className="adminUsersRow"
+                              tabIndex={0}
+                              role="button"
+                              aria-label={`Open test case ${tc.title}`}
+                              onClick={() => setSelectedTestCaseModalId(tc.id)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  setSelectedTestCaseModalId(tc.id);
+                                }
+                              }}
+                            >
+                              <td>{tc.title || "Untitled"}</td>
+                              <td>{tc.testCaseCode || "N/A"}</td>
+                              <td>{tc.module || "General"}</td>
+                              <td>{tc.priority || "N/A"}</td>
+                              <td>
+                                <span className={`adminPill status-${String(tc.status || "inactive").toLowerCase()}`}>
+                                  {tc.status || "N/A"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
-                )}
-                </div>
-              ))}
                 </>
+              )}
+
+              {selectedTestCaseModal && (
+                <div
+                  className="adminUserModalOverlay"
+                  onMouseDown={(event) => {
+                    if (event.target === event.currentTarget) setSelectedTestCaseModalId("");
+                  }}
+                >
+                  <div className="adminUserModal testCaseModal" role="dialog" aria-modal="true" aria-labelledby="testcase-modal-title">
+                    <button
+                      type="button"
+                      className="adminUserModalClose"
+                      aria-label="Close test case details"
+                      onClick={() => setSelectedTestCaseModalId("")}
+                    >
+                      X
+                    </button>
+                    <h5 id="testcase-modal-title">Test Case Details</h5>
+                    <div className="adminUserModalDetails">
+                      <p><strong>Test Case ID:</strong> {selectedTestCaseModal.testCaseCode || "N/A"}</p>
+                      <p><strong>Title:</strong> {selectedTestCaseModal.title || "N/A"}</p>
+                      <p><strong>Description:</strong> {selectedTestCaseModal.description || "N/A"}</p>
+                      <p><strong>Pre-conditions:</strong> {JSON.stringify(selectedTestCaseModal.preConditions ?? [])}</p>
+                      <p><strong>Test Data Requirements:</strong> {JSON.stringify(selectedTestCaseModal.testDataRequirements ?? [])}</p>
+                      <p><strong>Environment Requirements:</strong> {JSON.stringify(selectedTestCaseModal.environmentRequirements ?? [])}</p>
+                      <p><strong>Module:</strong> {selectedTestCaseModal.module || "N/A"}</p>
+                      <p><strong>Priority:</strong> {selectedTestCaseModal.priority || "N/A"}</p>
+                      <p><strong>Severity:</strong> {selectedTestCaseModal.severity || "N/A"}</p>
+                      <p><strong>Type:</strong> {selectedTestCaseModal.type || "N/A"}</p>
+                      <p><strong>Status:</strong> {selectedTestCaseModal.status || "N/A"}</p>
+                      <p><strong>Version:</strong> {selectedTestCaseModal.version ?? 1}</p>
+                      <p><strong>Tags:</strong> {(selectedTestCaseModal.tags ?? []).join(", ") || "N/A"}</p>
+                      <p><strong>Estimated Duration:</strong> {selectedTestCaseModal.estimatedDurationMinutes ?? "N/A"} min</p>
+                      <p><strong>Automation Status:</strong> {selectedTestCaseModal.automationStatus || "N/A"}</p>
+                      <p><strong>Automation Script:</strong> {selectedTestCaseModal.automationScriptLink || "N/A"}</p>
+                      <p><strong>Steps:</strong> {typeof selectedTestCaseModal.steps === "string" ? selectedTestCaseModal.steps : JSON.stringify(selectedTestCaseModal.steps ?? [])}</p>
+                      <p><strong>Post-conditions:</strong> {JSON.stringify(selectedTestCaseModal.postConditions ?? [])}</p>
+                      <p><strong>Metadata:</strong> {JSON.stringify(selectedTestCaseModal.metadata ?? {})}</p>
+                      <p><strong>Created By:</strong> {selectedTestCaseModal.creator?.name || selectedTestCaseModal.createdBy || "N/A"}</p>
+                      <p><strong>Last Modified By:</strong> {selectedTestCaseModal.lastEditor?.name || selectedTestCaseModal.lastModifiedBy || "N/A"}</p>
+                      <p><strong>Last Modified At:</strong> {selectedTestCaseModal.lastModifiedAt ? new Date(selectedTestCaseModal.lastModifiedAt).toLocaleString() : "N/A"}</p>
+                      <p><strong>Created At:</strong> {selectedTestCaseModal.createdAt ? new Date(selectedTestCaseModal.createdAt).toLocaleString() : "N/A"}</p>
+                    </div>
+                    {canCreateAndManageTestCases && (
+                      <div className="adminUserModalActions">
+                        <button
+                          className="button small adminActionEdit"
+                          onClick={() => {
+                            startEditCase(selectedTestCaseModal);
+                            setSelectedTestCaseModalId("");
+                          }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="button small"
+                          onClick={async () => {
+                            try {
+                              await createTemplateApi({
+                                name: `${selectedTestCaseModal.title} Template`,
+                                category: "From Existing Test Cases",
+                                sourceTestCaseId: selectedTestCaseModal.id,
+                              });
+                              await loadTestCaseData();
+                              alert("Template created from test case");
+                            } catch (error: any) {
+                              alert(error?.message || "Create template failed");
+                            }
+                          }}
+                        >
+                          Make Template
+                        </button>
+                        <button
+                          className="button small"
+                          onClick={async () => {
+                            try {
+                              const includeAttachments = window.confirm(
+                                "Clone with attachments? Click OK for Yes, Cancel for No."
+                              );
+                              await cloneTestCaseApi(selectedTestCaseModal.id, { includeAttachments });
+                              await loadTestCaseData();
+                            } catch (error: any) {
+                              alert(error?.message || "Clone failed");
+                            }
+                          }}
+                        >
+                          Clone
+                        </button>
+                        <button
+                          className="button small adminActionDelete"
+                          onClick={async () => {
+                            try {
+                              if (!window.confirm("Confirm soft-delete for this test case?")) {
+                                return;
+                              }
+                              await deleteTestCaseApi(selectedTestCaseModal.id);
+                              setSelectedTestCaseModalId("");
+                              await loadTestCaseData();
+                            } catch (error: any) {
+                              alert(error?.message || "Delete failed");
+                            }
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
               {editingId && canCreateAndManageTestCases && (
                 <div className="modalBackdrop">
@@ -5414,6 +5765,8 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     <input id="edit-title" className="input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} />
                     <label className="fieldLabel" htmlFor="edit-description">Description</label>
                     <input id="edit-description" className="input" value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+                    <label className="fieldLabel" htmlFor="edit-steps">Steps (JSON or one step per line)</label>
+                    <textarea id="edit-steps" className="input" rows={4} value={editStepsText} onChange={(e) => setEditStepsText(e.target.value)} />
                     <label className="fieldLabel" htmlFor="edit-pre-conditions">Pre-conditions</label>
                     <textarea id="edit-pre-conditions" className="input" rows={3} value={editPreConditionsText} onChange={(e) => setEditPreConditionsText(e.target.value)} />
                     <label className="fieldLabel" htmlFor="edit-test-data-requirements">Test Data Requirements</label>
