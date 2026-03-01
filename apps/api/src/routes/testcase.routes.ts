@@ -1164,6 +1164,98 @@ router.get(
   }
 );
 
+router.patch(
+  "/testcase-templates/:id",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const existing = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
+    if (!existing) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+    if (existing.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can only edit templates you created" });
+    }
+
+    let parsedSteps: Prisma.InputJsonValue | undefined;
+    if (req.body.steps !== undefined) {
+      parsedSteps = parseJsonValue(req.body.steps, existing.steps as Prisma.InputJsonValue);
+      const stepsValidationError = validateStepItems(parsedSteps);
+      if (stepsValidationError) {
+        return res.status(400).json({ message: stepsValidationError });
+      }
+    }
+
+    const updated = await prisma.testCaseTemplate.update({
+      where: { id: existing.id },
+      data: {
+        name: req.body.name !== undefined ? asString(req.body.name) : undefined,
+        category: req.body.category !== undefined ? asString(req.body.category) || null : undefined,
+        description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
+        preConditions:
+          req.body.preConditions !== undefined
+            ? parseJsonValue(req.body.preConditions, existing.preConditions ?? [])
+            : undefined,
+        testDataRequirements:
+          req.body.testDataRequirements !== undefined
+            ? parseJsonValue(req.body.testDataRequirements, existing.testDataRequirements ?? [])
+            : undefined,
+        environmentRequirements:
+          req.body.environmentRequirements !== undefined
+            ? parseJsonValue(req.body.environmentRequirements, existing.environmentRequirements ?? [])
+            : undefined,
+        postConditions:
+          req.body.postConditions !== undefined
+            ? parseJsonValue(req.body.postConditions, existing.postConditions ?? [])
+            : undefined,
+        metadata:
+          req.body.metadata !== undefined
+            ? parseJsonValue(req.body.metadata, existing.metadata ?? {})
+            : undefined,
+        module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
+        steps: parsedSteps !== undefined ? parsedSteps : undefined,
+        priority: parseEnum(Priority, req.body.priority) ?? undefined,
+        severity: parseEnum(TestSeverity, req.body.severity) ?? undefined,
+        type: parseEnum(TestCaseType, req.body.type) ?? undefined,
+        status: parseEnum(TestCaseStatus, req.body.status) ?? undefined,
+        tags: req.body.tags !== undefined ? asStringArray(req.body.tags) : undefined,
+        estimatedDurationMinutes:
+          req.body.estimatedDurationMinutes !== undefined &&
+          typeof req.body.estimatedDurationMinutes === "number"
+            ? req.body.estimatedDurationMinutes
+            : req.body.estimatedDurationMinutes !== undefined
+            ? null
+            : undefined,
+        automationStatus: parseEnum(AutomationStatus, req.body.automationStatus) ?? undefined,
+        automationScriptLink:
+          req.body.automationScriptLink !== undefined
+            ? asString(req.body.automationScriptLink) || null
+            : undefined,
+      },
+    });
+
+    await writeAuditLog(req.user!.userId, "EDIT_TEST_CASE_TEMPLATE", "TestCaseTemplate", updated.id);
+    return res.json(updated);
+  }
+);
+
+router.delete(
+  "/testcase-templates/:id",
+  authorizeRoles(Role.TESTER),
+  async (req: AuthRequest, res: Response) => {
+    const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
+    if (!template) {
+      return res.status(404).json({ message: "Template not found" });
+    }
+    if (template.createdBy !== req.user!.userId) {
+      return res.status(403).json({ message: "You can only delete templates you created" });
+    }
+
+    await prisma.testCaseTemplate.delete({ where: { id: req.params.id } });
+    await writeAuditLog(req.user!.userId, "DELETE_TEST_CASE_TEMPLATE", "TestCaseTemplate", req.params.id);
+    return res.json({ message: "Template deleted" });
+  }
+);
+
 router.post(
   "/testcases/from-template/:templateId",
   authorizeRoles(Role.TESTER),

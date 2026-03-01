@@ -267,6 +267,14 @@ export async function createFromTemplateApi(templateId: string, payload: Record<
   });
 }
 
+export async function updateTemplateApi(templateId: string, payload: Record<string, unknown>) {
+  return authJson(`/testcase-templates/${templateId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function importTestCasesApi(payload: Record<string, unknown>) {
   return authJson("/testcases/import", {
     method: "POST",
