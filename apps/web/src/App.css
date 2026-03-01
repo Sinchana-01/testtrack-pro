@@ -1182,3 +1182,204 @@ body {
 .button.danger {
   background-color: #dc2626;
 }
+
+/* ===== ADMIN USER MANAGEMENT (TABLE + MODAL UX) ===== */
+
+.adminUsersToolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.adminCreateUserPanel {
+  margin-bottom: 12px;
+}
+
+.adminUsersPrimaryBtn {
+  width: auto;
+  min-width: 120px;
+}
+
+.adminUsersTableWrap {
+  margin-top: 12px;
+}
+
+.adminUsersTable th,
+.adminUsersTable td {
+  vertical-align: middle;
+}
+
+.adminUsersRow {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+
+.adminUsersRow:hover,
+.adminUsersRow:focus-visible {
+  background: #f1f5f9;
+  outline: none;
+}
+
+.truncateCell {
+  max-width: 300px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adminPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.adminPill.role-admin {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.adminPill.role-tester {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.adminPill.role-developer {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.adminPill.status-active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.adminPill.status-inactive {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.adminUserModalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.5);
+  backdrop-filter: blur(2px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 240;
+  padding: 16px;
+}
+
+.adminUserModal {
+  position: relative;
+  width: min(520px, 96vw);
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid #dbe7f3;
+  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.22);
+  padding: 20px;
+}
+
+.adminUserModal h5 {
+  margin: 0 0 12px;
+  font-size: 18px;
+}
+
+.adminUserModalClose {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 32px;
+  height: 32px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.adminUserModalClose:hover {
+  background: #f8fafc;
+}
+
+.adminUserModalClose:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
+
+.adminUserModalDetails p {
+  margin: 8px 0;
+  color: #1e293b;
+}
+
+.adminUserModalForm .input {
+  margin-bottom: 10px;
+}
+
+.adminUserModalActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.adminActionEdit {
+  background: #2563eb;
+}
+
+.adminActionToggle {
+  background: #ea580c;
+}
+
+.adminActionDelete {
+  background: #dc2626;
+}
+
+.adminActionEdit:hover {
+  background: #1d4ed8;
+}
+
+.adminActionToggle:hover {
+  background: #c2410c;
+}
+
+.adminActionDelete:hover {
+  background: #b91c1c;
+}
+
+.adminUserModalError {
+  margin-bottom: 10px;
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.adminUserToast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 260;
+  background: #0f766e;
+  color: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(15, 118, 110, 0.35);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .truncateCell {
+    max-width: 180px;
+  }
+}
