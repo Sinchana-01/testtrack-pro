@@ -1,0 +1,373 @@
+.dashboardLayoutRoot {
+  --topbar-h: 64px;
+  --sidebar-w: 260px;
+  --sidebar-mini-w: 80px;
+  min-height: 100vh;
+  background: #f1f5f9;
+}
+
+.dashboardTopbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h);
+  display: grid;
+  grid-template-columns: 72px 1fr 180px;
+  align-items: center;
+  background: linear-gradient(90deg, #0b1220 0%, #111c35 100%);
+  color: #fff;
+  z-index: 80;
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.28);
+}
+
+.topbarTitle {
+  margin: 0;
+  text-align: center;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+
+.topbarIconBtn {
+  margin-left: 16px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 8px;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.topbarIconBtn span {
+  display: block;
+  height: 2px;
+  background: #e2e8f0;
+  border-radius: 999px;
+}
+
+.topbarRight {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  padding-right: 16px;
+}
+
+.notifWrap {
+  position: relative;
+}
+
+.notifDropdown {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  width: 220px;
+  background: #fff;
+  border: 1px solid #dbe7f3;
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.2);
+  z-index: 90;
+  overflow: hidden;
+}
+
+.notifHeader {
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf2f8;
+  font-size: 12px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.notifItem {
+  padding: 10px 12px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.notifItemBtn {
+  width: 100%;
+  border: 0;
+  background: #fff;
+  text-align: left;
+  padding: 10px 12px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #edf2f8;
+}
+
+.notifItemBtn strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.notifItemBtn span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.notifItemBtn.unread {
+  background: #f8fafc;
+}
+
+.notifItemBtn:hover {
+  background: #eef2ff;
+}
+
+.topbarCircleBtn,
+.topbarAvatarBtn {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.45);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.notifBadge {
+  position: absolute;
+  top: -4px;
+  right: -3px;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.avatarCircle {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: #1d4ed8;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.userMenuWrap {
+  position: relative;
+}
+
+.userDropdown {
+  position: absolute;
+  top: 44px;
+  right: 0;
+  width: 210px;
+  background: #fff;
+  border: 1px solid #dbe7f3;
+  border-radius: 8px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+  z-index: 90;
+}
+
+.userDropdownMeta {
+  padding: 10px 12px;
+  border-bottom: 1px solid #edf2f8;
+  display: grid;
+  gap: 2px;
+}
+
+.userDropdownMeta strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.userDropdownMeta span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.userDropdown button {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: #fff;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #1e293b;
+  cursor: pointer;
+}
+
+.userDropdown button:hover {
+  background: #f8fafc;
+}
+
+.dashboardSidebar {
+  position: fixed;
+  top: var(--topbar-h);
+  left: 0;
+  bottom: 0;
+  width: var(--sidebar-w);
+  background: #0f1e38;
+  border-right: 1px solid rgba(100, 116, 139, 0.25);
+  display: flex;
+  flex-direction: column;
+  z-index: 70;
+  transition: width 0.2s ease, transform 0.2s ease;
+}
+
+.dashboardSidebar.closed {
+  width: var(--sidebar-mini-w);
+}
+
+.sidebarNav {
+  display: grid;
+  gap: 6px;
+  padding: 0 10px 12px;
+  overflow-y: auto;
+}
+
+.sidebarNavItem,
+.sidebarLogoutBtn {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #c9d5e8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 11px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+}
+
+.sidebarNavItem:hover,
+.sidebarLogoutBtn:hover {
+  background: rgba(37, 99, 235, 0.16);
+  color: #fff;
+  transform: translateX(2px);
+}
+
+.sidebarNavItem.active {
+  background: #1d4ed8;
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(29, 78, 216, 0.28);
+}
+
+.sidebarIcon {
+  width: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+
+.sidebarBottom {
+  margin-top: auto;
+  padding: 12px 10px;
+  border-top: 1px solid rgba(100, 116, 139, 0.25);
+}
+
+.dashboardMain {
+  margin-top: var(--topbar-h);
+  min-height: calc(100vh - var(--topbar-h));
+  transition: margin-left 0.2s ease;
+}
+
+.dashboardMain.sidebarFull {
+  margin-left: var(--sidebar-w);
+}
+
+.dashboardMain.sidebarMini {
+  margin-left: var(--sidebar-mini-w);
+}
+
+.pagePrimaryAction {
+  border: 0;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.24);
+}
+
+.dashboardPageContent {
+  padding: 20px 24px 28px;
+  width: 100%;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.dashboardContentToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.mobileSidebarBackdrop {
+  display: none;
+  position: fixed;
+  inset: var(--topbar-h) 0 0 0;
+  background: rgba(15, 23, 42, 0.45);
+  border: 0;
+  z-index: 65;
+}
+
+.topbarIconBtn:focus-visible,
+.topbarCircleBtn:focus-visible,
+.topbarAvatarBtn:focus-visible,
+.sidebarNavItem:focus-visible,
+.sidebarLogoutBtn:focus-visible,
+.pagePrimaryAction:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
+
+@media (max-width: 980px) {
+  .dashboardMain.sidebarFull,
+  .dashboardMain.sidebarMini {
+    margin-left: 0;
+  }
+
+  .dashboardSidebar {
+    transform: translateX(-100%);
+  }
+
+  .dashboardSidebar.open {
+    transform: translateX(0);
+    width: var(--sidebar-w);
+  }
+
+  .dashboardSidebar.closed {
+    transform: translateX(-100%);
+    width: var(--sidebar-w);
+  }
+
+  .mobileSidebarBackdrop {
+    display: block;
+  }
+
+  .dashboardPageContent {
+    width: 100%;
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .topbarTitle {
+    font-size: 18px;
+  }
+}

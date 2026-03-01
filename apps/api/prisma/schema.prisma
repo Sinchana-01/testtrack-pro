@@ -8,97 +8,87 @@ datasource db {
 }
 
 model User {
-  id                  String   @id @default(uuid())
-  name                String
-  email               String   @unique
-  password            String
-  role                Role
-
-  isVerified          Boolean  @default(false)
-  verificationToken   String?
-  verificationExpiry  DateTime?
-
-  resetToken          String?
-  resetTokenExpiry    DateTime?
-  failedLoginAttempts Int      @default(0)
-  lockoutUntil        DateTime?
-  tokenVersion        Int      @default(0)
-  isActive            Boolean  @default(true)
-
-  passwordHistory     String[] @default([])
-
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
-
-  createdTestCases    TestCase[]      @relation("CreatedTestCases")
-  assignedTestCases   TestCase[]      @relation("AssignedTestCases")
-  modifiedTestCases   TestCase[]      @relation("ModifiedTestCases")
-  createdSuites       TestSuite[]     @relation("CreatedSuites")
+  id                     String               @id @default(uuid())
+  name                   String
+  email                  String               @unique
+  password               String
+  role                   Role
+  isVerified             Boolean              @default(false)
+  verificationToken      String?
+  verificationExpiry     DateTime?
+  resetToken             String?
+  resetTokenExpiry       DateTime?
+  failedLoginAttempts    Int                  @default(0)
+  lockoutUntil           DateTime?
+  tokenVersion           Int                  @default(0)
+  isActive               Boolean              @default(true)
+  passwordHistory        String[]             @default([])
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  uploadedAttachments    Attachment[]         @relation("UploadedBy")
+  auditLogs              AuditLog[]           @relation("AuditActor")
+  backupJobs             BackupJob[]          @relation("BackupTriggeredBy")
+  uploadedBugAttachments BugAttachment[]      @relation("BugAttachmentUploadedBy")
+  assignedIssues         Issue[]              @relation("AssignedIssues")
+  reportedIssues         Issue[]              @relation("ReportedIssues")
+  issueComments          IssueComment[]       @relation("IssueComments")
+  createdProjects        Project[]            @relation("CreatedProjects")
+  systemConfigUpdates    SystemConfig[]       @relation("ConfigUpdatedBy")
+  assignedTestCases      TestCase[]           @relation("AssignedTestCases")
+  createdTestCases       TestCase[]           @relation("CreatedTestCases")
+  modifiedTestCases      TestCase[]           @relation("ModifiedTestCases")
+  importJobs             TestCaseImportJob[]  @relation("Importer")
+  createdTemplates       TestCaseTemplate[]   @relation("TemplateCreator")
+  testCaseVersions       TestCaseVersion[]    @relation("TestCaseVersionEditor")
+  executions             TestExecution[]      @relation("ExecutedBy")
+  createdTestRuns        TestRun[]            @relation("CreatedTestRuns")
+  testRunAssignments     TestRunAssignment[]  @relation("AssignedTestRuns")
+  createdSuites          TestSuite[]          @relation("CreatedSuites")
+  addedSuiteCaseLinks    TestSuiteCase[]      @relation("SuiteCaseAddedBy")
   startedSuiteExecutions TestSuiteExecution[] @relation("StartedSuiteExecutions")
-  addedSuiteCaseLinks TestSuiteCase[] @relation("SuiteCaseAddedBy")
-  executions          TestExecution[] @relation("ExecutedBy")
-  uploadedAttachments Attachment[]    @relation("UploadedBy")
-  uploadedBugAttachments BugAttachment[] @relation("BugAttachmentUploadedBy")
-  reportedIssues      Issue[]         @relation("ReportedIssues")
-  assignedIssues      Issue[]         @relation("AssignedIssues")
-  issueComments       IssueComment[]  @relation("IssueComments")
-  auditLogs           AuditLog[]      @relation("AuditActor")
-  createdProjects     Project[]       @relation("CreatedProjects")
-  createdTemplates    TestCaseTemplate[] @relation("TemplateCreator")
-  testCaseVersions    TestCaseVersion[] @relation("TestCaseVersionEditor")
-  importJobs          TestCaseImportJob[] @relation("Importer")
-  backupJobs          BackupJob[]     @relation("BackupTriggeredBy")
-  systemConfigUpdates SystemConfig[]  @relation("ConfigUpdatedBy")
-  createdTestRuns     TestRun[]       @relation("CreatedTestRuns")
-  testRunAssignments  TestRunAssignment[] @relation("AssignedTestRuns")
 }
 
 model TestCase {
-  id           String         @id @default(uuid())
-  testCaseCode String?        @unique
-  title        String
-  description  String
-  preConditions Json?
-  testDataRequirements Json?
-  environmentRequirements Json?
-  postConditions Json?
-  metadata     Json?
-  module       String?
-  priority     Priority
-  severity     TestSeverity?
-  type         TestCaseType?
-  status       TestCaseStatus @default(DRAFT)
-  steps        Json
-  version      Int            @default(1)
-  tags         String[]       @default([])
+  id                       String                   @id @default(uuid())
+  testCaseCode             String?                  @unique
+  title                    String
+  description              String
+  preConditions            Json?
+  testDataRequirements     Json?
+  environmentRequirements  Json?
+  postConditions           Json?
+  metadata                 Json?
+  module                   String?
+  priority                 Priority
+  severity                 TestSeverity?
+  type                     TestCaseType?
+  status                   TestCaseStatus           @default(DRAFT)
+  steps                    Json
+  version                  Int                      @default(1)
+  tags                     String[]                 @default([])
   estimatedDurationMinutes Int?
-  automationStatus AutomationStatus @default(NOT_AUTOMATED)
-  automationScriptLink String?
-
-  createdBy   String
-  assignedTo  String?
-  lastModifiedBy String?
-  lastModifiedAt DateTime?
-  projectId   String?
-
-  isDeleted   Boolean     @default(false)
-  deletedAt   DateTime?
-
-  creator     User        @relation("CreatedTestCases", fields: [createdBy], references: [id])
-  assignee    User?       @relation("AssignedTestCases", fields: [assignedTo], references: [id])
-  lastEditor  User?       @relation("ModifiedTestCases", fields: [lastModifiedBy], references: [id])
-  project     Project?    @relation(fields: [projectId], references: [id])
-  versionHistory TestCaseVersion[]
-
-  suiteLinks  TestSuiteCase[]
-  suiteExecutionCases TestSuiteExecutionCase[]
-  executions  TestExecution[]
-  attachments Attachment[]
-  issues      Issue[]
-  testRunCases TestRunCase[]
-
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  automationStatus         AutomationStatus         @default(NOT_AUTOMATED)
+  automationScriptLink     String?
+  createdBy                String
+  assignedTo               String?
+  lastModifiedBy           String?
+  lastModifiedAt           DateTime?
+  projectId                String?
+  isDeleted                Boolean                  @default(false)
+  deletedAt                DateTime?
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
+  attachments              Attachment[]
+  issues                   Issue[]
+  assignee                 User?                    @relation("AssignedTestCases", fields: [assignedTo], references: [id])
+  creator                  User                     @relation("CreatedTestCases", fields: [createdBy], references: [id])
+  lastEditor               User?                    @relation("ModifiedTestCases", fields: [lastModifiedBy], references: [id])
+  project                  Project?                 @relation(fields: [projectId], references: [id])
+  versionHistory           TestCaseVersion[]
+  executions               TestExecution[]
+  testRunCases             TestRunCase[]
+  suiteLinks               TestSuiteCase[]
+  suiteExecutionCases      TestSuiteExecutionCase[]
 
   @@index([createdBy])
   @@index([assignedTo])
@@ -107,38 +97,35 @@ model TestCase {
 }
 
 model TestCaseVersion {
-  id          String   @id @default(uuid())
-  testCaseId  String
-  version     Int
-  changedBy   String
+  id            String   @id @default(uuid())
+  testCaseId    String
+  version       Int
+  changedBy     String
   changeSummary String
-  snapshot    Json
-  createdAt   DateTime @default(now())
-
-  testCase    TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  editor      User     @relation("TestCaseVersionEditor", fields: [changedBy], references: [id], onDelete: Cascade)
+  snapshot      Json
+  createdAt     DateTime @default(now())
+  editor        User     @relation("TestCaseVersionEditor", fields: [changedBy], references: [id], onDelete: Cascade)
+  testCase      TestCase @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
 
   @@index([testCaseId])
   @@index([changedBy])
 }
 
 model TestRun {
-  id              String            @id @default(uuid())
+  id              String               @id @default(uuid())
   name            String
   description     String?
   createdBy       String
   targetStartDate DateTime?
   targetEndDate   DateTime?
-  status          TestRunStatus     @default(PLANNED)
-
-  creator         User              @relation("CreatedTestRuns", fields: [createdBy], references: [id], onDelete: Cascade)
+  status          TestRunStatus        @default(PLANNED)
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  executions      TestExecution[]
+  creator         User                 @relation("CreatedTestRuns", fields: [createdBy], references: [id], onDelete: Cascade)
   assignments     TestRunAssignment[]
   testCases       TestRunCase[]
-  executions      TestExecution[]
   suiteExecutions TestSuiteExecution[]
-
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
 
   @@index([createdBy])
   @@index([status])
@@ -149,7 +136,6 @@ model TestRunAssignment {
   testRunId  String
   testerId   String
   assignedAt DateTime @default(now())
-
   testRun    TestRun  @relation(fields: [testRunId], references: [id], onDelete: Cascade)
   tester     User     @relation("AssignedTestRuns", fields: [testerId], references: [id], onDelete: Cascade)
 
@@ -163,40 +149,36 @@ model TestRunCase {
   testCaseId      String
   status          TestRunCaseStatus @default(NOT_RUN)
   lastExecutionId String?
-
-  testRun         TestRun           @relation(fields: [testRunId], references: [id], onDelete: Cascade)
-  testCase        TestCase          @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  lastExecution   TestExecution?    @relation("RunCaseLastExecution", fields: [lastExecutionId], references: [id], onDelete: SetNull)
-
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
+  lastExecution   TestExecution?    @relation("RunCaseLastExecution", fields: [lastExecutionId], references: [id])
+  testCase        TestCase          @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  testRun         TestRun           @relation(fields: [testRunId], references: [id], onDelete: Cascade)
 
   @@unique([testRunId, testCaseId])
   @@index([testCaseId])
 }
 
 model TestSuite {
-  id          String         @id @default(uuid())
-  name        String
-  description String?
-  module      String?
-  type        SuiteType      @default(STATIC)
-  filterJson  Json?
-  createdBy   String
-  projectId   String?
-  parentSuiteId String?
-  isArchived  Boolean        @default(false)
-
-  creator     User           @relation("CreatedSuites", fields: [createdBy], references: [id])
-  project     Project?       @relation(fields: [projectId], references: [id])
-  parentSuite TestSuite?     @relation("SuiteHierarchy", fields: [parentSuiteId], references: [id], onDelete: SetNull)
-  childSuites TestSuite[]    @relation("SuiteHierarchy")
-  suiteCases  TestSuiteCase[]
-  executions  TestSuiteExecution[]
+  id             String                   @id @default(uuid())
+  name           String
+  description    String?
+  createdBy      String
+  projectId      String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+  isArchived     Boolean                  @default(false)
+  module         String?
+  parentSuiteId  String?
+  type           SuiteType                @default(STATIC)
+  filterJson     Json?
+  creator        User                     @relation("CreatedSuites", fields: [createdBy], references: [id])
+  parentSuite    TestSuite?               @relation("SuiteHierarchy", fields: [parentSuiteId], references: [id])
+  childSuites    TestSuite[]              @relation("SuiteHierarchy")
+  project        Project?                 @relation(fields: [projectId], references: [id])
+  suiteCases     TestSuiteCase[]
+  executions     TestSuiteExecution[]
   executionCases TestSuiteExecutionCase[]
-
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
 
   @@index([createdBy])
   @@index([projectId])
@@ -206,46 +188,42 @@ model TestSuite {
 }
 
 model TestSuiteCase {
-  id         String    @id @default(uuid())
-  suiteId    String
-  testCaseId String
-  position   Int       @default(0)
-  addedBy    String?
-
-  suite      TestSuite @relation(fields: [suiteId], references: [id], onDelete: Cascade)
-  testCase   TestCase  @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  addedByUser User?    @relation("SuiteCaseAddedBy", fields: [addedBy], references: [id], onDelete: SetNull)
+  id                  String                   @id @default(uuid())
+  suiteId             String
+  testCaseId          String
+  createdAt           DateTime                 @default(now())
+  addedBy             String?
+  position            Int                      @default(0)
+  addedByUser         User?                    @relation("SuiteCaseAddedBy", fields: [addedBy], references: [id])
+  suite               TestSuite                @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  testCase            TestCase                 @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
   suiteExecutionCases TestSuiteExecutionCase[]
-
-  createdAt  DateTime  @default(now())
 
   @@unique([suiteId, testCaseId])
   @@index([suiteId, position])
 }
 
 model TestSuiteExecution {
-  id              String              @id @default(uuid())
+  id              String                   @id @default(uuid())
   suiteId         String
   startedBy       String
   mode            SuiteExecutionMode
-  status          SuiteExecutionStatus @default(PLANNED)
+  status          SuiteExecutionStatus     @default(PLANNED)
   linkedTestRunId String?
-  totalCases      Int                 @default(0)
-  passed          Int                 @default(0)
-  failed          Int                 @default(0)
-  blocked         Int                 @default(0)
-  skipped         Int                 @default(0)
+  totalCases      Int                      @default(0)
+  passed          Int                      @default(0)
+  failed          Int                      @default(0)
+  blocked         Int                      @default(0)
+  skipped         Int                      @default(0)
   passRate        Float?
   startedAt       DateTime?
   completedAt     DateTime?
-
-  suite           TestSuite           @relation(fields: [suiteId], references: [id], onDelete: Cascade)
-  starter         User                @relation("StartedSuiteExecutions", fields: [startedBy], references: [id], onDelete: Cascade)
-  linkedTestRun   TestRun?            @relation(fields: [linkedTestRunId], references: [id], onDelete: SetNull)
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  linkedTestRun   TestRun?                 @relation(fields: [linkedTestRunId], references: [id])
+  starter         User                     @relation("StartedSuiteExecutions", fields: [startedBy], references: [id], onDelete: Cascade)
+  suite           TestSuite                @relation(fields: [suiteId], references: [id], onDelete: Cascade)
   cases           TestSuiteExecutionCase[]
-
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
 
   @@index([suiteId])
   @@index([startedBy])
@@ -264,15 +242,13 @@ model TestSuiteExecutionCase {
   executionId      String?
   startedAt        DateTime?
   completedAt      DateTime?
-
-  suiteExecution   TestSuiteExecution @relation(fields: [suiteExecutionId], references: [id], onDelete: Cascade)
-  suite            TestSuite          @relation(fields: [suiteId], references: [id], onDelete: Cascade)
-  suiteCase        TestSuiteCase      @relation(fields: [suiteCaseId], references: [id], onDelete: Cascade)
-  testCase         TestCase           @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  execution        TestExecution?     @relation(fields: [executionId], references: [id], onDelete: SetNull)
-
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
+  execution        TestExecution?     @relation(fields: [executionId], references: [id])
+  suiteCase        TestSuiteCase      @relation(fields: [suiteCaseId], references: [id], onDelete: Cascade)
+  suiteExecution   TestSuiteExecution @relation(fields: [suiteExecutionId], references: [id], onDelete: Cascade)
+  suite            TestSuite          @relation(fields: [suiteId], references: [id], onDelete: Cascade)
+  testCase         TestCase           @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
 
   @@unique([suiteExecutionId, suiteCaseId])
   @@index([suiteExecutionId, status])
@@ -282,25 +258,23 @@ model TestSuiteExecutionCase {
 }
 
 model TestExecution {
-  id          String          @id @default(uuid())
-  testCaseId  String
-  executedBy  String
-  testRunId   String?
-  result      ExecutionStatus
-  notes       String?
-  stepResults Json?
-  progressPercent Int         @default(0)
-  isDraft     Boolean         @default(false)
-
-  testCase    TestCase        @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  executor    User            @relation("ExecutedBy", fields: [executedBy], references: [id])
-  testRun     TestRun?        @relation(fields: [testRunId], references: [id], onDelete: SetNull)
-  issues      Issue[]
-  runCaseRefs TestRunCase[]   @relation("RunCaseLastExecution")
+  id                 String                   @id @default(uuid())
+  testCaseId         String
+  executedBy         String
+  result             ExecutionStatus
+  notes              String?
+  executedAt         DateTime                 @default(now())
+  isDraft            Boolean                  @default(false)
+  progressPercent    Int                      @default(0)
+  stepResults        Json?
+  testRunId          String?
+  updatedAt          DateTime                 @updatedAt
+  issues             Issue[]
+  executor           User                     @relation("ExecutedBy", fields: [executedBy], references: [id])
+  testCase           TestCase                 @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  testRun            TestRun?                 @relation(fields: [testRunId], references: [id])
+  runCaseRefs        TestRunCase[]            @relation("RunCaseLastExecution")
   suiteExecutionRefs TestSuiteExecutionCase[]
-
-  executedAt  DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
 
   @@index([testCaseId])
   @@index([executedBy])
@@ -308,67 +282,62 @@ model TestExecution {
 }
 
 model Attachment {
-  id          String         @id @default(uuid())
-  testCaseId  String
-  uploadedBy  String
-  fileType    AttachmentType
-  fileUrl     String
-  fileName    String
-
-  testCase    TestCase       @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
-  uploader    User           @relation("UploadedBy", fields: [uploadedBy], references: [id])
-
-  createdAt   DateTime       @default(now())
+  id         String         @id @default(uuid())
+  testCaseId String
+  uploadedBy String
+  fileType   AttachmentType
+  fileUrl    String
+  fileName   String
+  createdAt  DateTime       @default(now())
+  testCase   TestCase       @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
+  uploader   User           @relation("UploadedBy", fields: [uploadedBy], references: [id])
 
   @@index([testCaseId])
 }
 
 model Issue {
-  id              String         @id @default(uuid())
-  bugCode         String?        @unique
-  title           String
-  description     String
-  stepsToReproduce String?
-  expectedBehavior String?
+  id               String            @id @default(uuid())
+  title            String
+  description      String
+  status           IssueStatus       @default(OPEN)
+  severity         Severity          @default(MEDIUM)
+  testCaseId       String?
+  executionId      String?
+  reportedBy       String
+  assignedTo       String?
+  fixNotes         String?
+  commitLink       String?
+  retestRequested  Boolean           @default(false)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
   actualBehavior   String?
-  bugPriority      BugPriority   @default(P3_MEDIUM)
+  affectedVersion  String?
+  bugCode          String?           @unique
+  bugPriority      BugPriority       @default(P3_MEDIUM)
+  dueDate          DateTime?
+  environment      String?
+  expectedBehavior String?
+  stepsToReproduce String?
   workflowStatus   BugWorkflowStatus @default(NEW)
-  status          IssueStatus    @default(OPEN)
-  severity        Severity       @default(MEDIUM)
-  environment     String?
-  affectedVersion String?
-  dueDate         DateTime?
-  testCaseId      String?
-  executionId     String?
-  reportedBy      String
-  assignedTo      String?
-  fixNotes        String?
-  commitLink      String?
-  retestRequested Boolean        @default(false)
-
-  testCase        TestCase?      @relation(fields: [testCaseId], references: [id], onDelete: SetNull)
-  execution       TestExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
-  reporter        User           @relation("ReportedIssues", fields: [reportedBy], references: [id])
-  assignee        User?          @relation("AssignedIssues", fields: [assignedTo], references: [id])
-  comments        IssueComment[]
-  attachments     BugAttachment[]
-
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  attachments      BugAttachment[]
+  assignee         User?             @relation("AssignedIssues", fields: [assignedTo], references: [id])
+  execution        TestExecution?    @relation(fields: [executionId], references: [id])
+  reporter         User              @relation("ReportedIssues", fields: [reportedBy], references: [id])
+  testCase         TestCase?         @relation(fields: [testCaseId], references: [id])
+  comments         IssueComment[]
 
   @@index([assignedTo])
   @@index([reportedBy])
 }
 
 model IssueComment {
-  id         String   @id @default(uuid())
-  issueId    String
-  authorId   String
-  comment    String
-  createdAt  DateTime @default(now())
-
-  issue      Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  author     User     @relation("IssueComments", fields: [authorId], references: [id])
+  id        String   @id @default(uuid())
+  issueId   String
+  authorId  String
+  comment   String
+  createdAt DateTime @default(now())
+  author    User     @relation("IssueComments", fields: [authorId], references: [id])
+  issue     Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([issueId])
 }
@@ -379,58 +348,53 @@ model Project {
   description String?
   isActive    Boolean     @default(true)
   createdBy   String
-
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
   creator     User        @relation("CreatedProjects", fields: [createdBy], references: [id])
   testCases   TestCase[]
   testSuites  TestSuite[]
-
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
 }
 
 model TestCaseTemplate {
-  id          String   @id @default(uuid())
-  name        String
-  category    String?
-  description String?
-  preConditions Json?
-  testDataRequirements Json?
-  environmentRequirements Json?
-  postConditions Json?
-  metadata    Json?
-  module      String?
-  sourceTestCaseId String?
-  severity    TestSeverity @default(MAJOR)
-  type        TestCaseType @default(FUNCTIONAL)
-  steps       Json
-  tags        String[] @default([])
+  id                       String           @id @default(uuid())
+  name                     String
+  category                 String?
+  description              String?
+  preConditions            Json?
+  testDataRequirements     Json?
+  environmentRequirements  Json?
+  postConditions           Json?
+  metadata                 Json?
+  module                   String?
+  sourceTestCaseId         String?
+  severity                 TestSeverity     @default(MAJOR)
+  type                     TestCaseType     @default(FUNCTIONAL)
+  steps                    Json
+  tags                     String[]         @default([])
   estimatedDurationMinutes Int?
-  automationStatus AutomationStatus @default(NOT_AUTOMATED)
-  automationScriptLink String?
-  priority    Priority @default(MEDIUM)
-  status      TestCaseStatus @default(DRAFT)
-  createdBy   String
-
-  creator     User     @relation("TemplateCreator", fields: [createdBy], references: [id], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  automationStatus         AutomationStatus @default(NOT_AUTOMATED)
+  automationScriptLink     String?
+  priority                 Priority         @default(MEDIUM)
+  status                   TestCaseStatus   @default(DRAFT)
+  createdBy                String
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  creator                  User             @relation("TemplateCreator", fields: [createdBy], references: [id], onDelete: Cascade)
 
   @@index([createdBy])
 }
 
 model TestCaseImportJob {
-  id           String       @id @default(uuid())
+  id           String           @id @default(uuid())
   importedBy   String
   sourceType   ImportSourceType
   totalRecords Int
   successCount Int
   failedCount  Int
   errors       Json?
-  createdIds   String[]     @default([])
-  createdAt    DateTime     @default(now())
-
-  importer     User         @relation("Importer", fields: [importedBy], references: [id], onDelete: Cascade)
+  createdIds   String[]         @default([])
+  createdAt    DateTime         @default(now())
+  importer     User             @relation("Importer", fields: [importedBy], references: [id], onDelete: Cascade)
 
   @@index([importedBy])
 }
@@ -443,7 +407,6 @@ model AuditLog {
   entityId   String
   metadata   Json?
   createdAt  DateTime @default(now())
-
   actor      User     @relation("AuditActor", fields: [actorId], references: [id], onDelete: Cascade)
 
   @@index([actorId])
@@ -451,13 +414,12 @@ model AuditLog {
 }
 
 model SystemConfig {
-  id         String   @id @default(uuid())
-  key        String   @unique
-  value      String
-  updatedBy  String
-  updatedAt  DateTime @updatedAt
-
-  updater    User     @relation("ConfigUpdatedBy", fields: [updatedBy], references: [id], onDelete: Cascade)
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     String
+  updatedBy String
+  updatedAt DateTime @updatedAt
+  updater   User     @relation("ConfigUpdatedBy", fields: [updatedBy], references: [id], onDelete: Cascade)
 }
 
 model BackupJob {
@@ -467,19 +429,29 @@ model BackupJob {
   notes       String?
   startedAt   DateTime     @default(now())
   completedAt DateTime?
-
   triggerUser User         @relation("BackupTriggeredBy", fields: [triggeredBy], references: [id], onDelete: Cascade)
+}
+
+model BugAttachment {
+  id         String         @id @default(uuid())
+  issueId    String
+  uploadedBy String
+  fileType   AttachmentType
+  fileUrl    String
+  fileName   String
+  notes      String?
+  createdAt  DateTime       @default(now())
+  issue      Issue          @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  uploader   User           @relation("BugAttachmentUploadedBy", fields: [uploadedBy], references: [id], onDelete: Cascade)
+
+  @@index([issueId])
+  @@index([uploadedBy])
 }
 
 enum Role {
   ADMIN
   TESTER
   DEVELOPER
-}
-
-enum SuiteType {
-  STATIC
-  DYNAMIC
 }
 
 enum Priority {
@@ -533,23 +505,6 @@ enum ExecutionStatus {
   FAILED
   BLOCKED
   SKIPPED
-}
-
-model BugAttachment {
-  id         String         @id @default(uuid())
-  issueId    String
-  uploadedBy String
-  fileType   AttachmentType
-  fileUrl    String
-  fileName   String
-  notes      String?
-  createdAt  DateTime       @default(now())
-
-  issue      Issue          @relation(fields: [issueId], references: [id], onDelete: Cascade)
-  uploader   User           @relation("BugAttachmentUploadedBy", fields: [uploadedBy], references: [id], onDelete: Cascade)
-
-  @@index([issueId])
-  @@index([uploadedBy])
 }
 
 enum TestRunStatus {
@@ -639,4 +594,9 @@ enum AutomationStatus {
   IN_PROGRESS
   AUTOMATED
   CANNOT_AUTOMATE
+}
+
+enum SuiteType {
+  STATIC
+  DYNAMIC
 }

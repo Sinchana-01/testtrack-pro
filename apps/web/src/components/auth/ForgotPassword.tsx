@@ -1,63 +1,52 @@
-import React from "react";
-
 interface ForgotPasswordProps {
   email: string;
   isLoading: boolean;
+  error?: string;
   setEmail: (val: string) => void;
   onSubmit: () => void;
   goToLogin: () => void;
 }
 
-const ForgotPassword: React.FC<ForgotPasswordProps> = ({
+const ForgotPassword = ({
   email,
   isLoading,
+  error,
   setEmail,
   onSubmit,
   goToLogin,
-}) => {
+}: ForgotPasswordProps) => {
   return (
-  <>
-    {/* BRANDING */}
-    <div style={{ textAlign: "center", color: "white", marginBottom: "40px" }}>
-      <h1 style={{ fontSize: "40px", fontWeight: 900, margin: 0 }}>
-        TestTrack Pro
-      </h1>
-      <p style={{ marginTop: "8px" }}>
-        Enterprise Test Management Platform
-      </p>
-    </div>
+    <section className="authScreen">
+      <div className="authCenterCard">
+        <input className="autoFillTrap" type="text" autoComplete="username" tabIndex={-1} />
+        <h3 className="authHeader">Forgot Password</h3>
+        <p className="authSubheader">
+          Enter your registered email to receive a reset link.
+        </p>
 
-    {/* CENTERED CARD */}
-    <div className="authCard">
+        <label className="fieldLabel">Email Address</label>
+        <input
+          className="input"
+          type="email"
+          autoComplete="one-time-code"
+          name="forgot_email_input"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
 
-      <div className="authTitle">Forgot Password</div>
-      <div className="authSubtitle">
-        Enter your registered email to receive reset instructions
+        {error ? <div className="authInlineError">{error}</div> : null}
+
+        <button className="button" onClick={onSubmit} disabled={isLoading}>
+          {isLoading ? <span className="buttonSpinner" /> : null}
+          {isLoading ? "Sending..." : "Send Reset Link"}
+        </button>
+
+        <div className="link" onClick={goToLogin}>
+          Back to Login
+        </div>
       </div>
-
-      <label className="fieldLabel">Email Address</label>
-      <input
-        className="input"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-      />
-
-      <button
-        className="button"
-        onClick={onSubmit}
-        disabled={isLoading}
-      >
-        {isLoading ? "Sending..." : "Send Reset Link"}
-      </button>
-
-      <div className="link" onClick={goToLogin}>
-        Back to Login
-      </div>
-
-    </div>
-  </>
-);
+    </section>
+  );
 };
 
 export default ForgotPassword;
