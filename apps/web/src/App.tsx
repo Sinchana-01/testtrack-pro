@@ -22,11 +22,13 @@ import {
   getBugApi,
   getTestRunApi,
   getRefreshToken,
+  getMyRolePermissionsApi,
   listBugCommentsApi,
   listBugNotificationsApi,
   listBugsApi,
   listExecutionEvidenceApi,
   listExecutionReportsApi,
+  listAdminProjectsApi,
   listAdminUsersApi,
   listAdminAuditLogsApi,
   listSuiteExecutionsApi,
@@ -334,18 +336,24 @@ function App() {
   const isTester = roleName === "TESTER";
   const isDeveloper = roleName === "DEVELOPER";
   const isAdmin = roleName === "ADMIN";
-  const canCreateAndManageTestCases = isTester;
-  const canUseTemplates = isTester;
-  const canRunBulkOps = isTester;
-  const canImportTestCases = isTester;
-  const canManageSuites = isTester;
-  const canSeeSelectionControls = isTester;
-  const canExecuteTests = isTester || isAdmin;
-  const canManageTestRuns = isTester || isAdmin;
-  const canViewBugs = isTester || isDeveloper || isAdmin;
-  const canCreateBugs = isTester || isAdmin;
-  const canTransitionBugs = isTester || isDeveloper || isAdmin;
-  const canResolveBugs = isDeveloper;
+  const currentRolePermissions = rolePermissions[roleName] || [];
+  const hasPermission = (permission: string): boolean => currentRolePermissions.includes(permission);
+  const canCreateAndManageTestCases = hasPermission("Create Test Cases");
+  const canUseTemplates = hasPermission("Create Test Cases");
+  const canRunBulkOps = hasPermission("Create Test Cases");
+  const canImportTestCases = hasPermission("Create Test Cases");
+  const canManageSuites = hasPermission("Create Test Cases");
+  const canSeeSelectionControls = hasPermission("Create Test Cases");
+  const canExecuteTests = hasPermission("Execute Tests");
+  const canManageTestRuns = hasPermission("Create Test Cases") || hasPermission("Execute Tests");
+  const canViewBugs =
+    hasPermission("Bug Management") || hasPermission("My Assigned Bugs") || hasPermission("All Bugs");
+  const canCreateBugs = hasPermission("Bug Management");
+  const canTransitionBugs = canViewBugs;
+  const canResolveBugs = isDeveloper && hasPermission("My Assigned Bugs");
+  const canManageUsersPermission = hasPermission("Manage Users");
+  const canManageProjectsPermission = hasPermission("Manage Projects");
+  const canViewAuditLogsPermission = hasPermission("View Audit Logs");
   const testerNavItems: DashboardNavItem[] = [
   { key: "dashboard_home", label: "Dashboard", icon: "D" },
   { key: "create_test_case", label: "Create Test Case", icon: "+" },
@@ -375,7 +383,63 @@ const adminNavItems: DashboardNavItem[] = [
   { key: "audit_logs", label: "Audit Logs", icon: "A" },
   { key: "backup_management", label: "Backup Management", icon: "K" },
 ];
-const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems : adminNavItems;
+const allNavItemsCatalog: DashboardNavItem[] = [
+  ...testerNavItems,
+  ...developerNavItems,
+  ...adminNavItems,
+].filter((item, idx, arr) => arr.findIndex((x) => x.key === item.key) === idx);
+const permissionToMenuKeys: Record<string, string[]> = {
+  "Manage Users": ["user_management"],
+  "Manage Roles": ["role_management"],
+  "Manage Projects": ["project_management"],
+  "View Audit Logs": ["audit_logs"],
+  "Backup Management": ["backup_management"],
+  "Create Test Cases": [
+    "create_test_case",
+    "test_cases",
+    "templates",
+    "bulk_operations",
+    "import_test_cases",
+    "suite_management",
+    "test_runs",
+  ],
+  "Execute Tests": ["execute_tests"],
+  "Bug Management": ["bug_management"],
+  Reports: ["reports"],
+  "My Assigned Bugs": ["my_assigned_bugs"],
+  "All Bugs": ["all_bugs"],
+  "Test Reports": ["test_reports"],
+  "Performance Report": ["performance_report"],
+  "Linked Commits": ["linked_commits"],
+};
+
+const buildNavFromPermissions = (
+  roleKey: string,
+  map: Record<string, string[]>
+): DashboardNavItem[] => {
+  const defaultBase =
+    roleKey === "TESTER" ? testerNavItems : roleKey === "DEVELOPER" ? developerNavItems : adminNavItems;
+  const allByKey = new Map(allNavItemsCatalog.map((item) => [item.key, item]));
+  const allowedPermissions = map[roleKey] || [];
+  const allowedKeys = new Set<string>(defaultBase.map((item) => item.key));
+  allowedKeys.add("dashboard_home");
+
+  allowedPermissions.forEach((permission) => {
+    const keys = permissionToMenuKeys[permission] || [];
+    keys.forEach((key) => allowedKeys.add(key));
+
+    // Allow exact label match for newly added permissions if label exists in sidebar definitions.
+    const matched = allNavItemsCatalog.find(
+      (item) => item.label.toUpperCase() === String(permission).toUpperCase()
+    );
+    if (matched) allowedKeys.add(matched.key);
+  });
+
+  return Array.from(allowedKeys)
+    .map((key) => allByKey.get(key))
+    .filter((item): item is DashboardNavItem => Boolean(item));
+};
+const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   const permissionCatalog = [
     "Manage Users",
     "Manage Projects",
@@ -694,6 +758,8 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
 
   const loadTestCaseData = async () => {
     setIsRefreshing(true);
+    const shouldFetchTestCases =
+      canCreateAndManageTestCases || canManageSuites || canManageTestRuns || canExecuteTests;
     const bugParams: Record<string, string> = {
       status: bugFilterStatus,
       priority: bugFilterPriority,
@@ -701,8 +767,8 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
       sortBy: bugSortBy,
     };
     const [caseRows, templateRows, runRows, suiteRows, executionRows, bugRows] = await Promise.all([
-      getTestCasesApi(),
-      listTemplatesApi(),
+      shouldFetchTestCases ? getTestCasesApi() : Promise.resolve([]),
+      canUseTemplates ? listTemplatesApi() : Promise.resolve([]),
       canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
       canManageSuites
         ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
@@ -778,9 +844,26 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
     setAdminUsers(Array.isArray(rows) ? rows : []);
   };
 
+  const loadAdminProjects = async () => {
+    const rows = await listAdminProjectsApi();
+    setAdminProjects(Array.isArray(rows) ? rows : []);
+  };
+
   const loadAdminAuditLogs = async (entityType?: string) => {
     const rows = await listAdminAuditLogsApi(entityType || undefined);
     setAdminAuditLogs(Array.isArray(rows) ? rows : []);
+  };
+
+  const loadRolePermissions = async () => {
+    const payload = await getMyRolePermissionsApi();
+    if (payload?.rolePermissions && typeof payload.rolePermissions === "object") {
+      const next = payload.rolePermissions as Record<string, unknown>;
+      setRolePermissions({
+        ADMIN: Array.isArray(next.ADMIN) ? (next.ADMIN as string[]) : rolePermissions.ADMIN || [],
+        TESTER: Array.isArray(next.TESTER) ? (next.TESTER as string[]) : rolePermissions.TESTER || [],
+        DEVELOPER: Array.isArray(next.DEVELOPER) ? (next.DEVELOPER as string[]) : rolePermissions.DEVELOPER || [],
+      });
+    }
   };
 
   const showAdminToast = (message: string) => {
@@ -1619,6 +1702,20 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
   }, [screen, currentRole]);
 
   useEffect(() => {
+    if (screen !== "dashboard" || !currentRole) return;
+    loadRolePermissions().catch(() => {
+      // no-op: keep defaults if fetch fails
+    });
+  }, [screen, currentRole]);
+
+  useEffect(() => {
+    if (screen !== "dashboard") return;
+    if (roleNavItems.some((item) => item.key === activeMenuKey)) return;
+    setActiveMenuKey("dashboard_home");
+    setActiveFeature("none");
+  }, [screen, activeMenuKey, roleNavItems]);
+
+  useEffect(() => {
     if (screen !== "dashboard" || !currentRole) {
       setNotificationItems([]);
       setNotificationUnreadCount(0);
@@ -1700,19 +1797,83 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
       setAdminCreateEmail("");
       setAdminCreatePassword("");
       setAdminCreateRole("");
-      loadAdminUsers().catch(() => {
-        setAdminUsers([]);
-      });
+      if (canManageUsersPermission) {
+        loadAdminUsers().catch(() => {
+          setAdminUsers([]);
+        });
+      }
       return;
     }
     if (activeMenuKey === "audit_logs" || activeMenuKey === "backup_management") {
-      loadAdminAuditLogs(activeMenuKey === "backup_management" ? "BackupJob" : auditEntityType || undefined).catch(
-        () => {
-          setAdminAuditLogs([]);
-        }
-      );
+      if (canViewAuditLogsPermission || hasPermission("Backup Management")) {
+        loadAdminAuditLogs(activeMenuKey === "backup_management" ? "BackupJob" : auditEntityType || undefined).catch(
+          () => {
+            setAdminAuditLogs([]);
+          }
+        );
+      }
     }
-  }, [screen, isAdmin, normalizedFeature, activeMenuKey, auditEntityType]);
+  }, [
+    screen,
+    isAdmin,
+    normalizedFeature,
+    activeMenuKey,
+    auditEntityType,
+    canManageUsersPermission,
+    canViewAuditLogsPermission,
+    rolePermissions,
+  ]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !isAdmin) return;
+    if (activeMenuKey !== "dashboard_home" && normalizedFeature !== "none") return;
+
+    const tasks: Array<Promise<void>> = [];
+
+    if (canManageUsersPermission) {
+      tasks.push(
+        loadAdminUsers().catch(() => {
+          setAdminUsers([]);
+        })
+      );
+    } else {
+      setAdminUsers([]);
+    }
+
+    if (canManageProjectsPermission) {
+      tasks.push(
+        loadAdminProjects().catch(() => {
+          setAdminProjects([]);
+        })
+      );
+    } else {
+      setAdminProjects([]);
+    }
+
+    if (canViewAuditLogsPermission) {
+      tasks.push(
+        loadAdminAuditLogs().catch(() => {
+          setAdminAuditLogs([]);
+        })
+      );
+    } else {
+      setAdminAuditLogs([]);
+    }
+
+    if (tasks.length > 0) {
+      Promise.all(tasks).catch(() => {
+        // no-op
+      });
+    }
+  }, [
+    screen,
+    isAdmin,
+    activeMenuKey,
+    normalizedFeature,
+    canManageUsersPermission,
+    canManageProjectsPermission,
+    canViewAuditLogsPermission,
+  ]);
 
   useEffect(() => {
     if (!executionRunId || !executionCaseId) return;
@@ -1789,6 +1950,7 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
         setActiveMenuKey("dashboard_home");
         setScreen("dashboard");
         try {
+          await loadRolePermissions();
           await loadTestCaseData();
         } catch (error: any) {
           alert(error?.message || "Failed to load test data");
@@ -1929,7 +2091,13 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
       }
 
       if (isAdmin && menuKey === "dashboard_home") {
-        await Promise.all([loadAdminUsers(), loadAdminAuditLogs()]);
+        const calls: Array<Promise<any>> = [];
+        if (canManageUsersPermission) calls.push(loadAdminUsers());
+        if (canManageProjectsPermission) calls.push(loadAdminProjects());
+        if (canViewAuditLogsPermission) calls.push(loadAdminAuditLogs());
+        if (calls.length > 0) {
+          await Promise.all(calls);
+        }
       }
 
       if (selectedBugId && mappedFeature === "bug_management") {
@@ -2667,6 +2835,7 @@ const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems
                                 key: "ROLE_PERMISSIONS",
                                 value: JSON.stringify(rolePermissions),
                               });
+                              await loadRolePermissions();
                               alert("Role permissions updated");
                             } catch (error: any) {
                               alert(error?.message || "Failed to save role permissions");

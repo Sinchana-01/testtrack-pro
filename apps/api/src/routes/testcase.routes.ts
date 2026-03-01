@@ -3794,6 +3794,62 @@ router.get(
 /* =========================
    ADMIN FLOWS (BONUS)
 ========================= */
+router.get(
+  "/admin/role-permissions/me",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const defaults: Record<string, string[]> = {
+      ADMIN: [
+        "Manage Users",
+        "Manage Projects",
+        "Manage Roles",
+        "View Audit Logs",
+        "Backup Management",
+      ],
+      TESTER: ["Create Test Cases", "Execute Tests", "Bug Management", "Reports"],
+      DEVELOPER: [
+        "My Assigned Bugs",
+        "All Bugs",
+        "Test Reports",
+        "Performance Report",
+        "Linked Commits",
+      ],
+    };
+
+    const config = await prisma.systemConfig.findUnique({
+      where: { key: "ROLE_PERMISSIONS" },
+      select: { value: true },
+    });
+
+    let rolePermissions = defaults;
+    if (config?.value) {
+      try {
+        const parsed = JSON.parse(config.value) as Record<string, unknown>;
+        rolePermissions = {
+          ADMIN: Array.isArray(parsed?.ADMIN)
+            ? (parsed.ADMIN as unknown[]).map((x) => asString(x)).filter(Boolean)
+            : defaults.ADMIN,
+          TESTER: Array.isArray(parsed?.TESTER)
+            ? (parsed.TESTER as unknown[]).map((x) => asString(x)).filter(Boolean)
+            : defaults.TESTER,
+          DEVELOPER: Array.isArray(parsed?.DEVELOPER)
+            ? (parsed.DEVELOPER as unknown[]).map((x) => asString(x)).filter(Boolean)
+            : defaults.DEVELOPER,
+        };
+      } catch {
+        rolePermissions = defaults;
+      }
+    }
+
+    const roleKey = String(req.user!.role || "").toUpperCase();
+    return res.json({
+      role: roleKey,
+      permissions: rolePermissions[roleKey] || [],
+      rolePermissions,
+    });
+  }
+);
+
 router.get("/admin/users", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
   const users = await prisma.user.findMany({
     select: { id: true, name: true, email: true, role: true, isActive: true, createdAt: true },
