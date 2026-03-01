@@ -36,6 +36,28 @@ const parseEnum = <T extends Record<string, string>>(enumType: T, value: unknown
   return (Object.values(enumType) as string[]).includes(value) ? (value as T[keyof T]) : null;
 };
 
+const resolveActiveDeveloperId = async (
+  tx: Prisma.TransactionClient,
+  raw: unknown
+): Promise<string | null> => {
+  const input = asString(raw);
+  if (!input) return null;
+
+  const byId = await tx.user.findUnique({ where: { id: input } });
+  if (byId && byId.role === Role.DEVELOPER && byId.isActive) {
+    return byId.id;
+  }
+
+  if (input.includes("@")) {
+    const byEmail = await tx.user.findUnique({ where: { email: input.toLowerCase() } });
+    if (byEmail && byEmail.role === Role.DEVELOPER && byEmail.isActive) {
+      return byEmail.id;
+    }
+  }
+
+  return null;
+};
+
 const toExecutionStepItems = (steps: unknown): StepExecutionItem[] => {
   let rawSteps: unknown = steps;
   if (typeof rawSteps === "string") {
@@ -710,6 +732,10 @@ export const executionsService = {
         { LOW: "LOW", MEDIUM: "MEDIUM", HIGH: "HIGH", CRITICAL: "CRITICAL" },
         input.severity || "MEDIUM"
       );
+      const assignedTo = await resolveActiveDeveloperId(tx, input.assignedTo);
+      if (asString(input.assignedTo) && !assignedTo) {
+        fail(400, "assignedTo must be an active developer (id or email)");
+      }
 
       const issue = await tx.issue.create({
         data: {
@@ -725,8 +751,8 @@ export const executionsService = {
           testCaseId: execution.testCaseId,
           executionId: execution.id,
           reportedBy: input.actorId,
-          assignedTo: asString(input.assignedTo) || null,
-          workflowStatus: "OPEN",
+          assignedTo,
+          workflowStatus: "NEW",
           bugPriority: "P3_MEDIUM",
         } as any,
       });

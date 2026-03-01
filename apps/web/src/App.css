@@ -1,7 +1,268 @@
 :root {
-  --primary: #1f5bd6;
+  --primary: black;
   --primary-hover: #1748ac;
   --danger: #b91c1c;
+}
+
+/* ================= APP LAYOUT OVERRIDES ================= */
+
+.container.authMode {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 20px;
+  background: #0f172a;
+}
+
+.container.dashboardMode {
+  min-height: 100vh;
+  display: block;
+  padding: 0;
+  background: #f8fafc;
+}
+
+.card {
+  width: 100%;
+}
+
+.cardAuth {
+  max-width: 520px;
+}
+
+.cardDashboard {
+  max-width: none;
+}
+
+.brandTitle {
+  margin: 0;
+  text-align: center;
+  font-size: 36px;
+  font-weight: 900;
+  color: #ffffff;
+}
+
+.authTagline {
+  margin: 8px 0 18px;
+  text-align: center;
+  color: #e2e8f0;
+  font-weight: 600;
+}
+
+.authPanel {
+  width: 100%;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 16px 40px rgba(2, 6, 23, 0.2);
+}
+
+.authPanel h3 {
+  margin: 0 0 16px;
+  text-align: center;
+}
+
+.authScreen {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.authCenterCard {
+  width: 100%;
+  max-width: 460px;
+  background: #ffffff;
+  border: 2px solid #111827;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 18px 44px rgba(2, 6, 23, 0.22);
+}
+
+.authHeader {
+  margin: 0;
+  font-size: 24px;
+  text-align: center;
+  color: #0f172a;
+}
+
+.authSubheader {
+  margin: 8px 0 18px;
+  text-align: center;
+  color: #475569;
+  font-size: 14px;
+}
+
+.passwordInputWrap {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.passwordInput {
+  margin-bottom: 0;
+  padding-right: 46px;
+}
+
+.passwordToggle {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  border: 0;
+  background: transparent;
+  color: #111827;
+  border-radius: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  cursor: pointer;
+}
+
+.passwordToggle:hover {
+  color: #0f172a;
+}
+
+.passwordToggle:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.eyeIcon {
+  width: 18px;
+  height: 18px;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+.autoFillTrap {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 1px;
+  height: 1px;
+}
+
+.authInlineError {
+  margin-bottom: 12px;
+  border: 2px solid #991b1b;
+  background: #fef2f2;
+  color: #991b1b;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.buttonSpinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.45);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 8px;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 768px) {
+  .container.authMode {
+    background: #0f172a;
+    padding: 20px 14px;
+  }
+
+  .brandTitle {
+    font-size: 30px;
+  }
+
+  .authCenterCard {
+    padding: 18px;
+  }
+}
+
+.menuButton {
+  width: 42px;
+  height: 42px;
+  border: 2px solid #111827;
+  border-radius: 10px;
+  background: #ffffff;
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 9px;
+  cursor: pointer;
+}
+
+.menuButton span {
+  display: block;
+  height: 3px;
+  border-radius: 999px;
+  background: #111827;
+}
+
+.dashboardBody {
+  display: flex;
+  width: 100%;
+  min-height: calc(100vh - 92px);
+}
+
+.dashboardBody.withSidebar .featureSidebar {
+  width: 30%;
+  min-width: 280px;
+  max-width: 420px;
+}
+
+.dashboardBody.withSidebar .dashboardContent {
+  width: 70%;
+}
+
+.dashboardBody.withoutSidebar .dashboardContent {
+  width: 100%;
+}
+
+.featureSidebar {
+  background: #0f172a;
+  color: #ffffff;
+  padding: 16px;
+}
+
+.featureList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (max-width: 1024px) {
+  .dashboardBody {
+    flex-direction: column;
+  }
+
+  .dashboardBody.withSidebar .featureSidebar,
+  .dashboardBody.withSidebar .dashboardContent,
+  .dashboardBody.withoutSidebar .dashboardContent {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+  }
 }
 
 /* ================= RESET ================= */
@@ -89,7 +350,7 @@ body {
 .button {
   width: 100%;
   padding: 12px;
-  background: black;
+  background:var(--primary);
   color: white;
   border: none;
   border-radius: 8px;
@@ -447,4 +708,477 @@ body {
   margin-top: 25px;
   display: flex;
   justify-content: space-between;
+}.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.simpleListItem {
+  padding: 14px;
+  border-bottom: 1px solid #e5e7eb;
+  cursor: pointer;
+}
+
+.simpleListItem:hover {
+  background: #f3f4f6;
+}
+
+.listName {
+  font-weight: 600;
+}
+
+.listEmail {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.listMeta {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 4px;
+}
+.templateSteps {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 10px;
+}
+
+.stepItem {
+  padding: 6px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+.bulkList {
+  margin-top: 15px;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+/* ================= DASHBOARD LAYOUT OVERRIDES ================= */
+
+.container.dashboardMode {
+  background: #f1f5f9;
+}
+
+.container.dashboardMode .cardDashboard {
+  width: 100%;
+}
+
+.dashboardGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(100%, 1400px);
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.dashboardPageContent .panel {
+  width: 100%;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.07);
+}
+
+.dashboardPageContent .panel h4 {
+  margin: 0 0 10px;
+  font-size: 18px;
+  color: #0f172a;
+}
+
+.dashboardPageContent .panel .note {
+  color: #64748b;
+}
+
+.dashboardPageContent .panel:hover {
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.1);
+}
+
+.dashboardPageContent .createCasePanel {
+  width: 100%;
+  margin-left: 0;
+  margin-right: auto;
+}
+
+.dashboardPageContent .dashboardWidget {
+  width: 100%;
+}
+
+.dashboardPageContent .table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.dashboardPageContent .table th,
+.dashboardPageContent .table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 10px;
+  text-align: left;
+}
+
+.dashboardPageContent .listCompact {
+  display: grid;
+  gap: 8px;
+}
+
+.dashboardPageContent .row {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.dashboardPageContent .inlineGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.dashboardPageContent .input,
+.dashboardPageContent textarea.input,
+.dashboardPageContent select.input {
+  width: 100%;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+  color: #0f172a;
+  margin-bottom: 10px;
+}
+
+.dashboardPageContent .button {
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.dashboardPageContent .button.small {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.dashboardPageContent .button.danger {
+  background: #dc2626;
+}
+
+.dashboardPageContent .toolbarActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboardPageContent .modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 120;
+  padding: 16px;
+}
+
+.dashboardPageContent .modalCard {
+  width: min(760px, 96vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 8px;
+  border: 1px solid #dbe7f3;
+  padding: 16px;
+}
+
+@media (max-width: 980px) {
+  .dashboardPageContent .inlineGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.dashboardWidget {
+  margin-top: 10px;
+}
+
+.kpiRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.kpiItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  display: grid;
+  gap: 6px;
+}
+
+.kpiItem strong {
+  font-size: 13px;
+  color: #475569;
+}
+
+.kpiItem span {
+  font-size: 26px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tableWrap {
+  overflow-x: auto;
+}
+
+.statusBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 3px 8px;
+  font-weight: 700;
+}
+
+.status-draft {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.status-ready_for_review {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.miniBarChart {
+  height: 160px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 6px;
+}
+
+.miniBarItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.miniBarItem span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.miniBar {
+  width: 100%;
+  max-width: 28px;
+  background: #2563eb;
+  border-radius: 8px 8px 2px 2px;
+  min-height: 8px;
+}
+
+.bugAgingBar {
+  background: #d97706;
+}
+
+.systemBar {
+  background: #0ea5e9;
+}
+
+.pieSection {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.pieChart {
+  width: 120px;
+  height: 120px;
+  border-radius: 999px;
+  border: 1px solid #dbe7f3;
+}
+
+.pieLegend {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: #334155;
+}
+
+@media (max-width: 980px) {
+  .dashboardGrid {
+    width: 100%;
+  }
+
+  .dashboardPageContent .createCasePanel {
+    width: 100%;
+  }
+
+  .dashboardPageContent .panel {
+    width: 100%;
+  }
+
+  .kpiRow {
+    grid-template-columns: 1fr;
+  }
+
+  .pieSection {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+.bulkItem {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 6px;
+  cursor: pointer;
+}
+
+.bulkItem:hover {
+  background: #f3f4f6;
+}
+
+.bulkMeta {
+  display: block;
+  font-size: 12px;
+  color: #6b7280;
+}
+.importButtonGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;   /* 👈 adds spacing */
+  margin-top: 20px;
+}
+
+.previewBtn {
+  background: #2563eb;   /* Blue */
+}
+
+.previewBtn:hover {
+  background: #1d4ed8;
+}
+
+.confirmBtn {
+  background: #0a622a;   /* Green */
+}
+
+.confirmBtn:hover {
+  background: #15803d;
+}
+.largeModal {
+  width: 900px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.modalSection {
+  margin-bottom: 20px;
+}
+
+.modalSection pre {
+  background: #f3f4f6;
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modalCard {
+  background: white;
+  padding: 30px;
+  border-radius: 12px;
+  width: 600px;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.largeModal {
+  width: 800px;
+}
+
+.modalActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+.executePanel {
+  padding: 16px;
+}
+
+.executeHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.executeLayout {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 16px;
+}
+
+.executeSteps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.executeStepCard {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f9fafb;
+}
+
+.stepNumber {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
+
+.executeControls {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.buttonGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.button.success {
+  background-color: #16a34a;
+}
+
+.button.warning {
+  background-color: #f59e0b;
+}
+
+.button.danger {
+  background-color: #dc2626;
 }

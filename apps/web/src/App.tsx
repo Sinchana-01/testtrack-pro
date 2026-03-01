@@ -1,44 +1,36 @@
 import { useEffect, useState } from "react";
-import Login from "./components/auth/Login";
-import ForgotPassword from "./components/auth/ForgotPassword";
-import Register from "./components/auth/Register";
-import AdminDashboard from "./components/admin/AdminDashboard";
 import {
   bulkTestCaseOperationApi,
   clearSessionTokens,
   cloneTestCaseApi,
   createBugApi,
   createBugCommentApi,
-  createBugFromExecutionStepApi,
-  createTestRunApi,
+  createBugFromExecutionApi,
+  createSuiteApi,
   createAdminUserApi,
-  deleteAdminUserApi,
+  createTestRunApi,
   deleteExecutionEvidenceApi,
+  deleteAdminUserApi,
   deleteBugCommentApi,
   createFromTemplateApi,
   createTemplateApi,
   createTestCaseApi,
   editBugCommentApi,
   deleteTestCaseApi,
-  finalizeExecutionV2Api,
+  finalizeExecutionApi,
   forgotPasswordApi,
   getBugApi,
   getTestRunApi,
   getRefreshToken,
   listBugCommentsApi,
+  listBugNotificationsApi,
   listBugsApi,
   listExecutionEvidenceApi,
   listExecutionReportsApi,
   listAdminUsersApi,
-  listAdminProjectsApi,
-  createAdminProjectApi,
-  updateAdminProjectApi,
   listAdminAuditLogsApi,
-  listAdminSystemConfigsApi,
-  upsertAdminSystemConfigApi,
-  listAdminBackupsApi,
-  triggerAdminBackupApi,
-  listAvailableTestersApi,
+  listSuiteExecutionsApi,
+  listSuitesApi,
   getTestCasesApi,
   importTestCasesApi,
   listTemplatesApi,
@@ -46,85 +38,97 @@ import {
   loginApi,
   logoutAllApi,
   openExecutionApi,
-  reexecuteExecutionV2Api,
+  reexecuteExecutionApi,
   refreshTokenApi,
   registerApi,
   resolveBugApi,
   resetPasswordApi,
-  saveExecutionStepV2Api,
+  saveExecutionStepApi,
   setSessionTokens,
-  startExecutionApi,
   startExecutionTimerApi,
+  startExecutionApi,
+  startSuiteExecutionApi,
   stopExecutionTimerApi,
-  pauseExecutionTimerApi,
-  resumeExecutionTimerApi,
-  setExecutionManualTimeApi,
-  listExecutionHistoryApi,
-  compareExecutionsApi,
   quickUpdateDeveloperBugStatusApi,
   uploadExecutionEvidenceApi,
   updateBugWorkflowApi,
-  updateAdminRoleApi,
-  updateAdminUserApi,
-  updateTestCaseApi,
-  createSuiteApi,
-  listSuitesApi,
+  addSuiteTestCasesApi,
+  archiveSuiteApi,
+  cloneSuiteApi,
+  deleteSuiteApi,
   getSuiteApi,
-  getSuiteTestCasesApi,
-  updateSuiteApi,
-  cloneSuiteV2Api,
-  archiveSuiteV2Api,
-  restoreSuiteV2Api,
-  addSuiteTestCasesV2Api,
-  removeSuiteTestCaseV2Api,
-  reorderSuiteTestCasesV2Api,
   getSuiteExecutionApi,
-  listSuiteExecutionsApi,
-  previewDynamicFilterApi,
-  startSuiteExecutionApi,
-  executeSuiteRunApi,
-  updateSuiteExecutionStatusApi,
-  bulkMarkSuiteRunApi,
-  resetSuiteRunApi,
-  syncSuiteRunApi,
-  getTestRunSummaryApi,
+  removeSuiteTestCaseApi,
+  reorderSuiteTestCasesApi,
+  restoreSuiteApi,
+  updateAdminRoleApi,
+  createAdminProjectApi,
+  updateAdminProjectApi,
+  triggerAdminBackupApi,
+  upsertAdminSystemConfigApi,
+  updateAdminUserApi,
+  updateSuiteApi,
+  updateTestCaseApi,
+  markBugNotificationReadApi,
 } from "./api";
+import Login from "./components/auth/Login";
+import Register from "./components/auth/Register";
+import ForgotPassword from "./components/auth/ForgotPassword";
+import ResetPassword from "./components/auth/ResetPassword";
+import DashboardLayout, { DashboardNavItem } from "./components/layout/DashboardLayout";
 import "./App.css";
 
 type Screen = "login" | "register" | "forgot" | "reset" | "dashboard";
 type DashboardFeature =
+  | "dashboard_home"
   | "create_test_case"
   | "templates"
   | "bulk_operations"
   | "import_test_cases"
-  | "test_suites"
   | "test_runs"
+  | "suite_management"
   | "execute_tests"
   | "bug_management"
   | "test_cases"
   | "developer_workspace"
-  | "admin_create_users"
-  | "admin_manage_users"
-  | "admin_manage_projects"
-  | "admin_manage_roles"
-  | "admin_audit_logs"
-  | "admin_system_config"
-  | "admin_backup_mgmt";
+  | "admin_workspace"
+  | "reports"
+  | "my_assigned_bugs"
+  | "all_bugs"
+  | "test_reports"
+  | "performance_report"
+  | "linked_commits"
+  | "user_management"
+  | "role_management"
+  | "project_management"
+  | "system_configuration"
+  | "audit_logs"
+  | "backup_management";
 
-const EXECUTION_DRAFT_KEY = "ttp_execution_draft";
+type AppNotificationItem = {
+  id: string;
+  sourceId?: string;
+  type: "mention" | "bug";
+  title: string;
+  subtitle?: string;
+  isRead: boolean;
+  bugId?: string;
+};
 
 function App() {
   const [screen, setScreen] = useState<Screen>("login");
-  const [isLoading, setIsLoading] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [role, setRole] = useState("");
   const [currentRole, setCurrentRole] = useState("");
   const [currentUserId, setCurrentUserId] = useState("");
   const [rememberMe, setRememberMe] = useState(false);
   const [resetToken, setResetToken] = useState("");
+  const [authError, setAuthError] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [testCases, setTestCases] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -133,29 +137,29 @@ function App() {
   const [tcPreConditionsText, setTcPreConditionsText] = useState("");
   const [tcTestDataRequirementsText, setTcTestDataRequirementsText] = useState("");
   const [tcEnvironmentRequirementsText, setTcEnvironmentRequirementsText] = useState("");
-  const [tcModule, setTcModule] = useState("Authentication");
+  const [tcModule, setTcModule] = useState("");
   const [tcStepsText, setTcStepsText] = useState("");
   const [tcPostConditionsText, setTcPostConditionsText] = useState("");
   const [tcMetadataText, setTcMetadataText] = useState("");
   const [tcTagsText, setTcTagsText] = useState("");
   const [tcEstimatedDurationMinutes, setTcEstimatedDurationMinutes] = useState("");
-  const [tcAutomationStatus, setTcAutomationStatus] = useState("NOT_AUTOMATED");
+  const [tcAutomationStatus, setTcAutomationStatus] = useState("");
   const [tcAutomationScriptLink, setTcAutomationScriptLink] = useState("");
-  const [tcPriority, setTcPriority] = useState("MEDIUM");
-  const [tcSeverity, setTcSeverity] = useState("MAJOR");
-  const [tcType, setTcType] = useState("FUNCTIONAL");
-  const [tcStatus, setTcStatus] = useState("DRAFT");
-  const [bulkOperation, setBulkOperation] = useState("STATUS");
-  const [bulkStatus, setBulkStatus] = useState("READY_FOR_REVIEW");
-  const [bulkPriority, setBulkPriority] = useState("MEDIUM");
-  const [bulkSeverityValue, setBulkSeverityValue] = useState("MAJOR");
-  const [bulkModule, setBulkModule] = useState("General");
+  const [tcPriority, setTcPriority] = useState("");
+  const [tcSeverity, setTcSeverity] = useState("");
+  const [tcType, setTcType] = useState("");
+  const [tcStatus, setTcStatus] = useState("");
+  const [bulkOperation, setBulkOperation] = useState("");
+  const [bulkStatus, setBulkStatus] = useState("");
+  const [bulkPriority, setBulkPriority] = useState("");
+  const [bulkSeverityValue, setBulkSeverityValue] = useState("");
+  const [bulkModule, setBulkModule] = useState("");
   const [bulkSuiteId, setBulkSuiteId] = useState("");
   const [bulkAssignee, setBulkAssignee] = useState("");
   const [templateName, setTemplateName] = useState("");
   const [templateCategory, setTemplateCategory] = useState("");
   const [templateSteps, setTemplateSteps] = useState("");
-  const [importType, setImportType] = useState("JSON");
+  const [importType, setImportType] = useState("");
   const [importFieldMappingText, setImportFieldMappingText] = useState("");
   const [importExcelRows, setImportExcelRows] = useState<any[]>([]);
   const [importExcelFileName, setImportExcelFileName] = useState("");
@@ -164,9 +168,7 @@ function App() {
   const [importPreviewErrors, setImportPreviewErrors] = useState<string[]>([]);
   const [previewReady, setPreviewReady] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null);const [editingId, setEditingId] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+  const [editingId, setEditingId] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editPreConditionsText, setEditPreConditionsText] = useState("");
@@ -177,13 +179,13 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   const [editMetadataText, setEditMetadataText] = useState("");
   const [editTagsText, setEditTagsText] = useState("");
   const [editEstimatedDurationMinutes, setEditEstimatedDurationMinutes] = useState("");
-  const [editAutomationStatus, setEditAutomationStatus] = useState("NOT_AUTOMATED");
+  const [editAutomationStatus, setEditAutomationStatus] = useState("");
   const [editAutomationScriptLink, setEditAutomationScriptLink] = useState("");
   const [editChangeSummary, setEditChangeSummary] = useState("");
-  const [editPriority, setEditPriority] = useState("MEDIUM");
-  const [editSeverity, setEditSeverity] = useState("MAJOR");
-  const [editType, setEditType] = useState("FUNCTIONAL");
-  const [editStatus, setEditStatus] = useState("DRAFT");
+  const [editPriority, setEditPriority] = useState("");
+  const [editSeverity, setEditSeverity] = useState("");
+  const [editType, setEditType] = useState("");
+  const [editStatus, setEditStatus] = useState("");
   const [showTestCaseList, setShowTestCaseList] = useState(false);
   const [expandedTestCaseId, setExpandedTestCaseId] = useState("");
   const [testRuns, setTestRuns] = useState<any[]>([]);
@@ -191,91 +193,49 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   const [runDescription, setRunDescription] = useState("");
   const [runStartDate, setRunStartDate] = useState("");
   const [runEndDate, setRunEndDate] = useState("");
-  const [runTesterIds, setRunTesterIds] = useState<string[]>([]);
-  const [runTesterOptions, setRunTesterOptions] = useState<any[]>([]);
-  const [runSelectedTestCaseIds, setRunSelectedTestCaseIds] = useState<string[]>([]);
-  const [runTestCaseSearchQuery, setRunTestCaseSearchQuery] = useState("");
-  const [runTestCaseFilterModule, setRunTestCaseFilterModule] = useState("");
+  const [runTesterIdsText, setRunTesterIdsText] = useState("");
   const [selectedRunId, setSelectedRunId] = useState("");
   const [runDetails, setRunDetails] = useState<any>(null);
   const [suites, setSuites] = useState<any[]>([]);
   const [suiteName, setSuiteName] = useState("");
   const [suiteDescription, setSuiteDescription] = useState("");
   const [suiteModule, setSuiteModule] = useState("");
-  const [suiteType, setSuiteType] = useState("STATIC");
+  const [suiteProjectId, setSuiteProjectId] = useState("");
   const [suiteParentId, setSuiteParentId] = useState("");
-  const [suiteFilterModules, setSuiteFilterModules] = useState<string[]>([]);
-  const [suiteFilterPriorities, setSuiteFilterPriorities] = useState<string[]>([]);
-  const [suiteFilterTags, setSuiteFilterTags] = useState<string[]>([]);
-  const [suiteFilterAutoStatus, setSuiteFilterAutoStatus] = useState("");
-  const [suiteStaticTestCases, setSuiteStaticTestCases] = useState<string[]>([]);
-  const [suiteFilterPreviewCount, setSuiteFilterPreviewCount] = useState<number | null>(null);
-  const [editingSuiteId, setEditingSuiteId] = useState("");
-  const [editSuiteName, setEditSuiteName] = useState("");
-  const [editSuiteDescription, setEditSuiteDescription] = useState("");
-  const [editSuiteModule, setEditSuiteModule] = useState("");
-  const [editSuiteParentId, setEditSuiteParentId] = useState("");
-  const [editSuiteFilterModules, setEditSuiteFilterModules] = useState<string[]>([]);
-  const [editSuiteFilterPriorities, setEditSuiteFilterPriorities] = useState<string[]>([]);
-  const [editSuiteFilterTags, setEditSuiteFilterTags] = useState<string[]>([]);
-  const [editSuiteFilterAutoStatus, setEditSuiteFilterAutoStatus] = useState("");
+  const [suiteCreateCaseSelection, setSuiteCreateCaseSelection] = useState<string[]>([]);
+  const [suiteAddCaseSelection, setSuiteAddCaseSelection] = useState<string[]>([]);
+  const [suiteCreateCaseSearch, setSuiteCreateCaseSearch] = useState("");
+  const [suiteAddCaseSearch, setSuiteAddCaseSearch] = useState("");
   const [selectedSuiteId, setSelectedSuiteId] = useState("");
   const [suiteDetails, setSuiteDetails] = useState<any>(null);
-  const [suiteCaseCounts, setSuiteCaseCounts] = useState<Record<string, number>>({});
-  const [suiteCases, setSuiteCases] = useState<any[]>([]);
-  const [suiteExecutions, setSuiteExecutions] = useState<any[]>([]);
-  const [suiteActiveTab, setSuiteActiveTab] = useState<"testCases" | "analytics" | "history">("testCases");
+  const [suiteReorderIds, setSuiteReorderIds] = useState<string[]>([]);
+  const [suiteCloneName, setSuiteCloneName] = useState("");
+  const [suiteExecutionMode, setSuiteExecutionMode] = useState("");
+  const [suiteExecutionTesterIdsText, setSuiteExecutionTesterIdsText] = useState("");
+  const [suiteExecutionId, setSuiteExecutionId] = useState("");
+  const [suiteExecutionDetails, setSuiteExecutionDetails] = useState<any>(null);
+  const [suiteExecutionHistory, setSuiteExecutionHistory] = useState<any[]>([]);
+  const [activeSuiteExecutionContext, setActiveSuiteExecutionContext] = useState<{
+    suiteExecutionId: string;
+    mode: string;
+    runId: string;
+  } | null>(null);
   const [showArchivedSuites, setShowArchivedSuites] = useState(false);
-  const [suiteToast, setSuiteToast] = useState("");
-  const [showAddSuiteCasesModal, setShowAddSuiteCasesModal] = useState(false);
-  const [addSuiteCaseSearch, setAddSuiteCaseSearch] = useState("");
-  const [addSuiteCaseModule, setAddSuiteCaseModule] = useState("");
-  const [addSuiteCaseSelection, setAddSuiteCaseSelection] = useState<string[]>([]);
-  const [draggingSuiteCaseId, setDraggingSuiteCaseId] = useState("");
-  const [showSuiteExecutionModal, setShowSuiteExecutionModal] = useState(false);
-  const [suiteExecutionMode, setSuiteExecutionMode] = useState("SEQUENTIAL");
-  const [suiteExecutionTesterIds, setSuiteExecutionTesterIds] = useState<string[]>([]);
-  const [suiteExecutionTargetStartDate, setSuiteExecutionTargetStartDate] = useState("");
-  const [suiteExecutionTargetEndDate, setSuiteExecutionTargetEndDate] = useState("");
-  const [isStartingSuiteExecution, setIsStartingSuiteExecution] = useState(false);
-  const [expandedSuiteNodes, setExpandedSuiteNodes] = useState<Record<string, boolean>>({});
-  const [showDynamicFilterModal, setShowDynamicFilterModal] = useState(false);
-  const [dynamicFilterDraftText, setDynamicFilterDraftText] = useState("{}");
-  const [suiteRunV2Id, setSuiteRunV2Id] = useState("");
-  const [suiteRunV2Executions, setSuiteRunV2Executions] = useState<any[]>([]);
-  const [suiteRunV2Summary, setSuiteRunV2Summary] = useState<any>(null);
-  const [suiteRunV2BulkStatus, setSuiteRunV2BulkStatus] = useState("PASS");
-  const [suiteRunV2ResetMode, setSuiteRunV2ResetMode] = useState("ALL");
-  const [suiteRunV2ExecutionId, setSuiteRunV2ExecutionId] = useState("");
-  const [suiteRunV2ExecutionStatus, setSuiteRunV2ExecutionStatus] = useState("PASS");
-  const [isSuiteRunV2Loading, setIsSuiteRunV2Loading] = useState(false);
   const [executionCaseId, setExecutionCaseId] = useState("");
   const [executionRunId, setExecutionRunId] = useState("");
   const [executionId, setExecutionId] = useState("");
   const [executionSteps, setExecutionSteps] = useState<any[]>([]);
   const [executionNotes, setExecutionNotes] = useState("");
   const [executionSelectedStepNumber, setExecutionSelectedStepNumber] = useState("");
-  const [executionStepStatus, setExecutionStepStatus] = useState("PASSED");
+  const [executionStepStatus, setExecutionStepStatus] = useState("");
   const [executionActualResult, setExecutionActualResult] = useState("");
   const [executionStepNotes, setExecutionStepNotes] = useState("");
   const [executionProgress, setExecutionProgress] = useState(0);
   const [executionStartedAt, setExecutionStartedAt] = useState("");
   const [executionCompletedAt, setExecutionCompletedAt] = useState("");
   const [executionDurationSeconds, setExecutionDurationSeconds] = useState<number | null>(null);
-  const [executionTimerState, setExecutionTimerState] = useState("");
-  const [executionManualMinutes, setExecutionManualMinutes] = useState("");
-  const [executionHistory, setExecutionHistory] = useState<any[]>([]);
-  const [compareExecutionId, setCompareExecutionId] = useState("");
-  const [executionCompareResult, setExecutionCompareResult] = useState<any>(null);
-  const [activeSuiteExecutionId, setActiveSuiteExecutionId] = useState("");
-  const [activeSuiteExecutionName, setActiveSuiteExecutionName] = useState("");
-  const [activeSuiteExecutionMode, setActiveSuiteExecutionMode] = useState("");
-  const [activeSuiteExecutionCases, setActiveSuiteExecutionCases] = useState<any[]>([]);
   const [executionEvidence, setExecutionEvidence] = useState<any[]>([]);
-  const [executionToast, setExecutionToast] = useState("");
-  const [showFinalizeSummary, setShowFinalizeSummary] = useState(false);
-  const [executionBugStepNumber, setExecutionBugStepNumber] = useState("");
-  const [evidenceType, setEvidenceType] = useState("IMAGE");
+  const [evidenceType, setEvidenceType] = useState("");
   const [evidenceUrl, setEvidenceUrl] = useState("");
   const [evidenceName, setEvidenceName] = useState("");
   const [evidenceNotes, setEvidenceNotes] = useState("");
@@ -283,7 +243,7 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   const [selectedExecutionReportId, setSelectedExecutionReportId] = useState("");
   const [quickBugTitle, setQuickBugTitle] = useState("");
   const [quickBugDescription, setQuickBugDescription] = useState("");
-  const [quickBugSeverity, setQuickBugSeverity] = useState("MEDIUM");
+  const [quickBugSeverity, setQuickBugSeverity] = useState("");
   const [bugs, setBugs] = useState<any[]>([]);
   const [selectedBugId, setSelectedBugId] = useState("");
   const [selectedBug, setSelectedBug] = useState<any>(null);
@@ -298,8 +258,8 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   const [bugCreateStepsToReproduce, setBugCreateStepsToReproduce] = useState("");
   const [bugCreateExpectedBehavior, setBugCreateExpectedBehavior] = useState("");
   const [bugCreateActualBehavior, setBugCreateActualBehavior] = useState("");
-  const [bugCreateSeverity, setBugCreateSeverity] = useState("MEDIUM");
-  const [bugCreatePriority, setBugCreatePriority] = useState("P3_MEDIUM");
+  const [bugCreateSeverity, setBugCreateSeverity] = useState("");
+  const [bugCreatePriority, setBugCreatePriority] = useState("");
   const [bugCreateEnvironment, setBugCreateEnvironment] = useState("");
   const [bugCreateAffectedVersion, setBugCreateAffectedVersion] = useState("");
   const [bugCreateAssignedTo, setBugCreateAssignedTo] = useState("");
@@ -307,30 +267,10 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   const [bugCreateExecutionId, setBugCreateExecutionId] = useState("");
   const [bugCreateDueDate, setBugCreateDueDate] = useState("");
   const [bugCreateAttachmentsText, setBugCreateAttachmentsText] = useState("");
-  const [adminUsers, setAdminUsers] = useState<any[]>([]);
-  const [adminCreateName, setAdminCreateName] = useState("");
-  const [adminCreateEmail, setAdminCreateEmail] = useState("");
-  const [adminCreatePassword, setAdminCreatePassword] = useState("");
-  const [adminCreateRole, setAdminCreateRole] = useState("");
-  const [adminEditUserId, setAdminEditUserId] = useState("");
-  const [adminEditName, setAdminEditName] = useState("");
-  const [adminEditRole, setAdminEditRole] = useState("TESTER");
-  const [adminEditActive, setAdminEditActive] = useState(true);
- 
-  const [adminProjects, setAdminProjects] = useState<any[]>([]);
-  const [adminProjectName, setAdminProjectName] = useState("");
-  const [adminProjectDescription, setAdminProjectDescription] = useState("");
-  const [adminAuditLogs, setAdminAuditLogs] = useState<any[]>([]);
-  const [adminAuditEntityType, setAdminAuditEntityType] = useState("");
-  const [adminSystemConfigs, setAdminSystemConfigs] = useState<any[]>([]);
-  const [adminConfigKey, setAdminConfigKey] = useState("");
-  const [adminConfigValue, setAdminConfigValue] = useState("");
-  const [adminBackups, setAdminBackups] = useState<any[]>([]);
-  const [adminBackupNotes, setAdminBackupNotes] = useState("");
-  const [bugTransitionToStatus, setBugTransitionToStatus] = useState("OPEN");
+  const [bugTransitionToStatus, setBugTransitionToStatus] = useState("");
   const [bugTransitionReason, setBugTransitionReason] = useState("");
   const [bugTransitionDuplicateOf, setBugTransitionDuplicateOf] = useState("");
-  const [bugResolveAction, setBugResolveAction] = useState("START_PROGRESS");
+  const [bugResolveAction, setBugResolveAction] = useState("");
   const [bugResolveFixNotes, setBugResolveFixNotes] = useState("");
   const [bugResolveCommitLink, setBugResolveCommitLink] = useState("");
   const [bugCommentText, setBugCommentText] = useState("");
@@ -340,74 +280,249 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   const [editingCommentId, setEditingCommentId] = useState("");
   const [editingCommentText, setEditingCommentText] = useState("");
   const [quickStatusByBugId, setQuickStatusByBugId] = useState<Record<string, string>>({});
-  const [navOpen, setNavOpen] = useState(false);
+  const [adminUsers, setAdminUsers] = useState<any[]>([]);
+  const [adminCreateName, setAdminCreateName] = useState("");
+  const [adminCreateEmail, setAdminCreateEmail] = useState("");
+  const [adminCreatePassword, setAdminCreatePassword] = useState("");
+  const [adminCreateRole, setAdminCreateRole] = useState("");
+  const [adminUserSavingId, setAdminUserSavingId] = useState("");
+  const [adminProjects, setAdminProjects] = useState<any[]>([]);
+  const [adminProjectName, setAdminProjectName] = useState("");
+  const [adminProjectDescription, setAdminProjectDescription] = useState("");
+  const [adminProjectSavingId, setAdminProjectSavingId] = useState("");
+  const [adminAuditLogs, setAdminAuditLogs] = useState<any[]>([]);
+  const [notificationItems, setNotificationItems] = useState<AppNotificationItem[]>([]);
+  const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [auditEntityType, setAuditEntityType] = useState("");
+  const [backupNotes, setBackupNotes] = useState("");
+  const [backupTriggering, setBackupTriggering] = useState(false);
+  const [rolePermissionSaving, setRolePermissionSaving] = useState(false);
+  const [editPermissionRole, setEditPermissionRole] = useState<"ADMIN" | "TESTER" | "DEVELOPER">("ADMIN");
+  const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
+    ADMIN: [
+      "Manage Users",
+      "Manage Projects",
+      "Manage Roles",
+      "View Audit Logs",
+      "Backup Management",
+    ],
+    TESTER: [
+      "Create Test Cases",
+      "Execute Tests",
+      "Bug Management",
+      "Reports",
+    ],
+    DEVELOPER: [
+      "My Assigned Bugs",
+      "All Bugs",
+      "Test Reports",
+      "Linked Commits",
+    ],
+  });
   const [activeFeature, setActiveFeature] = useState<DashboardFeature | "none">("none");
-  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [activeMenuKey, setActiveMenuKey] = useState<string>("dashboard_home");
   const roleName = currentRole.toUpperCase();
   const isTester = roleName === "TESTER";
   const isDeveloper = roleName === "DEVELOPER";
   const isAdmin = roleName === "ADMIN";
-  const roleKey = isTester ? "tester" : isDeveloper ? "developer" : isAdmin ? "admin" : "unknown";
   const canCreateAndManageTestCases = isTester;
   const canUseTemplates = isTester;
   const canRunBulkOps = isTester;
   const canImportTestCases = isTester;
-  const canSeeSelectionControls = isTester;
-  const canExecuteTests = isTester;
-  const canManageTestRuns = isTester;
   const canManageSuites = isTester;
-  const canViewBugs = isTester || isDeveloper;
-  const canCreateBugs = isTester;
-  const canTransitionBugs = isTester || isDeveloper;
+  const canSeeSelectionControls = isTester;
+  const canExecuteTests = isTester || isAdmin;
+  const canManageTestRuns = isTester || isAdmin;
+  const canViewBugs = isTester || isDeveloper || isAdmin;
+  const canCreateBugs = isTester || isAdmin;
+  const canTransitionBugs = isTester || isDeveloper || isAdmin;
   const canResolveBugs = isDeveloper;
-  const testerFeatures: Array<{ key: DashboardFeature; label: string }> = [
-    { key: "create_test_case", label: "Create Test Case" },
-    { key: "templates", label: "Templates" },
-    { key: "bulk_operations", label: "Bulk Operations" },
-    { key: "import_test_cases", label: "Import Test Cases" },
-    { key: "test_suites", label: "Test Suites" },
-    { key: "test_runs", label: "Test Run Management" },
-    { key: "execute_tests", label: "Execute Tests" },
-    { key: "bug_management", label: "Bug Management" },
-    { key: "test_cases", label: "Test Cases" },
+  const testerNavItems: DashboardNavItem[] = [
+  { key: "dashboard_home", label: "Dashboard", icon: "D" },
+  { key: "create_test_case", label: "Create Test Case", icon: "+" },
+  { key: "test_cases", label: "Test Cases", icon: "T" },
+  { key: "templates", label: "Templates", icon: "M" },
+  { key: "bulk_operations", label: "Bulk Operations", icon: "B" },
+  { key: "import_test_cases", label: "Import Test Cases", icon: "I" },
+  { key: "suite_management", label: "Test Suites", icon: "S" },
+  { key: "test_runs", label: "Test Run Management", icon: "R" },
+  { key: "execute_tests", label: "Execute Tests", icon: "E" },
+  { key: "bug_management", label: "Bug Management", icon: "!" },
+  { key: "reports", label: "Reports", icon: "P" },
+];
+const developerNavItems: DashboardNavItem[] = [
+  { key: "dashboard_home", label: "Dashboard", icon: "D" },
+  { key: "my_assigned_bugs", label: "My Assigned Bugs", icon: "!" },
+  { key: "all_bugs", label: "All Bugs", icon: "A" },
+  { key: "test_reports", label: "Test Reports", icon: "P" },
+  { key: "performance_report", label: "Performance Report", icon: "F" },
+  { key: "linked_commits", label: "Linked Commits", icon: "C" },
+];
+const adminNavItems: DashboardNavItem[] = [
+  { key: "dashboard_home", label: "Dashboard", icon: "D" },
+  { key: "user_management", label: "User Management", icon: "U" },
+  { key: "role_management", label: "Role Management", icon: "L" },
+  { key: "project_management", label: "Project Management", icon: "J" },
+  { key: "audit_logs", label: "Audit Logs", icon: "A" },
+  { key: "backup_management", label: "Backup Management", icon: "K" },
+];
+const roleNavItems = isTester ? testerNavItems : isDeveloper ? developerNavItems : adminNavItems;
+  const permissionCatalog = [
+    "Manage Users",
+    "Manage Projects",
+    "Manage Roles",
+    "View Audit Logs",
+    "Backup Management",
+    "Create Test Cases",
+    "Execute Tests",
+    "Bug Management",
+    "Reports",
+    "My Assigned Bugs",
+    "All Bugs",
+    "Test Reports",
+    "Performance Report",
+    "Linked Commits",
   ];
-  const developerFeatures: Array<{ key: DashboardFeature; label: string }> = [
-    { key: "developer_workspace", label: "Developer Workspace" },
-    { key: "bug_management", label: "Assigned Bugs" },
-    { key: "test_cases", label: "Test Cases" },
-  ];
-  const adminFeatures: Array<{ key: DashboardFeature; label: string }> = [
-    { key: "admin_create_users", label: "Create Users" },
-    { key: "admin_manage_users", label: "Manage Users" },
-    { key: "admin_manage_projects", label: "Manage Projects" },
-    { key: "admin_manage_roles", label: "Manage Roles" },
-    { key: "admin_audit_logs", label: "Audit Logs" },
-    { key: "admin_system_config", label: "System Config" },
-    { key: "admin_backup_mgmt", label: "Backup Mgmt" },
-  ];
-  const roleFeatures = isTester ? testerFeatures : isDeveloper ? developerFeatures : adminFeatures;
-  const roleSummary = isTester
-    ? "Tester workspace: create, edit, execute, report, and assign issues."
-    : isDeveloper
-    ? "Developer workspace: view assigned bugs, add fix notes, and update statuses."
-    : isAdmin
-    ? "Admin workspace: govern users, projects, roles, configuration, and audits."
-    : "Workspace";
-  const showCreateTestCase = canCreateAndManageTestCases && activeFeature === "create_test_case";
-  const showTemplates = canUseTemplates && activeFeature === "templates";
-  const showBulkOperations = canRunBulkOps && activeFeature === "bulk_operations";
-  const showImport = canImportTestCases && activeFeature === "import_test_cases";
-  const showTestSuites = canManageSuites && activeFeature === "test_suites";
-  const showTestRuns = canManageTestRuns && activeFeature === "test_runs";
-  const showExecute = canExecuteTests && activeFeature === "execute_tests";
+
+  const menuFeatureMap: Record<string, DashboardFeature | "none"> = {
+    dashboard_home: "none",
+    create_test_case: "create_test_case",
+    test_cases: "test_cases",
+    templates: "templates",
+    bulk_operations: "bulk_operations",
+    import_test_cases: "import_test_cases",
+    suite_management: "suite_management",
+    test_runs: "test_runs",
+    execute_tests: "execute_tests",
+    bug_management: "bug_management",
+    reports: "execute_tests",
+    my_assigned_bugs: "bug_management",
+    all_bugs: "bug_management",
+    test_reports: "execute_tests",
+    performance_report: "developer_workspace",
+    linked_commits: "developer_workspace",
+    user_management: "admin_workspace",
+    role_management: "admin_workspace",
+    project_management: "admin_workspace",
+    system_configuration: "admin_workspace",
+    audit_logs: "admin_workspace",
+    backup_management: "admin_workspace",
+    developer_workspace: "developer_workspace",
+    admin_workspace: "admin_workspace",
+  };
+
+  const normalizedFeature = activeFeature;
+
+  const currentPageMeta = (() => {
+    if (activeMenuKey === "dashboard_home" || activeFeature === "none") {
+      return {
+        title: "Dashboard Overview",
+        subtitle: "Monitor quality, execution trends, and module health in one place.",
+      };
+    }
+    const byKey: Record<string, { title: string; subtitle: string }> = {
+      create_test_case: { title: "Create Test Case", subtitle: "Design structured test cases with complete metadata." },
+      templates: { title: "Templates", subtitle: "Standardize test case creation using reusable templates." },
+      bulk_operations: { title: "Bulk Operations", subtitle: "Apply controlled updates across multiple test cases." },
+      import_test_cases: { title: "Import Test Cases", subtitle: "Import structured test cases from JSON, CSV, or Excel." },
+      suite_management: { title: "Test Suites", subtitle: "Organize suites and manage static or dynamic case collections." },
+      test_runs: { title: "Test Run Management", subtitle: "Plan and execute test runs with assignments and progress." },
+      execute_tests: { title: "Execute Tests", subtitle: "Run test cases step-by-step with evidence and timing." },
+      bug_management: { title: "Bug Management", subtitle: "Track defects, comments, workflow transitions, and ownership." },
+      test_cases: { title: "Test Cases", subtitle: "Browse, inspect, clone, and edit detailed test case records." },
+      reports: { title: "Reports", subtitle: "Review execution outcomes and defect quality indicators." },
+      my_assigned_bugs: { title: "My Assigned Bugs", subtitle: "Focus on defects currently assigned to your developer queue." },
+      all_bugs: { title: "All Bugs", subtitle: "Review bug backlog with filters, priority, and severity views." },
+      test_reports: { title: "Test Reports", subtitle: "Analyze run-level and case-level quality trends." },
+      performance_report: { title: "Performance Report", subtitle: "Review test execution throughput and aging trends." },
+      linked_commits: { title: "Linked Commits", subtitle: "Track fixes mapped to commits and retest cycles." },
+      admin_workspace: { title: "Admin Workspace", subtitle: "Govern users, roles, projects, configuration, and audits." },
+      user_management: { title: "User Management", subtitle: "Manage user activation, lifecycle, and role assignments." },
+      role_management: { title: "Role Management", subtitle: "Control permissions and assignment structure across teams." },
+      project_management: { title: "Project Management", subtitle: "Manage projects and module ownership for quality planning." },
+      system_configuration: { title: "System Configuration", subtitle: "Maintain platform-level settings and controls." },
+      audit_logs: { title: "Audit Logs", subtitle: "Track all critical operations with actor and timestamp context." },
+      backup_management: { title: "Backup Management", subtitle: "Trigger and monitor backup jobs for platform resilience." },
+      developer_workspace: { title: "Developer Workspace", subtitle: "Resolve assigned defects with workflow and evidence updates." },
+    };
+    return byKey[activeMenuKey] || byKey[activeFeature] || byKey.bug_management;
+  })();
+  const showCreateTestCase = canCreateAndManageTestCases && normalizedFeature === "create_test_case";
+  const showTemplates = canUseTemplates && normalizedFeature === "templates";
+  const showBulkOperations = canRunBulkOps && normalizedFeature === "bulk_operations";
+  const showImport = canImportTestCases && normalizedFeature === "import_test_cases";
+  const showTestRuns = canManageTestRuns && normalizedFeature === "test_runs";
+  const showSuiteManagement = canManageSuites && normalizedFeature === "suite_management";
+  const showExecute = canExecuteTests && normalizedFeature === "execute_tests";
   const showBugs =
     canViewBugs &&
-    (activeFeature === "bug_management" || (isDeveloper && activeFeature === "developer_workspace"));
-  const showTestCases = activeFeature === "test_cases";
-  const showRolePanel = activeFeature === "developer_workspace";
+    (normalizedFeature === "bug_management" || (isDeveloper && normalizedFeature === "developer_workspace"));
+  const showTestCases = normalizedFeature === "test_cases";
+  const showRolePanel = normalizedFeature === "developer_workspace" || normalizedFeature === "admin_workspace";
+  const selectedExecutionRun = testRuns.find((run) => run.id === executionRunId) || null;
+  const executionRunCaseIds = new Set(
+    (selectedExecutionRun?.testCases || [])
+      .map((item: any) => item?.testCaseId)
+      .filter((id: any) => typeof id === "string" && id.length > 0)
+  );
+  const executionSelectableCases =
+    executionRunId && executionRunCaseIds.size > 0
+      ? testCases.filter((tc) => executionRunCaseIds.has(tc.id))
+      : testCases;
   const assignedBugCount = bugs.length;
   const p1UrgentCount = bugs.filter((item) => item.priority === "P1_URGENT").length;
   const criticalBugCount = bugs.filter((item) => item.severity === "CRITICAL").length;
+  const failedExecutions = executionReports.filter((item) => item.result === "FAILED");
+  const testerPendingTests = testCases
+    .filter((item) => item.status === "DRAFT" || item.status === "READY_FOR_REVIEW")
+    .slice(0, 8);
+  const recentFailures = failedExecutions.slice(0, 6);
+  const statusCounts = {
+    passed: executionReports.filter((item) => item.result === "PASSED").length,
+    failed: executionReports.filter((item) => item.result === "FAILED").length,
+    blocked: executionReports.filter((item) => item.result === "BLOCKED").length,
+    skipped: executionReports.filter((item) => item.result === "SKIPPED").length,
+  };
+  const totalStatusCount =
+    statusCounts.passed + statusCounts.failed + statusCounts.blocked + statusCounts.skipped || 1;
+  const statusPie = `conic-gradient(
+    #16a34a 0deg ${(statusCounts.passed / totalStatusCount) * 360}deg,
+    #dc2626 ${(statusCounts.passed / totalStatusCount) * 360}deg ${((statusCounts.passed + statusCounts.failed) / totalStatusCount) * 360}deg,
+    #d97706 ${((statusCounts.passed + statusCounts.failed) / totalStatusCount) * 360}deg ${((statusCounts.passed + statusCounts.failed + statusCounts.blocked) / totalStatusCount) * 360}deg,
+    #64748b ${((statusCounts.passed + statusCounts.failed + statusCounts.blocked) / totalStatusCount) * 360}deg 360deg
+  )`;
+  const trendBuckets = (() => {
+    const base = Array.from({ length: 7 }, (_, idx) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - idx));
+      const key = d.toISOString().slice(0, 10);
+      return { key, label: d.toLocaleDateString(undefined, { weekday: "short" }), count: 0 };
+    });
+    executionReports.forEach((item) => {
+      const key = new Date(item.executedAt).toISOString().slice(0, 10);
+      const found = base.find((row) => row.key === key);
+      if (found) found.count += 1;
+    });
+    return base;
+  })();
+  const maxTrendCount = Math.max(...trendBuckets.map((b) => b.count), 1);
+  const bugStatusCounts = {
+    NEW: bugs.filter((b) => b.workflowStatus === "NEW").length,
+    OPEN: bugs.filter((b) => b.workflowStatus === "OPEN").length,
+    IN_PROGRESS: bugs.filter((b) => b.workflowStatus === "IN_PROGRESS").length,
+    FIXED: bugs.filter((b) => b.workflowStatus === "FIXED").length,
+    VERIFIED: bugs.filter((b) => b.workflowStatus === "VERIFIED").length,
+    CLOSED: bugs.filter((b) => b.workflowStatus === "CLOSED").length,
+  };
+  const bugStatusTotal = Object.values(bugStatusCounts).reduce((acc, n) => acc + n, 0) || 1;
+  const bugStatusPie = `conic-gradient(
+    #2563eb 0deg ${(bugStatusCounts.NEW / bugStatusTotal) * 360}deg,
+    #7c3aed ${(bugStatusCounts.NEW / bugStatusTotal) * 360}deg ${((bugStatusCounts.NEW + bugStatusCounts.OPEN) / bugStatusTotal) * 360}deg,
+    #d97706 ${((bugStatusCounts.NEW + bugStatusCounts.OPEN) / bugStatusTotal) * 360}deg ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS) / bugStatusTotal) * 360}deg,
+    #16a34a ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS) / bugStatusTotal) * 360}deg ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED) / bugStatusTotal) * 360}deg,
+    #0891b2 ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED) / bugStatusTotal) * 360}deg ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED + bugStatusCounts.VERIFIED) / bugStatusTotal) * 360}deg,
+    #64748b ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED + bugStatusCounts.VERIFIED) / bugStatusTotal) * 360}deg 360deg
+  )`;
 
   const parseSteps = (raw: string): unknown => {
     const value = raw.trim();
@@ -576,23 +691,56 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
       severity: bugFilterSeverity,
       sortBy: bugSortBy,
     };
-    const [caseRows, templateRows, runRows, testerRows, executionRows, bugRows] = await Promise.all([
+    const [caseRows, templateRows, runRows, suiteRows, executionRows, bugRows] = await Promise.all([
       getTestCasesApi(),
       listTemplatesApi(),
       canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
-      canManageTestRuns ? listAvailableTestersApi() : Promise.resolve([]),
+      canManageSuites
+        ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
+        : Promise.resolve([]),
       canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
       canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
-      canManageSuites ? listSuitesApi() : Promise.resolve([]),
     ]);
     const rows = Array.isArray(caseRows) ? caseRows : [];
     setTestCases(rows);
+    const projectsFromCases = Array.from(
+      new Map(
+        rows
+          .map((row: any) => row?.project)
+          .filter((project: any) => project?.id)
+          .map((project: any) => [
+            project.id,
+            {
+              id: project.id,
+              name: project.name || "Unnamed Project",
+              description: project.description || "",
+              isActive: project.isActive !== false,
+            },
+          ])
+      ).values()
+    );
+    if (projectsFromCases.length > 0) {
+      setAdminProjects((prev) => {
+        const byId = new Map<string, any>();
+        prev.forEach((p: any) => byId.set(p.id, p));
+        projectsFromCases.forEach((p: any) => {
+          if (!byId.has(p.id)) byId.set(p.id, p);
+        });
+        return Array.from(byId.values());
+      });
+    }
     setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
     setTemplates(Array.isArray(templateRows) ? templateRows : []);
     setTestRuns(Array.isArray(runRows) ? runRows : []);
-    const testers = Array.isArray(testerRows) ? testerRows : [];
-    setRunTesterOptions(testers);
-    setRunTesterIds((prev) => prev.filter((id) => testers.some((tester) => tester.id === id)));
+    const suiteList = Array.isArray(suiteRows) ? suiteRows : [];
+    setSuites(suiteList);
+    if (selectedSuiteId && !suiteList.some((suite: any) => suite.id === selectedSuiteId)) {
+      setSelectedSuiteId("");
+      setSuiteDetails(null);
+      setSuiteExecutionHistory([]);
+      setSuiteExecutionId("");
+      setSuiteExecutionDetails(null);
+    }
     setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
     const bugList = Array.isArray(bugRows) ? bugRows : [];
     setBugs(bugList);
@@ -600,164 +748,7 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
       if (!prev?.id) return prev;
       return bugList.find((item) => item.id === prev.id) || null;
     });
-    try {
-      if (isAdmin) {
-        setTestCases([]);
-        setTemplates([]);
-        setTestRuns([]);
-        setRunTesterOptions([]);
-        setExecutionReports([]);
-        setBugs([]);
-        setSuites([]);
-        return;
-      }
-      const bugParams: Record<string, string> = {
-        status: bugFilterStatus,
-        priority: bugFilterPriority,
-        severity: bugFilterSeverity,
-        sortBy: bugSortBy,
-      };
-      const [caseRows, templateRows, runRows, testerRows, executionRows, bugRows, suiteRows] = await Promise.all([
-        getTestCasesApi(),
-        listTemplatesApi(),
-        canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
-        canManageTestRuns ? listAvailableTestersApi() : Promise.resolve([]),
-        canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
-        canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
-        canManageSuites
-          ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
-          : Promise.resolve([]),
-      ]);
-      const rows = Array.isArray(caseRows) ? caseRows : [];
-      setTestCases(rows);
-      setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
-      setTemplates(Array.isArray(templateRows) ? templateRows : []);
-      setTestRuns(Array.isArray(runRows) ? runRows : []);
-      const testers = Array.isArray(testerRows) ? testerRows : [];
-      setRunTesterOptions(testers);
-      setRunTesterIds((prev) => prev.filter((id) => testers.some((tester) => tester.id === id)));
-      setExecutionReports(Array.isArray(executionRows) ? executionRows : []);
-      const bugList = Array.isArray(bugRows) ? bugRows : [];
-      setBugs(bugList);
-      setSelectedBug((prev: any) => {
-        if (!prev?.id) return prev;
-        return bugList.find((item) => item.id === prev.id) || null;
-      });
-      setSuites(Array.isArray(suiteRows) ? suiteRows : []);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
-  const showSuiteToast = (message: string) => {
-    setSuiteToast(message);
-    window.setTimeout(() => {
-      setSuiteToast((current) => (current === message ? "" : current));
-    }, 2200);
-  };
-
-  const reloadSuites = async () => {
-    const suiteRows = await listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined);
-    setSuites(Array.isArray(suiteRows) ? suiteRows : []);
-  };
-
-  const showExecutionToast = (message: string) => {
-    setExecutionToast(message);
-    window.setTimeout(() => {
-      setExecutionToast((current) => (current === message ? "" : current));
-    }, 2200);
-  };
-
-  const clearExecutionDraftStorage = () => {
-    localStorage.removeItem(EXECUTION_DRAFT_KEY);
-  };
-
-  const toMinutesString = (durationSeconds: number | null | undefined): string => {
-    if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds) || durationSeconds < 0) return "";
-    return String(Math.round(durationSeconds / 60));
-  };
-
-  const openExecutionSession = async (testCaseId: string, runId?: string) => {
-    const opened = await openExecutionApi(testCaseId, runId || undefined);
-    const currentSteps = Array.isArray(opened?.stepResults) ? opened.stepResults : [];
-    setExecutionSteps(currentSteps);
-    setExecutionProgress(opened?.draftExecution?.progressPercent || 0);
-    setExecutionNotes(opened?.draftExecution?.notes || "");
-    setExecutionStartedAt(opened?.draftExecution?.startedAt || "");
-    setExecutionCompletedAt(opened?.draftExecution?.completedAt || "");
-    setExecutionDurationSeconds(
-      typeof opened?.draftExecution?.durationSeconds === "number"
-        ? opened.draftExecution.durationSeconds
-        : null
-    );
-    setExecutionTimerState(
-      String(
-        opened?.draftExecution?.timerState ||
-          (opened?.draftExecution?.completedAt ? "STOPPED" : opened?.draftExecution?.startedAt ? "RUNNING" : "")
-      )
-    );
-    setExecutionManualMinutes(
-      toMinutesString(
-        typeof opened?.draftExecution?.manualDurationSeconds === "number"
-          ? opened.draftExecution.manualDurationSeconds
-          : null
-      )
-    );
-    setExecutionEvidence(Array.isArray(opened?.draftExecution?.evidence) ? opened.draftExecution.evidence : []);
-    if (opened?.draftExecution?.id) {
-      setExecutionId(opened.draftExecution.id);
-      try {
-        const historyRows = await listExecutionHistoryApi(opened.draftExecution.id);
-        setExecutionHistory(Array.isArray(historyRows) ? historyRows : []);
-      } catch {
-        setExecutionHistory([]);
-      }
-    } else {
-      const started = await startExecutionApi({
-        testCaseId,
-        testRunId: runId || null,
-        notes: executionNotes || "",
-      });
-      setExecutionId(started.id);
-      setExecutionStartedAt(started?.startedAt || "");
-      setExecutionCompletedAt("");
-      setExecutionDurationSeconds(null);
-      setExecutionTimerState("RUNNING");
-      setExecutionManualMinutes("");
-      setExecutionEvidence([]);
-      try {
-        const historyRows = await listExecutionHistoryApi(started.id);
-        setExecutionHistory(Array.isArray(historyRows) ? historyRows : []);
-      } catch {
-        setExecutionHistory([]);
-      }
-    }
-    setCompareExecutionId("");
-    setExecutionCompareResult(null);
-    if (currentSteps.length > 0) {
-      setExecutionSelectedStepNumber(String(currentSteps[0].stepNumber));
-      setExecutionBugStepNumber(String(currentSteps[0].stepNumber));
-    } else {
-      setExecutionSelectedStepNumber("");
-      setExecutionBugStepNumber("");
-    }
-  };
-
-  const openSuiteDetails = async (suiteId: string) => {
-    const [detail, caseData, history] = await Promise.all([
-      getSuiteApi(suiteId),
-      getSuiteTestCasesApi(suiteId),
-      listSuiteExecutionsApi(suiteId).catch(() => []),
-    ]);
-    setSuiteDetails(detail);
-    setSelectedSuiteId(suiteId);
-    setSuiteCases(Array.isArray(caseData?.testCases) ? caseData.testCases : []);
-    setSuiteExecutions(Array.isArray(history) ? history : []);
-    setSuiteActiveTab("testCases");
-    setSuiteRunV2Id("");
-    setSuiteRunV2Executions([]);
-    setSuiteRunV2Summary(null);
-    setSuiteRunV2ExecutionId("");
+    setIsRefreshing(false);
   };
 
   const loadBugDetails = async (bugId: string) => {
@@ -778,17 +769,99 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setAdminUsers(Array.isArray(rows) ? rows : []);
   };
 
-  const loadAdminWorkspaceData = async () => {
-    const [projects, logs, configs, backups] = await Promise.all([
-      listAdminProjectsApi(),
-      listAdminAuditLogsApi(adminAuditEntityType || undefined),
-      listAdminSystemConfigsApi(),
-      listAdminBackupsApi(),
-    ]);
-    setAdminProjects(Array.isArray(projects) ? projects : []);
-    setAdminAuditLogs(Array.isArray(logs) ? logs : []);
-    setAdminSystemConfigs(Array.isArray(configs) ? configs : []);
-    setAdminBackups(Array.isArray(backups) ? backups : []);
+  const loadAdminAuditLogs = async (entityType?: string) => {
+    const rows = await listAdminAuditLogsApi(entityType || undefined);
+    setAdminAuditLogs(Array.isArray(rows) ? rows : []);
+  };
+
+  const buildBugNotificationItems = (bugRows: any[]): AppNotificationItem[] => {
+    if (!Array.isArray(bugRows) || bugRows.length === 0) return [];
+    const unresolvedWorkflow = new Set(["NEW", "OPEN", "IN_PROGRESS", "REOPENED"]);
+    return bugRows
+      .filter((row) => {
+        const workflow = String(row?.workflowStatus || row?.status || "").toUpperCase();
+        return unresolvedWorkflow.has(workflow);
+      })
+      .sort((a, b) => {
+        const at = new Date(a?.updatedAt || a?.createdAt || 0).getTime();
+        const bt = new Date(b?.updatedAt || b?.createdAt || 0).getTime();
+        return bt - at;
+      })
+      .slice(0, 8)
+      .map((row) => {
+        const priority = String(row?.bugPriority || row?.priority || "").toUpperCase() || "P3_MEDIUM";
+        const workflow = String(row?.workflowStatus || row?.status || "").toUpperCase() || "OPEN";
+        return {
+          id: `bug:${String(row?.id || Math.random())}`,
+          type: "bug" as const,
+          title: `${row?.bugCode || "BUG"} • ${workflow} • ${priority}`,
+          subtitle: String(row?.title || "Bug update"),
+          isRead: false,
+          bugId: String(row?.id || ""),
+        };
+      })
+      .filter((item) => item.bugId);
+  };
+
+  const loadNotifications = async () => {
+    if (screen !== "dashboard") {
+      setNotificationItems([]);
+      setNotificationUnreadCount(0);
+      return;
+    }
+
+    const canUseMentionApi = isTester || isDeveloper;
+    let mentionItems: AppNotificationItem[] = [];
+
+    if (canUseMentionApi) {
+      try {
+        const payload = await listBugNotificationsApi({ unread: "0", take: 30 });
+        const rows = Array.isArray(payload?.notifications) ? payload.notifications : [];
+        mentionItems = rows.map((row: any) => ({
+          id: `mention:${String(row?.id || Math.random())}`,
+          sourceId: String(row?.id || ""),
+          type: "mention" as const,
+          title: String(row?.message || "You were mentioned in a bug comment"),
+          subtitle:
+            String(row?.bugCode || "").trim() && String(row?.issueTitle || "").trim()
+              ? `${row.bugCode} • ${row.issueTitle}`
+              : String(row?.issueTitle || row?.commentPreview || "").trim(),
+          isRead: Boolean(row?.isRead),
+          bugId: String(row?.issueId || ""),
+        }));
+      } catch {
+        mentionItems = [];
+      }
+    }
+
+    const bugItems = canUseMentionApi ? buildBugNotificationItems(bugs) : [];
+    setNotificationItems([...mentionItems, ...bugItems]);
+    setNotificationUnreadCount(mentionItems.filter((item) => !item.isRead).length);
+  };
+
+  const handleNotificationClick = async (id: string) => {
+    const selected = notificationItems.find((item) => item.id === id);
+    if (!selected) return;
+
+    if (selected.type === "mention" && selected.sourceId && !selected.isRead) {
+      try {
+        await markBugNotificationReadApi(selected.sourceId);
+      } catch {
+        // no-op for optimistic UI
+      }
+      setNotificationItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, isRead: true } : item))
+      );
+      setNotificationUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
+    if (selected.bugId) {
+      setSelectedBugId(selected.bugId);
+      const targetMenuKey = isDeveloper ? "my_assigned_bugs" : "bug_management";
+      handleDashboardNavSelect(targetMenuKey).catch(() => {
+        // no-op
+      });
+    }
   };
 
   const resetExecutionPanel = () => {
@@ -798,35 +871,23 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setExecutionSteps([]);
     setExecutionNotes("");
     setExecutionSelectedStepNumber("");
-    setExecutionStepStatus("PASSED");
+    setExecutionStepStatus("");
     setExecutionActualResult("");
     setExecutionStepNotes("");
     setExecutionProgress(0);
     setExecutionStartedAt("");
     setExecutionCompletedAt("");
     setExecutionDurationSeconds(null);
-    setExecutionTimerState("");
-    setExecutionManualMinutes("");
-    setExecutionHistory([]);
-    setCompareExecutionId("");
-    setExecutionCompareResult(null);
-    setActiveSuiteExecutionId("");
-    setActiveSuiteExecutionName("");
-    setActiveSuiteExecutionMode("");
-    setActiveSuiteExecutionCases([]);
     setExecutionEvidence([]);
-    setExecutionToast("");
-    setShowFinalizeSummary(false);
-    setExecutionBugStepNumber("");
-    setEvidenceType("IMAGE");
+    setEvidenceType("");
     setEvidenceUrl("");
     setEvidenceName("");
     setEvidenceNotes("");
     setSelectedExecutionReportId("");
     setQuickBugTitle("");
     setQuickBugDescription("");
-    setQuickBugSeverity("MEDIUM");
-    clearExecutionDraftStorage();
+    setQuickBugSeverity("");
+    setActiveSuiteExecutionContext(null);
   };
 
   const resetBugPanel = () => {
@@ -840,8 +901,8 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setBugCreateStepsToReproduce("");
     setBugCreateExpectedBehavior("");
     setBugCreateActualBehavior("");
-    setBugCreateSeverity("MEDIUM");
-    setBugCreatePriority("P3_MEDIUM");
+    setBugCreateSeverity("");
+    setBugCreatePriority("");
     setBugCreateEnvironment("");
     setBugCreateAffectedVersion("");
     setBugCreateAssignedTo("");
@@ -849,10 +910,10 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setBugCreateExecutionId("");
     setBugCreateDueDate("");
     setBugCreateAttachmentsText("");
-    setBugTransitionToStatus("OPEN");
+    setBugTransitionToStatus("");
     setBugTransitionReason("");
     setBugTransitionDuplicateOf("");
-    setBugResolveAction("START_PROGRESS");
+    setBugResolveAction("");
     setBugResolveFixNotes("");
     setBugResolveCommitLink("");
     setBugCommentText("");
@@ -871,29 +932,29 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setTcPreConditionsText("");
     setTcTestDataRequirementsText("");
     setTcEnvironmentRequirementsText("");
-    setTcModule("Authentication");
+    setTcModule("");
     setTcStepsText("");
     setTcPostConditionsText("");
     setTcMetadataText("");
     setTcTagsText("");
     setTcEstimatedDurationMinutes("");
-    setTcAutomationStatus("NOT_AUTOMATED");
+    setTcAutomationStatus("");
     setTcAutomationScriptLink("");
-    setTcPriority("MEDIUM");
-    setTcSeverity("MAJOR");
-    setTcType("FUNCTIONAL");
-    setTcStatus("DRAFT");
-    setBulkOperation("STATUS");
-    setBulkStatus("READY_FOR_REVIEW");
-    setBulkPriority("MEDIUM");
-    setBulkSeverityValue("MAJOR");
-    setBulkModule("General");
+    setTcPriority("");
+    setTcSeverity("");
+    setTcType("");
+    setTcStatus("");
+    setBulkOperation("");
+    setBulkStatus("");
+    setBulkPriority("");
+    setBulkSeverityValue("");
+    setBulkModule("");
     setBulkSuiteId("");
     setBulkAssignee("");
     setTemplateName("");
     setTemplateCategory("");
     setTemplateSteps("");
-    setImportType("JSON");
+    setImportType("");
     setImportFieldMappingText("");
     setImportExcelRows([]);
     setImportExcelFileName("");
@@ -902,12 +963,43 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setRunDescription("");
     setRunStartDate("");
     setRunEndDate("");
-    setRunTesterIds([]);
+    setRunTesterIdsText("");
     setSelectedRunId("");
     setRunDetails(null);
+    setSuiteName("");
+    setSuiteDescription("");
+    setSuiteModule("");
+    setSuiteProjectId("");
+    setSuiteParentId("");
+    setSuiteCreateCaseSelection([]);
+    setSuiteAddCaseSelection([]);
+    setSuiteCreateCaseSearch("");
+    setSuiteAddCaseSearch("");
+    setSelectedSuiteId("");
+    setSuiteDetails(null);
+    setSuiteReorderIds([]);
+    setSuiteCloneName("");
+    setSuiteExecutionMode("");
+    setSuiteExecutionTesterIdsText("");
+    setSuiteExecutionId("");
+    setSuiteExecutionDetails(null);
+    setSuiteExecutionHistory([]);
+    setAdminUsers([]);
+    setAdminCreateName("");
+    setAdminCreateEmail("");
+    setAdminCreatePassword("");
+    setAdminCreateRole("");
+    setAdminUserSavingId("");
     resetExecutionPanel();
     resetBugPanel();
   };
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !canManageSuites) return;
+    loadTestCaseData().catch(() => {
+      // no-op
+    });
+  }, [showArchivedSuites, screen, canManageSuites]);
 
   const resetCreateTestCaseFields = () => {
     setTcTitle("");
@@ -915,18 +1007,18 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setTcPreConditionsText("");
     setTcTestDataRequirementsText("");
     setTcEnvironmentRequirementsText("");
-    setTcModule("Authentication");
+    setTcModule("");
     setTcStepsText("");
     setTcPostConditionsText("");
     setTcMetadataText("");
     setTcTagsText("");
     setTcEstimatedDurationMinutes("");
-    setTcAutomationStatus("NOT_AUTOMATED");
+    setTcAutomationStatus("");
     setTcAutomationScriptLink("");
-    setTcPriority("MEDIUM");
-    setTcSeverity("MAJOR");
-    setTcType("FUNCTIONAL");
-    setTcStatus("DRAFT");
+    setTcPriority("");
+    setTcSeverity("");
+    setTcType("");
+    setTcStatus("");
   };
 
   const resetTemplateFields = () => {
@@ -936,7 +1028,7 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   };
 
   const resetImportFields = () => {
-    setImportType("JSON");
+    setImportType("");
     setImportFieldMappingText("");
     setImportExcelRows([]);
     setImportExcelFileName("");
@@ -951,65 +1043,16 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setRunDescription("");
     setRunStartDate("");
     setRunEndDate("");
-    setRunTesterIds([]);
+    setRunTesterIdsText("");
     setSelectedRunId("");
     setRunDetails(null);
-  };
-
-  const resetSuiteFields = () => {
-    setSuiteName("");
-    setSuiteDescription("");
-    setSuiteModule("");
-    setSuiteType("STATIC");
-    setSuiteParentId("");
-    setSuiteFilterModules([]);
-    setSuiteFilterPriorities([]);
-    setSuiteFilterTags([]);
-    setSuiteFilterAutoStatus("");
-    setSuiteStaticTestCases([]);
-    setSuiteFilterPreviewCount(null);
-    setEditingSuiteId("");
-    setEditSuiteName("");
-    setEditSuiteDescription("");
-    setEditSuiteModule("");
-    setEditSuiteParentId("");
-    setEditSuiteFilterModules([]);
-    setEditSuiteFilterPriorities([]);
-    setEditSuiteFilterTags([]);
-    setEditSuiteFilterAutoStatus("");
-    setSelectedSuiteId("");
-    setSuiteDetails(null);
-    setSuiteCases([]);
-    setSuiteExecutions([]);
-    setSuiteActiveTab("testCases");
-    setShowAddSuiteCasesModal(false);
-    setAddSuiteCaseSearch("");
-    setAddSuiteCaseModule("");
-    setAddSuiteCaseSelection([]);
-    setDraggingSuiteCaseId("");
-    setShowSuiteExecutionModal(false);
-    setSuiteExecutionMode("SEQUENTIAL");
-    setSuiteExecutionTesterIds([]);
-    setSuiteExecutionTargetStartDate("");
-    setSuiteExecutionTargetEndDate("");
-    setIsStartingSuiteExecution(false);
-    setShowDynamicFilterModal(false);
-    setDynamicFilterDraftText("{}");
-    setSuiteRunV2Id("");
-    setSuiteRunV2Executions([]);
-    setSuiteRunV2Summary(null);
-    setSuiteRunV2BulkStatus("PASS");
-    setSuiteRunV2ResetMode("ALL");
-    setSuiteRunV2ExecutionId("");
-    setSuiteRunV2ExecutionStatus("PASS");
-    setIsSuiteRunV2Loading(false);
   };
 
   const resetQuickBugFields = () => {
     setSelectedExecutionReportId("");
     setQuickBugTitle("");
     setQuickBugDescription("");
-    setQuickBugSeverity("MEDIUM");
+    setQuickBugSeverity("");
   };
 
   const resetBugCreateFields = () => {
@@ -1018,8 +1061,8 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setBugCreateStepsToReproduce("");
     setBugCreateExpectedBehavior("");
     setBugCreateActualBehavior("");
-    setBugCreateSeverity("MEDIUM");
-    setBugCreatePriority("P3_MEDIUM");
+    setBugCreateSeverity("");
+    setBugCreatePriority("");
     setBugCreateEnvironment("");
     setBugCreateAffectedVersion("");
     setBugCreateAssignedTo("");
@@ -1027,103 +1070,6 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setBugCreateExecutionId("");
     setBugCreateDueDate("");
     setBugCreateAttachmentsText("");
-  };
-
-  const selectedSuite = suiteDetails;
-  const selectedSuiteExecutableCount = selectedSuite
-    ? selectedSuite.type === "DYNAMIC"
-      ? suiteCases.length
-      : suiteCaseCounts[selectedSuite.id] ?? suiteCases.length
-    : 0;
-  const suiteChildrenMap = suites.reduce<Record<string, any[]>>((acc, suite: any) => {
-    const key = suite.parentSuiteId || "__root__";
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(suite);
-    return acc;
-  }, {});
-  const rootSuites = suiteChildrenMap["__root__"] || [];
-  const modulesForAddFilter = Array.from(new Set(testCases.map((tc: any) => tc.module).filter(Boolean)));
-  const addSuiteCaseCandidates = testCases.filter((tc: any) => {
-    const inSuite = suiteCases.some((item) => item.id === tc.id);
-    const matchModule = addSuiteCaseModule ? tc.module === addSuiteCaseModule : true;
-    const query = addSuiteCaseSearch.trim().toLowerCase();
-    const matchSearch =
-      !query ||
-      String(tc.title || "").toLowerCase().includes(query) ||
-      String(tc.testCaseCode || "").toLowerCase().includes(query);
-    return !inSuite && matchModule && matchSearch;
-  });
-  const suiteExecutionTotals = suiteExecutions.reduce(
-    (acc, row: any) => {
-      acc.totalCases += Number(row.totalCases || 0);
-      acc.passed += Number(row.passed || 0);
-      acc.failed += Number(row.failed || 0);
-      acc.blocked += Number(row.blocked || 0);
-      acc.skipped += Number(row.skipped || 0);
-      return acc;
-    },
-    { totalCases: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 }
-  );
-  const suiteExecutionCompleted =
-    suiteExecutionTotals.passed +
-    suiteExecutionTotals.failed +
-    suiteExecutionTotals.blocked +
-    suiteExecutionTotals.skipped;
-  const suiteExecutionPassRate =
-    suiteExecutionCompleted > 0
-      ? ((suiteExecutionTotals.passed / suiteExecutionCompleted) * 100).toFixed(2)
-      : "0.00";
-
-  const renderSuiteTreeNodes = (nodes: any[], depth = 0): JSX.Element[] => {
-    return nodes.flatMap((suite: any) => {
-      const children = suiteChildrenMap[suite.id] || [];
-      const hasChildren = children.length > 0;
-      const expanded = expandedSuiteNodes[suite.id] ?? true;
-      const item = (
-        <div key={suite.id} style={{ marginLeft: depth * 12, marginBottom: "6px" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 8px",
-              borderRadius: "8px",
-              border: selectedSuiteId === suite.id ? "1px solid #60a5fa" : "1px solid #e2e8f0",
-              background: selectedSuiteId === suite.id ? "#eff6ff" : "#f8fafc",
-            }}
-          >
-            {hasChildren ? (
-              <button
-                className="button small"
-                style={{ margin: 0, padding: "2px 6px" }}
-                onClick={() =>
-                  setExpandedSuiteNodes((prev) => ({ ...prev, [suite.id]: !(prev[suite.id] ?? true) }))
-                }
-              >
-                {expanded ? "-" : "+"}
-              </button>
-            ) : (
-              <span style={{ width: "20px", display: "inline-block" }} />
-            )}
-            <button
-              className="linkButton"
-              style={{ color: "#0f172a", fontSize: "13px" }}
-              onClick={async () => {
-                try {
-                  await openSuiteDetails(suite.id);
-                } catch (error: any) {
-                  alert(error?.message || "Load suite failed");
-                }
-              }}
-            >
-              {suite.name}
-            </button>
-          </div>
-        </div>
-      );
-      if (!hasChildren || !expanded) return [item];
-      return [item, ...renderSuiteTreeNodes(children, depth + 1)];
-    });
   };
 
   const appendCommentSnippet = (snippet: string) => {
@@ -1244,7 +1190,7 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     setEditPreConditionsText(JSON.stringify(tc.preConditions ?? [], null, 2));
     setEditTestDataRequirementsText(JSON.stringify(tc.testDataRequirements ?? [], null, 2));
     setEditEnvironmentRequirementsText(JSON.stringify(tc.environmentRequirements ?? [], null, 2));
-    setEditModule(tc.module || "General");
+    setEditModule(tc.module || "");
     setEditPostConditionsText(JSON.stringify(tc.postConditions ?? [], null, 2));
     setEditMetadataText(JSON.stringify(tc.metadata ?? {}, null, 2));
     setEditTagsText((tc.tags ?? []).join(", "));
@@ -1253,13 +1199,13 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
         ? String(tc.estimatedDurationMinutes)
         : ""
     );
-    setEditAutomationStatus(tc.automationStatus || "NOT_AUTOMATED");
+    setEditAutomationStatus(tc.automationStatus || "");
     setEditAutomationScriptLink(tc.automationScriptLink || "");
     setEditChangeSummary("");
-    setEditPriority(tc.priority || "MEDIUM");
-    setEditSeverity(tc.severity || "MAJOR");
-    setEditType(tc.type || "FUNCTIONAL");
-    setEditStatus(tc.status || "DRAFT");
+    setEditPriority(tc.priority || "");
+    setEditSeverity(tc.severity || "");
+    setEditType(tc.type || "");
+    setEditStatus(tc.status || "");
   };
 
   const saveEditCase = async () => {
@@ -1297,26 +1243,179 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
       setEditingId("");
       setEditTitle("");
       setEditDescription("");
-      setEditPreConditionsText("[]");
-      setEditTestDataRequirementsText("[]");
-      setEditEnvironmentRequirementsText("[]");
+      setEditPreConditionsText("");
+      setEditTestDataRequirementsText("");
+      setEditEnvironmentRequirementsText("");
       setEditModule("");
-      setEditPostConditionsText("[]");
-      setEditMetadataText("{}");
+      setEditPostConditionsText("");
+      setEditMetadataText("");
       setEditTagsText("");
       setEditEstimatedDurationMinutes("");
-      setEditAutomationStatus("NOT_AUTOMATED");
+      setEditAutomationStatus("");
       setEditAutomationScriptLink("");
       setEditChangeSummary("");
-      setEditPriority("MEDIUM");
-      setEditSeverity("MAJOR");
-      setEditType("FUNCTIONAL");
-      setEditStatus("DRAFT");
+      setEditPriority("");
+      setEditSeverity("");
+      setEditType("");
+      setEditStatus("");
       await loadTestCaseData();
       alert("Test case updated");
     } catch (error: any) {
       alert(error?.message || "Edit failed");
     }
+  };
+
+  const parseIdsFromText = (raw: string): string[] =>
+    raw
+      .split(/[\n,]/)
+      .map((item) => item.trim().replace(/^<+|>+$/g, "").replace(/^"+|"+$/g, ""))
+      .filter(Boolean);
+
+  const toggleSelection = (
+    id: string,
+    setter: (updater: (prev: string[]) => string[]) => void
+  ) => {
+    setter((prev: string[]) =>
+      prev.includes(id) ? prev.filter((item: string) => item !== id) : [...prev, id]
+    );
+  };
+
+  const getSuiteFriendlyError = (error: any, fallback: string): string => {
+    const msg = String(error?.message || "").trim();
+    if (!msg) return fallback;
+    if (msg.includes("Circular hierarchy is not allowed")) {
+      return "Invalid parent selection: this creates a circular suite hierarchy.";
+    }
+    if (msg.includes("Archived suite cannot be set as parent")) {
+      return "Selected parent suite is archived. Restore the parent suite first.";
+    }
+    if (msg.includes("Restore parent suite first")) {
+      return "Restore the parent suite first, then restore this child suite.";
+    }
+    if (msg.includes("Archive child suites first")) {
+      return "Archive all child suites first, then archive the parent suite.";
+    }
+    if (msg.includes("testCaseIds must exactly match current suite membership")) {
+      return "Reorder list must include all current suite test cases exactly once.";
+    }
+    if (msg.includes("testCaseIds must not contain duplicates")) {
+      return "Reorder list contains duplicate test case IDs/codes. Remove duplicates and retry.";
+    }
+    if (msg.includes("One or more testCaseIds are invalid/deleted")) {
+      return "Some test case IDs/codes are invalid or deleted. Verify IDs and retry.";
+    }
+    if (msg.includes("Suite has no test cases to execute")) {
+      return "Add test cases to the suite before starting suite execution.";
+    }
+    if (msg.includes("Archive suite before permanent delete")) {
+      return "Archive the suite first, then delete it permanently.";
+    }
+    if (msg.includes("One or more testerIds are invalid")) {
+      return "One or more tester IDs are invalid or inactive.";
+    }
+    if (msg.includes("Sequential suite mode: execute the next pending suite case first")) {
+      return "Sequential suite mode requires executing the next pending case in order.";
+    }
+    if (msg.includes("already in progress by another tester")) {
+      return "This suite case is already in progress by another tester.";
+    }
+    if (msg.includes("This suite case is already executed")) {
+      return "This suite case is already executed.";
+    }
+    return msg || fallback;
+  };
+
+  const loadSuiteDetails = async (suiteId: string) => {
+    if (!suiteId) {
+      setSuiteDetails(null);
+      setSuiteExecutionHistory([]);
+      setSuiteAddCaseSelection([]);
+      return;
+    }
+    const [detail, history] = await Promise.all([getSuiteApi(suiteId), listSuiteExecutionsApi(suiteId)]);
+    setSuiteDetails(detail || null);
+    setSuiteExecutionHistory(Array.isArray(history) ? history : []);
+    setSuiteAddCaseSelection([]);
+    if (Array.isArray(detail?.suiteCases)) {
+      setSuiteReorderIds(detail.suiteCases.map((item: any) => item.testCaseId));
+    }
+  };
+
+  const openExecutionSession = async (testCaseId: string, runId?: string) => {
+    const opened = await openExecutionApi(testCaseId, runId || undefined);
+    let currentSteps = Array.isArray(opened?.stepResults) ? opened.stepResults : [];
+    setExecutionCaseId(testCaseId);
+    setExecutionRunId(runId || "");
+    setExecutionProgress(opened?.draftExecution?.progressPercent || 0);
+    setExecutionNotes(opened?.draftExecution?.notes || "");
+    setExecutionStartedAt(opened?.draftExecution?.startedAt || "");
+    setExecutionCompletedAt(opened?.draftExecution?.completedAt || "");
+    setExecutionDurationSeconds(
+      typeof opened?.draftExecution?.durationSeconds === "number"
+        ? opened.draftExecution.durationSeconds
+        : null
+    );
+    setExecutionEvidence(Array.isArray(opened?.draftExecution?.evidence) ? opened.draftExecution.evidence : []);
+    if (opened?.draftExecution?.id) {
+      setExecutionId(opened.draftExecution.id);
+    } else {
+      const started = await startExecutionApi({
+        testCaseId,
+        testRunId: runId || null,
+      });
+      setExecutionId(started.id);
+      setExecutionStartedAt(started?.startedAt || "");
+      setExecutionCompletedAt("");
+      setExecutionDurationSeconds(null);
+      setExecutionEvidence([]);
+      // Ensure UI has steps even if initial open response had none.
+      const reopened = await openExecutionApi(testCaseId, runId || undefined);
+      const reopenedSteps = Array.isArray(reopened?.stepResults) ? reopened.stepResults : [];
+      if (reopenedSteps.length > 0) {
+        currentSteps = reopenedSteps;
+        setExecutionProgress(reopened?.draftExecution?.progressPercent || 0);
+        setExecutionNotes(reopened?.draftExecution?.notes || "");
+      }
+    }
+    setExecutionSteps(currentSteps);
+    setExecutionStepStatus("");
+    setExecutionActualResult("");
+    setExecutionStepNotes("");
+    if (currentSteps.length > 0) {
+      setExecutionSelectedStepNumber("");
+    } else {
+      setExecutionSelectedStepNumber("");
+      throw new Error("No executable steps found for this test case. Add steps and try again.");
+    }
+  };
+
+  const openSuiteExecutionCase = async (suiteExecution: any, suiteCase: any) => {
+    if (!suiteExecution?.id || !suiteExecution?.linkedTestRun?.id) {
+      throw new Error("Linked run not found for this suite execution.");
+    }
+    if (!suiteCase?.testCaseId) {
+      throw new Error("Invalid suite case selected.");
+    }
+    setActiveSuiteExecutionContext({
+      suiteExecutionId: suiteExecution.id,
+      mode: String(suiteExecution.mode || "SEQUENTIAL"),
+      runId: suiteExecution.linkedTestRun.id,
+    });
+    await openExecutionSession(suiteCase.testCaseId, suiteExecution.linkedTestRun.id);
+    setActiveFeature("execute_tests");
+    setActiveMenuKey("execute_tests");
+  };
+
+  const moveSuiteCase = (testCaseId: string, direction: "UP" | "DOWN") => {
+    setSuiteReorderIds((prev) => {
+      const current = [...prev];
+      const idx = current.indexOf(testCaseId);
+      if (idx < 0) return prev;
+      const nextIdx = direction === "UP" ? idx - 1 : idx + 1;
+      if (nextIdx < 0 || nextIdx >= current.length) return prev;
+      [current[idx], current[nextIdx]] = [current[nextIdx], current[idx]];
+      return current;
+    });
   };
 
   const parseBugAttachmentsInput = (raw: string): Array<{
@@ -1350,6 +1449,29 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
     /[0-9]/.test(pwd) &&
     /[@$!%*?&]/.test(pwd);
 
+  const resetAuthFields = () => {
+    setName("");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setRole("");
+    setRememberMe(false);
+    setNewPassword("");
+    setResetToken("");
+    setAuthError("");
+  };
+
+  const clearAuthFormFields = () => {
+    setName("");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setRole("");
+    setRememberMe(false);
+    setNewPassword("");
+    setAuthError("");
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token") || "";
@@ -1361,6 +1483,17 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
       setScreen("reset");
     }
   }, []);
+
+  useEffect(() => {
+    if (screen === "login" || screen === "register" || screen === "forgot") {
+      clearAuthFormFields();
+    }
+  }, [screen]);
+
+  useEffect(() => {
+    setAuthError("");
+    setAuthSubmitting(false);
+  }, [screen]);
 
   useEffect(() => {
     if (screen !== "dashboard") {
@@ -1390,8 +1523,8 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
 
   useEffect(() => {
     if (screen !== "dashboard") {
-      setNavOpen(false);
       setActiveFeature("none");
+      setActiveMenuKey("dashboard_home");
       setShowTestCaseList(false);
       setExpandedTestCaseId("");
       setSelectedIds([]);
@@ -1399,6 +1532,12 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
       setTestRuns([]);
       setSelectedRunId("");
       setRunDetails(null);
+      setAdminUsers([]);
+      setAdminCreateName("");
+      setAdminCreateEmail("");
+      setAdminCreatePassword("");
+      setAdminCreateRole("");
+      setAdminUserSavingId("");
       resetExecutionPanel();
       resetBugPanel();
     }
@@ -1407,6 +1546,7 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
   useEffect(() => {
     if (screen !== "dashboard") return;
     setActiveFeature("none");
+    setActiveMenuKey("dashboard_home");
   }, [screen, isTester, isDeveloper, isAdmin]);
 
   useEffect(() => {
@@ -1434,511 +1574,591 @@ const [selectedFeatureKey, setSelectedFeatureKey] = useState<string | null>(null
 
   useEffect(() => {
     if (screen !== "dashboard" || !currentRole) return;
-    if (currentRole.toUpperCase() === "ADMIN") return;
     loadTestCaseData().catch(() => {
       // no-op: page-level actions already show explicit alerts on manual refresh
     });
   }, [screen, currentRole]);
 
   useEffect(() => {
-    if (screen !== "dashboard") return;
-    if (activeFeature !== "bug_management" && activeFeature !== "test_cases") return;
-    loadTestCaseData().catch(() => {
-      // no-op
-    });
-  }, [activeFeature, screen]);
-
-  useEffect(() => {
-    if (screen !== "dashboard" || !canManageSuites) return;
-    loadTestCaseData().catch(() => {
-      // no-op
-    });
-  }, [showArchivedSuites]);
-
-  useEffect(() => {
-    if (screen !== "dashboard" || !executionId || !executionCaseId) return;
-    const payload = {
-      executionId,
-      executionCaseId,
-      executionRunId,
-      activeSuiteExecutionId,
-      activeSuiteExecutionName,
-      activeSuiteExecutionMode,
-      savedAt: new Date().toISOString(),
-    };
-    localStorage.setItem(EXECUTION_DRAFT_KEY, JSON.stringify(payload));
-  }, [
-    screen,
-    executionId,
-    executionCaseId,
-    executionRunId,
-    activeSuiteExecutionId,
-    activeSuiteExecutionName,
-    activeSuiteExecutionMode,
-  ]);
-
-  useEffect(() => {
-    if (!showExecute) return;
-    if (executionId) return;
-    const raw = localStorage.getItem(EXECUTION_DRAFT_KEY);
-    if (!raw) return;
-    try {
-      const parsed = JSON.parse(raw) as {
-        executionCaseId?: string;
-        executionRunId?: string;
-        activeSuiteExecutionId?: string;
-        activeSuiteExecutionName?: string;
-        activeSuiteExecutionMode?: string;
-      };
-      if (!parsed?.executionCaseId) return;
-      setExecutionCaseId(parsed.executionCaseId);
-      setExecutionRunId(parsed.executionRunId || "");
-      setActiveSuiteExecutionId(parsed.activeSuiteExecutionId || "");
-      setActiveSuiteExecutionName(parsed.activeSuiteExecutionName || "");
-      setActiveSuiteExecutionMode(parsed.activeSuiteExecutionMode || "");
-      openExecutionSession(parsed.executionCaseId, parsed.executionRunId || undefined).catch(() => {
-        clearExecutionDraftStorage();
-      });
-    } catch {
-      clearExecutionDraftStorage();
+    if (screen !== "dashboard" || !currentRole) {
+      setNotificationItems([]);
+      setNotificationUnreadCount(0);
+      return;
     }
-  }, [showExecute]);
+
+    let disposed = false;
+    const run = async () => {
+      try {
+        await loadNotifications();
+      } catch {
+        if (!disposed) {
+          setNotificationItems([]);
+          setNotificationUnreadCount(0);
+        }
+      }
+    };
+
+    run();
+    const timerId = window.setInterval(run, 30000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timerId);
+    };
+  }, [screen, currentRole, currentUserId, bugs]);
 
   useEffect(() => {
-    if (screen !== "dashboard" || !showExecute || !executionId) return;
-    listExecutionHistoryApi(executionId)
-      .then((rows) => setExecutionHistory(Array.isArray(rows) ? rows : []))
-      .catch(() => setExecutionHistory([]));
-  }, [screen, showExecute, executionId]);
+    if (screen !== "dashboard") return;
+    if (normalizedFeature !== "bug_management" && normalizedFeature !== "test_cases") return;
+    loadTestCaseData().catch(() => {
+      // no-op
+    });
+  }, [normalizedFeature, screen]);
 
   useEffect(() => {
-    if (screen !== "dashboard" || !showExecute) return;
-    if (!executionId || executionTimerState !== "RUNNING" || executionCompletedAt) return;
-    const interval = window.setInterval(() => {
-      setExecutionDurationSeconds((prev) => (typeof prev === "number" ? prev + 1 : 1));
-    }, 1000);
-    return () => window.clearInterval(interval);
-  }, [screen, showExecute, executionId, executionTimerState, executionCompletedAt]);
-
-  useEffect(() => {
-    if (screen !== "dashboard" || !isAdmin || !String(activeFeature).startsWith("admin_")) return;
-    setAdminCreateName("");
-    setAdminCreateEmail("");
-    setAdminCreatePassword("");
-    setAdminCreateRole("");
-      setAdminEditUserId("");
-      setAdminEditName("");
-      setAdminEditRole("TESTER");
-      setAdminEditActive(true);
+    if (screen !== "dashboard" || !isAdmin || normalizedFeature !== "admin_workspace") return;
+    if (activeMenuKey === "user_management" || activeMenuKey === "role_management") {
+      setAdminCreateName("");
+      setAdminCreateEmail("");
+      setAdminCreatePassword("");
+      setAdminCreateRole("");
       loadAdminUsers().catch(() => {
         setAdminUsers([]);
       });
-      loadAdminWorkspaceData().catch(() => {
-        setAdminProjects([]);
-        setAdminAuditLogs([]);
-        setAdminSystemConfigs([]);
-        setAdminBackups([]);
-      });
-  }, [screen, isAdmin, activeFeature, adminAuditEntityType]);
+      return;
+    }
+    if (activeMenuKey === "audit_logs" || activeMenuKey === "backup_management") {
+      loadAdminAuditLogs(activeMenuKey === "backup_management" ? "BackupJob" : auditEntityType || undefined).catch(
+        () => {
+          setAdminAuditLogs([]);
+        }
+      );
+    }
+  }, [screen, isAdmin, normalizedFeature, activeMenuKey, auditEntityType]);
 
   useEffect(() => {
-    let isCancelled = false;
+    if (!executionRunId || !executionCaseId) return;
+    const stillValid = executionSelectableCases.some((tc) => tc.id === executionCaseId);
+    if (!stillValid) {
+      setExecutionCaseId("");
+      setExecutionId("");
+      setExecutionSteps([]);
+      setExecutionSelectedStepNumber("");
+      setExecutionProgress(0);
+      setExecutionNotes("");
+      setExecutionActualResult("");
+      setExecutionStepNotes("");
+    }
+  }, [executionRunId, executionCaseId, testRuns, testCases]);
 
-    const loadSuiteCounts = async () => {
-      if (!canManageSuites || suites.length === 0) {
-        setSuiteCaseCounts({});
-        return;
-      }
-
-      const entries = await Promise.all(
-        suites.map(async (suite: any) => {
-          try {
-            const data = await getSuiteTestCasesApi(suite.id);
-            const count = typeof data?.count === "number" ? data.count : Number(suite?._count?.suiteCases || 0);
-            return [suite.id, count] as const;
-          } catch {
-            return [suite.id, Number(suite?._count?.suiteCases || 0)] as const;
-          }
-        })
-      );
-
-      if (!isCancelled) {
-        setSuiteCaseCounts(
-          entries.reduce<Record<string, number>>((acc, [id, count]) => {
-            acc[id] = count;
-            return acc;
-          }, {})
-        );
-      }
-    };
-
-    loadSuiteCounts().catch(() => {
-      if (!isCancelled) {
-        setSuiteCaseCounts({});
-      }
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [suites, canManageSuites]);
+  useEffect(() => {
+    if (!executionRunId) return;
+    if (executionCaseId) return;
+    if (!executionSelectableCases.length) return;
+    setExecutionCaseId(executionSelectableCases[0].id);
+  }, [executionRunId, executionCaseId, executionSelectableCases]);
 
   /* REGISTER */
   const handleRegister = async () => {
+    setAuthError("");
     if (!role) {
-      alert("Please select a role");
+      setAuthError("Please select a role.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setAuthError("Password and confirm password do not match.");
       return;
     }
     if (!isValidPassword(password)) {
-      alert(
+      setAuthError(
         "Password must be at least 8 characters and include uppercase, number, and special character."
       );
       return;
     }
+    try {
+      setAuthSubmitting(true);
+      const res = await registerApi(name, email, password, role);
+      if (res?.message && String(res.message).toLowerCase().includes("successful")) {
+        alert(res.message || "Registered successfully");
+        resetAuthFields();
+        setScreen("login");
+        return;
+      }
+      setAuthError(res?.message || "Registration failed.");
+    } catch (error: any) {
+      setAuthError(error?.message || "Registration failed.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
 
-    const res = await registerApi(name, email, password, role);
-    alert(res.message || "Registered successfully");
-    setName("");
-    setEmail("");
-    setPassword("");
-    setRole("");
+  /* LOGIN */
+  const handleLogin = async () => {
+    setAuthError("");
+    try {
+      setAuthSubmitting(true);
+      const res = await loginApi(email, password, rememberMe);
+
+      if (res.accessToken && res.refreshToken) {
+        setSessionTokens(res.accessToken, res.refreshToken, rememberMe);
+        setCurrentRole(res?.user?.role || "");
+        setCurrentUserId(res?.user?.id || "");
+        setShowTestCaseList(false);
+        setExpandedTestCaseId("");
+        setSelectedIds([]);
+        setEditingId("");
+        resetBugPanel();
+        setActiveMenuKey("dashboard_home");
+        setScreen("dashboard");
+        try {
+          await loadTestCaseData();
+        } catch (error: any) {
+          alert(error?.message || "Failed to load test data");
+        }
+      } else {
+        setAuthError(res.message || "Invalid email or password");
+      }
+    } catch (error: any) {
+      setAuthError(error?.message || "Login failed.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setAuthError("");
+    try {
+      setAuthSubmitting(true);
+      const res = await forgotPasswordApi(email);
+      if (res?.message) {
+        alert(res.message);
+        resetAuthFields();
+        setScreen("login");
+      } else {
+        setAuthError("Unable to send reset link.");
+      }
+    } catch (error: any) {
+      setAuthError(error?.message || "Unable to send reset link.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleResetPassword = async () => {
+    setAuthError("");
+    if (!isValidPassword(newPassword)) {
+      setAuthError(
+        "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
+      );
+      return;
+    }
+    try {
+      setAuthSubmitting(true);
+      const res = await resetPasswordApi(resetToken, newPassword);
+      alert(res.message || "Password reset complete");
+
+      if (typeof res.message === "string" && res.message.toLowerCase().includes("successful")) {
+        setNewPassword("");
+        window.history.replaceState({}, "", "/");
+        setScreen("login");
+      }
+    } catch (error: any) {
+      setAuthError(error?.message || "Password reset failed.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const handleBackToLogin = () => {
+    window.history.replaceState({}, "", "/");
+    resetAuthFields();
     setScreen("login");
   };
 
- /* LOGIN */
-const handleLogin = async () => {
-  try {
-    setIsLoading(true);
+  const goToRegisterScreen = () => {
+    clearAuthFormFields();
+    setScreen("register");
+  };
 
-    const res = await loginApi(email, password, rememberMe);
+  const goToForgotScreen = () => {
+    clearAuthFormFields();
+    setScreen("forgot");
+  };
 
-    if (res.accessToken && res.refreshToken) {
-      const loggedRole = String(res?.user?.role || "").toUpperCase();
-
-      setSessionTokens(res.accessToken, res.refreshToken, rememberMe);
-      setCurrentRole(res?.user?.role || "");
-      setCurrentUserId(res?.user?.id || "");
-      setShowTestCaseList(false);
-      setExpandedTestCaseId("");
-      setSelectedIds([]);
-      setEditingId("");
-      resetBugPanel();
-      setNavOpen(false);
-      setScreen("dashboard");
-
-      alert("Logged in successfully");
-      setEmail("");
-setPassword("");
-
-      try {
-        if (loggedRole !== "ADMIN") {
-          await loadTestCaseData();
-        } else {
-          await Promise.all([
-            loadAdminUsers(),
-            loadAdminWorkspaceData(),
-          ]);
-        }
-      } catch (error: any) {
-        // keep login successful even if optional dashboard calls fail
-      }
-
-    } else {
-      alert(res.message || "Invalid email or password");
-    }
-
-  } catch (error: any) {
-    alert(error?.message || "Login failed");
-  } finally {
-    setIsLoading(false);
-  }
-};
+  const goToLoginScreen = () => {
+    clearAuthFormFields();
+    setScreen("login");
+  };
 
   /* LOGOUT */
   const handleLogout = () => {
     clearSessionTokens();
     setCurrentRole("");
     setCurrentUserId("");
-    setEmail("");
-    setPassword("");
+    setNotificationItems([]);
+    setNotificationUnreadCount(0);
+    resetAuthFields();
     setShowTestCaseList(false);
     setExpandedTestCaseId("");
     setSelectedIds([]);
     setEditingId("");
     resetBugPanel();
-    setNavOpen(false);
     setActiveFeature("none");
+    setActiveMenuKey("dashboard_home");
     setScreen("login");
   };
 
-  const openAdminEditUser = (user: any) => {
-    setAdminEditUserId(user.id);
-    setAdminEditName(user.name || "");
-    setAdminEditRole(user.role || "TESTER");
-    setAdminEditActive(Boolean(user.isActive));
+  const handleDashboardNavSelect = async (menuKey: string) => {
+    const mappedFeature = menuFeatureMap[menuKey] || "none";
+    setActiveMenuKey(menuKey);
+    setActiveFeature(mappedFeature);
+
+    try {
+      if (
+        mappedFeature === "none" ||
+        mappedFeature === "create_test_case" ||
+        mappedFeature === "templates" ||
+        mappedFeature === "bulk_operations" ||
+        mappedFeature === "import_test_cases" ||
+        mappedFeature === "suite_management" ||
+        mappedFeature === "test_runs" ||
+        mappedFeature === "execute_tests" ||
+        mappedFeature === "bug_management" ||
+        mappedFeature === "test_cases" ||
+        mappedFeature === "developer_workspace"
+      ) {
+        await loadTestCaseData();
+      }
+
+      if (isAdmin && mappedFeature === "admin_workspace") {
+        if (menuKey === "user_management" || menuKey === "role_management") {
+          await loadAdminUsers();
+        } else if (menuKey === "audit_logs") {
+          await loadAdminAuditLogs(auditEntityType || undefined);
+        } else if (menuKey === "backup_management") {
+          await loadAdminAuditLogs("BackupJob");
+        } else if (menuKey === "project_management") {
+          await loadTestCaseData();
+        }
+      }
+
+      if (isAdmin && menuKey === "dashboard_home") {
+        await Promise.all([loadAdminUsers(), loadAdminAuditLogs()]);
+      }
+
+      if (selectedBugId && mappedFeature === "bug_management") {
+        await loadBugDetails(selectedBugId);
+      }
+    } catch {
+      // Intentionally silent here: existing page-level actions already show explicit alerts.
+    }
   };
 
- return (
-  <div className={screen === "dashboard" ? "dashboardMode" : "container"}>
+  const toggleRolePermission = (roleKey: "ADMIN" | "TESTER" | "DEVELOPER", permission: string) => {
+    setRolePermissions((prev) => {
+      const current = prev[roleKey] || [];
+      const next = current.includes(permission)
+        ? current.filter((item) => item !== permission)
+        : [...current, permission];
+      return { ...prev, [roleKey]: next };
+    });
+  };
 
-    {/* LOGIN FULL SCREEN */}
-    {screen === "login" && (
-      <Login
-        email={email}
-        password={password}
-        rememberMe={rememberMe}
-        isLoading={isLoading}
-        setEmail={setEmail}
-        setPassword={setPassword}
-        setRememberMe={setRememberMe}
-        onLogin={handleLogin}
-        goToRegister={() => setScreen("register")}
-        goToForgot={() => setScreen("forgot")}
-      />
-    )}
+  return (
+    <div className={`container ${screen === "dashboard" ? "dashboardMode" : "authMode"}`}>
+      <div className={`card ${screen === "dashboard" ? "cardDashboard" : "cardAuth"}`}>
+        {screen !== "dashboard" && <h2 className="brandTitle">TestTrack Pro</h2>}
+        {screen !== "dashboard" && (
+          <p className="authTagline">Quality engineering workspace for testers, developers, and admins.</p>
+        )}
 
-    {/* REGISTER FULL SCREEN */}
-    {screen === "register" && (
-      <Register
-        name={name}
-        email={email}
-        password={password}
-        confirmPassword={confirmPassword}
-        role={role}
-        isLoading={isLoading}
-        setName={setName}
-        setEmail={setEmail}
-        setPassword={setPassword}
-        setConfirmPassword={setConfirmPassword}
-        setRole={setRole}
-        onRegister={handleRegister}
-        goToLogin={() => setScreen("login")}
-      />
-    )}
-
-    {/* FORGOT FULL SCREEN */}
-    {screen === "forgot" && (
-      <ForgotPassword
-        email={email}
-        isLoading={isLoading}
-        setEmail={setEmail}
-        onSubmit={async () => {
-          setIsLoading(true);
-          try {
-            const res = await forgotPasswordApi(email);
-            alert(res.message);
-            setEmail("");
-            setScreen("login");
-          } finally {
-            setIsLoading(false);
-          }
-        }}
-        goToLogin={() => setScreen("login")}
-      />
-    )}
-
-
-          {/* KEEP YOUR OLD DASHBOARD / RESET CONTENT BELOW THIS */}
-       {/* RESET PAGE */}
-{screen === "reset" && (
-  <div className="resetWrapper">
-    <section className="authPanel">
-      <h3>Reset Password</h3>
-
-      {!resetToken ? (
-        <div className="note">
-          Invalid reset link. Please request a new one.
-        </div>
-      ) : (
-        <>
-          <input
-            className="input"
-            type="password"
-            placeholder="New password"
-            onChange={(e) => setNewPassword(e.target.value)}
+        {screen === "login" && (
+          <Login
+            key="auth-login"
+            email={email}
+            password={password}
+            rememberMe={rememberMe}
+            isLoading={authSubmitting}
+            error={authError}
+            setEmail={setEmail}
+            setPassword={setPassword}
+            setRememberMe={setRememberMe}
+            onLogin={handleLogin}
+            goToForgot={goToForgotScreen}
+            goToRegister={goToRegisterScreen}
           />
+        )}
 
-          <div className="note">
-            Password must include uppercase, lowercase, number & special character
-          </div>
+        {screen === "register" && (
+          <Register
+            key="auth-register"
+            name={name}
+            email={email}
+            password={password}
+            confirmPassword={confirmPassword}
+            role={role}
+            isLoading={authSubmitting}
+            error={authError}
+            setName={setName}
+            setEmail={setEmail}
+            setPassword={setPassword}
+            setConfirmPassword={setConfirmPassword}
+            setRole={setRole}
+            onRegister={handleRegister}
+            goToLogin={goToLoginScreen}
+          />
+        )}
 
-          <button
-            className="button"
-            onClick={async () => {
-              if (!isValidPassword(newPassword)) {
-                alert(
-                  "Password must be at least 8 characters and include uppercase, lowercase, number, and special character."
-                );
-                return;
-              }
+        {screen === "forgot" && (
+          <ForgotPassword
+            key="auth-forgot"
+            email={email}
+            isLoading={authSubmitting}
+            error={authError}
+            setEmail={setEmail}
+            onSubmit={handleForgotPassword}
+            goToLogin={goToLoginScreen}
+          />
+        )}
 
-              const res = await resetPasswordApi(resetToken, newPassword);
-              alert(res.message || "Password reset complete");
+        {screen === "reset" && (
+          <ResetPassword
+            resetToken={resetToken}
+            newPassword={newPassword}
+            isLoading={authSubmitting}
+            error={authError}
+            setNewPassword={setNewPassword}
+            onSubmit={handleResetPassword}
+            goToLogin={handleBackToLogin}
+          />
+        )}
 
-              setNewPassword("");
-              setScreen("login");
+        {screen === "dashboard" && (
+          <DashboardLayout
+            key={`layout-${currentUserId || "anon"}-${currentRole || "none"}`}
+            currentUserName={name || email || "User"}
+            currentRole={currentRole || "USER"}
+            notificationCount={notificationUnreadCount}
+            notificationItems={notificationItems.map((item) => ({
+              id: item.id,
+              title: item.title,
+              subtitle: item.subtitle,
+              isRead: item.isRead,
+            }))}
+            onNotificationClick={handleNotificationClick}
+            navItems={roleNavItems}
+            activeKey={activeMenuKey}
+            onSelect={(feature) => {
+              handleDashboardNavSelect(feature);
             }}
-          >
-            Set New Password
-          </button>
-        </>
-      )}
-
-      <div className="link" onClick={() => setScreen("login")}>
-        Back to login
-      </div>
-    </section>
-  </div>
-)}
-
-{/* DASHBOARD */}
-{screen === "dashboard" && (
-<div className="dashboardWrapper">
-
-  {/* HEADER */}
-  <div className="dashboardHeader">
-    <div className="headerInner">
-      <div className="hamburger" onClick={() => setNavOpen(!navOpen)}>
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
-      <h2>TestTrack Pro</h2>
-    </div>
-  </div>
-
-  {/* BODY */}
-  <div className="dashboardMain">
-
-    {/* SIDEBAR */}
-    {navOpen && (
-      <aside className="sidebar">
-        {roleFeatures.map((feature) => (
-          <button
-            key={feature.key}
-            className={`featureItem ${activeFeature === feature.key ? "active" : ""}`}
-onClick={() =>
-  setActiveFeature((prev) =>
-    prev === feature.key ? "none" : feature.key
-  )
-}          >
-            {feature.label}
-          </button>
-        ))}
-
-        <div className="sidebarBottom">
-          <button className="logoutBtn" onClick={handleLogout}>
-            Logout
-          </button>
-          <button
-            className="logoutAllBtn"
-            onClick={async () => {
+            onLogout={handleLogout}
+            onLogoutAll={async () => {
               const res = await logoutAllApi();
-              alert(res.message);
+              alert(res.message || "Logged out from all devices");
+              clearSessionTokens();
               setScreen("login");
             }}
+            pageTitle={currentPageMeta.title}
+            pageSubtitle={currentPageMeta.subtitle}
+            primaryActionLabel={isRefreshing ? "Refreshing..." : "Refresh Data"}
+            onPrimaryAction={async () => {
+              try {
+                resetEntryFields();
+                await loadTestCaseData();
+              } catch (error: any) {
+                setIsRefreshing(false);
+                alert(error?.message || "Refresh failed");
+              }
+            }}
           >
-            Logout All
-          </button>
-        </div>
-      </aside>
-    )}
-{selectedUser && (
-  <div className="modalOverlay">
-    <div className="modalCard">
+            {activeFeature === "none" && (
+              <>
+                {isTester && (
+                  <>
+                    <section className="panel">
+                      <h4>Tester Dashboard</h4>
+                      <p className="note">Track pending tests, failures, and execution quality at a glance.</p>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader">
+                        <h4 style={{ marginBottom: 0 }}>My Pending Tests</h4>
+                      </div>
+                      <div className="tableWrap">
+                        <table className="table">
+                          <thead>
+                            <tr>
+                              <th>Test Case</th>
+                              <th>Module</th>
+                              <th>Status</th>
+                              <th>Priority</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {testerPendingTests.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="note">No pending tests.</td>
+                              </tr>
+                            ) : (
+                              testerPendingTests.map((item) => (
+                                <tr key={item.id}>
+                                  <td>{item.title}</td>
+                                  <td>{item.module || "General"}</td>
+                                  <td>
+                                    <span className={`statusBadge status-${String(item.status || "").toLowerCase()}`}>
+                                      {item.status}
+                                    </span>
+                                  </td>
+                                  <td>{item.priority || "MEDIUM"}</td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Failures</h4></div>
+                      <div className="listCompact">
+                        {recentFailures.length === 0 ? (
+                          <p className="note">No recent failures.</p>
+                        ) : (
+                          recentFailures.map((row) => (
+                            <div className="row" key={row.id}>
+                              <strong>{row.testCase?.title || row.testCaseId}</strong>
+                              <div className="note">{new Date(row.executedAt).toLocaleString()}</div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Execution Trend (7 Days)</h4></div>
+                      <div className="miniBarChart">
+                        {trendBuckets.map((bucket) => (
+                          <div key={bucket.key} className="miniBarItem">
+                            <div
+                              className="miniBar"
+                              style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrendCount) * 100))}%` }}
+                            />
+                            <span>{bucket.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Test Status Breakdown</h4></div>
+                      <div className="pieSection">
+                        <div className="pieChart" style={{ background: statusPie }} />
+                        <div className="pieLegend">
+                          <div>Passed: {statusCounts.passed}</div>
+                          <div>Failed: {statusCounts.failed}</div>
+                          <div>Blocked: {statusCounts.blocked}</div>
+                          <div>Skipped: {statusCounts.skipped}</div>
+                        </div>
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Quick Actions</h4></div>
+                      <div className="toolbarActions">
+                        <button className="button small" onClick={() => handleDashboardNavSelect("create_test_case")}>Create Test Case</button>
+                        <button className="button small" onClick={() => handleDashboardNavSelect("execute_tests")}>Execute Tests</button>
+                        <button className="button small" onClick={() => handleDashboardNavSelect("bug_management")}>Report Bug</button>
+                      </div>
+                    </section>
+                  </>
+                )}
 
-      <h3>{selectedUser.name}</h3>
-      <p className="note">{selectedUser.email}</p>
+                {isDeveloper && (
+                  <>
+                    <section className="panel">
+                      <h4>Developer Dashboard</h4>
+                      <p className="note">Monitor assigned defects, severity hotspots, and recent updates.</p>
+                    </section>
+                    <section className="panel dashboardWidget kpiRow">
+                      <div className="kpiItem"><strong>Assigned Bugs</strong><span>{assignedBugCount}</span></div>
+                      <div className="kpiItem"><strong>Critical / P1</strong><span>{criticalBugCount + p1UrgentCount}</span></div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Bug Aging (Last 7 Days)</h4></div>
+                      <div className="miniBarChart">
+                        {trendBuckets.map((bucket) => (
+                          <div key={`aging-${bucket.key}`} className="miniBarItem">
+                            <div
+                              className="miniBar bugAgingBar"
+                              style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrendCount) * 100))}%` }}
+                            />
+                            <span>{bucket.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Bug Status Distribution</h4></div>
+                      <div className="pieSection">
+                        <div className="pieChart" style={{ background: bugStatusPie }} />
+                        <div className="pieLegend">
+                          <div>New: {bugStatusCounts.NEW}</div>
+                          <div>Open: {bugStatusCounts.OPEN}</div>
+                          <div>In Progress: {bugStatusCounts.IN_PROGRESS}</div>
+                          <div>Fixed: {bugStatusCounts.FIXED}</div>
+                          <div>Verified: {bugStatusCounts.VERIFIED}</div>
+                          <div>Closed: {bugStatusCounts.CLOSED}</div>
+                        </div>
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Activity</h4></div>
+                      <div className="listCompact">
+                        {bugs.slice(0, 6).map((item) => (
+                          <div className="row" key={item.id}>
+                            <strong>{item.title || item.bugCode || item.id}</strong>
+                            <div className="note">{item.workflowStatus || item.status || "OPEN"} | {new Date(item.updatedAt || item.createdAt).toLocaleString()}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </>
+                )}
 
-      <div className="modalSection">
-        <label>Change Role</label>
-        <select
-  className="roleSelect"
-  value={selectedUser.role}
-  onChange={async (e) => {
-    try {
-      const newRole = e.target.value;
-
-      await updateAdminRoleApi(selectedUser.id, newRole);
-
-      await loadAdminUsers();
-
-      setSelectedUser(null);
-
-      alert("Role updated successfully");
-    } catch (error: any) {
-      alert(error?.message || "Role update failed");
-    }
-  }}
->
-  <option value="TESTER">TESTER</option>
-  <option value="DEVELOPER">DEVELOPER</option>
-  <option value="ADMIN">ADMIN</option>
-</select>
-      </div>
-
-      <div className="modalActions">
-        <button
-  className="button small"
-  onClick={async () => {
-    try {
-      await updateAdminUserApi(selectedUser.id, {
-        isActive: !selectedUser.isActive,
-      });
-
-      await loadAdminUsers();
-
-      setSelectedUser(null);
-
-      alert("Status updated successfully");
-    } catch (error: any) {
-      alert(error?.message || "Status update failed");
-    }
-  }}
-></button>
-  {selectedUser.isActive ? "Deactivate" : "Activate"}
-<button
-  className="button small danger"
-  onClick={async () => {
-    try {
-      if (!window.confirm("Are you sure you want to delete this user?")) return;
-
-      await deleteAdminUserApi(selectedUser.id);
-
-      await loadAdminUsers();
-
-      setSelectedUser(null);
-
-      alert("User deleted successfully");
-    } catch (error: any) {
-      alert(error?.message || "Delete failed");
-    }
-  }}
->
-  Delete
-</button>
-        <button
-          className="button small"
-          style={{ background: "#374151" }}
-          onClick={() => setSelectedUser(null)}
-        >
-          Close
-        </button>
-      </div>
-
-    </div>
-  </div>
-)}
-              <div className="dashboardContent">
-           {activeFeature ===  "none" && !navOpen && (
-  <section className="panel">
-    <h4>Admin Workspace</h4>
-    <p className="note">
-      Select an admin feature from the left sidebar.
-    </p>
-  </section>
-)}
-
+                {isAdmin && (
+                  <>
+                    <section className="panel">
+                      <h4>Admin Dashboard</h4>
+                      <p className="note">View user/project/case health and system-wide activity trends.</p>
+                    </section>
+                    <section className="panel dashboardWidget kpiRow">
+                      <div className="kpiItem"><strong>Total Users</strong><span>{adminUsers.length}</span></div>
+                      <div className="kpiItem"><strong>Active Projects</strong><span>{adminProjects.filter((p) => p.isActive !== false).length}</span></div>
+                      <div className="kpiItem"><strong>Total Test Cases</strong><span>{testCases.length}</span></div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>System Activity (7 Days)</h4></div>
+                      <div className="miniBarChart">
+                        {trendBuckets.map((bucket) => (
+                          <div key={`system-${bucket.key}`} className="miniBarItem">
+                            <div
+                              className="miniBar systemBar"
+                              style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrendCount) * 100))}%` }}
+                            />
+                            <span>{bucket.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                    <section className="panel dashboardWidget">
+                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Audit Logs</h4></div>
+                      <div className="listCompact">
+                        {adminAuditLogs.slice(0, 8).map((log: any) => (
+                          <div className="row" key={log.id}>
+                            <strong>{log.action || "ACTION"}</strong>
+                            <div className="note">{log.actor?.name || log.actor?.email || "Unknown"} | {new Date(log.createdAt).toLocaleString()}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  </>
+                )}
+              </>
+            )}
             <div className="dashboardGrid">
               {isDeveloper && showRolePanel && activeFeature === "developer_workspace" && (
                 <section className="panel rolePanel rolePanelDeveloper">
@@ -1950,387 +2170,467 @@ onClick={() =>
                 </section>
               )}
 
-              {isAdmin && String(activeFeature).startsWith("admin_") && (
+              {isAdmin && showRolePanel && activeFeature === "admin_workspace" && (
                 <section className="panel rolePanel rolePanelAdmin">
-                  <h4>Admin Workspace</h4>
-                  <p className="note">
-                    Select an admin feature from the left sidebar.
-                  </p>
-                  {activeFeature === "admin_create_users" && (
+                  {activeMenuKey === "user_management" && (
                     <>
-                  <h4 style={{ marginTop: "10px" }}>Create User</h4>
-                  <input
-                    className="input"
-                    placeholder="Name"
-                    value={adminCreateName}
-                    autoComplete="off"
-                    name="admin_create_name"
-                    onChange={(e) => setAdminCreateName(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    placeholder="Email"
-                    value={adminCreateEmail}
-                    autoComplete="off"
-                    name="admin_create_email"
-                    onChange={(e) => setAdminCreateEmail(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    type="password"
-                    placeholder="Password"
-                    value={adminCreatePassword}
-                    autoComplete="new-password"
-                    name="admin_create_password"
-                    onChange={(e) => setAdminCreatePassword(e.target.value)}
-                  />
-                  <select
-                    className="input"
-                    value={adminCreateRole}
-                    onChange={(e) => setAdminCreateRole(e.target.value)}
-                  >
-                    <option value="">Select role</option>
-                    <option value="TESTER">TESTER</option>
-                    <option value="DEVELOPER">DEVELOPER</option>
-                    <option value="ADMIN">ADMIN</option>
-                  </select>
-                  <button
-                    className="button"
-                    onClick={async () => {
-                      try {
-                        if (!adminCreateName.trim() || !adminCreateEmail.trim() || !adminCreatePassword.trim()) {
-                          alert("Name, email, and password are required");
-                          return;
-                        }
-                        if (!adminCreateRole) {
-                          alert("Please select a role");
-                          return;
-                        }
-                        await createAdminUserApi({
-                          name: adminCreateName.trim(),
-                          email: adminCreateEmail.trim(),
-                          password: adminCreatePassword,
-                          role: adminCreateRole,
-                        });
-                        setAdminCreateName("");
-                        setAdminCreateEmail("");
-                        setAdminCreatePassword("");
-                        setAdminCreateRole("");
-                        await loadAdminUsers();
-                        alert("User created");
-                      } catch (error: any) {
-                        alert(error?.message || "Create user failed");
-                      }
-                    }}
-                  >
-                    Create User
-                  </button>
-                    </>
-                  )}
-                  {activeFeature === "admin_manage_users" && (
-                    <>
-                  <h4 style={{ marginTop: "10px" }}>Manage Users</h4>
-                  <button
-                    className="button small"
-                    onClick={async () => {
-                      try {
-                        await loadAdminUsers();
-                      } catch (error: any) {
-                        alert(error?.message || "Load users failed");
-                      }
-                    }}
-                  >
-                    Refresh Users
-                  </button>
-                  {adminUsers.length > 0 && (
-                    <div className="listCompact">
-                      {adminUsers.map((user) => (
-                        <div className="row" key={user.id}>
-                          <span className="title">{user.name} ({user.email})</span>
-                          <span className="meta">{user.role} | {user.isActive ? "Active" : "Inactive"}</span>
-                          <select
-                            className="input"
-                            style={{ width: "140px", marginBottom: 0 }}
-                            value={user.role}
-                            onChange={async (e) => {
-                              try {
-                                await updateAdminRoleApi(user.id, e.target.value);
-                                await loadAdminUsers();
-                              } catch (error: any) {
-                                alert(error?.message || "Role update failed");
-                              }
-                            }}
-                          >
-                            <option value="TESTER">TESTER</option>
-                            <option value="DEVELOPER">DEVELOPER</option>
-                            <option value="ADMIN">ADMIN</option>
-                          </select>
-                          <button
-                            className="button small"
-                            onClick={() => openAdminEditUser(user)}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            className="button small"
-                            disabled={user.id === currentUserId}
-                            onClick={async () => {
-                              try {
-                                if (user.id === currentUserId) {
-                                  alert("You cannot change your own active status");
-                                  return;
-                                }
-                                await updateAdminUserApi(user.id, { isActive: !Boolean(user.isActive) });
-                                await loadAdminUsers();
-                              } catch (error: any) {
-                                alert(error?.message || "Update active status failed");
-                              }
-                            }}
-                          >
-                            {user.isActive ? "Deactivate" : "Activate"}
-                          </button>
-                          <button
-                            className="button small danger"
-                            disabled={user.id === currentUserId}
-                            onClick={async () => {
-                              try {
-                                if (user.id === currentUserId) {
-                                  alert("You cannot delete your own admin account");
-                                  return;
-                                }
-                                if (!window.confirm(`Delete user ${user.email}?`)) {
-                                  return;
-                                }
-                                await deleteAdminUserApi(user.id);
-                                await loadAdminUsers();
-                              } catch (error: any) {
-                                alert(error?.message || "Delete user failed");
-                              }
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                    </>
-                  )}
-                  {activeFeature === "admin_manage_projects" && (
-                    <>
-                  <h4 style={{ marginTop: "12px" }}>Manage Projects</h4>
-                  <input
-                    className="input"
-                    placeholder="Project name"
-                    value={adminProjectName}
-                    onChange={(e) => setAdminProjectName(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    placeholder="Project description"
-                    value={adminProjectDescription}
-                    onChange={(e) => setAdminProjectDescription(e.target.value)}
-                  />
-                  <div className="inlineGrid">
-                    <button
-                      className="button small"
-                      onClick={async () => {
-                        try {
-                          if (!adminProjectName.trim()) {
-                            alert("Project name is required");
-                            return;
+                      <h4>User Management</h4>
+                      <p className="note">Create, edit, activate/deactivate, and delete user accounts.</p>
+                      <div className="inlineGrid">
+                        <input
+                          className="input"
+                          placeholder="Name"
+                          value={adminCreateName}
+                          autoComplete="off"
+                          name="admin_create_name"
+                          onChange={(e) => setAdminCreateName(e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Email"
+                          value={adminCreateEmail}
+                          autoComplete="off"
+                          name="admin_create_email"
+                          onChange={(e) => setAdminCreateEmail(e.target.value)}
+                        />
+                      </div>
+                      <div className="inlineGrid">
+                        <input
+                          className="input"
+                          type="password"
+                          placeholder="Temporary Password"
+                          value={adminCreatePassword}
+                          autoComplete="new-password"
+                          name="admin_create_password"
+                          onChange={(e) => setAdminCreatePassword(e.target.value)}
+                        />
+                        <select
+                          className="input"
+                          value={adminCreateRole}
+                          onChange={(e) => setAdminCreateRole(e.target.value)}
+                        >
+                          <option value="">Select role</option>
+                          <option value="TESTER">TESTER</option>
+                          <option value="DEVELOPER">DEVELOPER</option>
+                          <option value="ADMIN">ADMIN</option>
+                        </select>
+                      </div>
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            if (!adminCreateName.trim() || !adminCreateEmail.trim() || !adminCreatePassword.trim() || !adminCreateRole) {
+                              alert("Name, email, password, and role are required");
+                              return;
+                            }
+                            await createAdminUserApi({
+                              name: adminCreateName.trim(),
+                              email: adminCreateEmail.trim().toLowerCase(),
+                              password: adminCreatePassword,
+                              role: adminCreateRole,
+                            });
+                            setAdminCreateName("");
+                            setAdminCreateEmail("");
+                            setAdminCreatePassword("");
+                            setAdminCreateRole("");
+                            await loadAdminUsers();
+                            alert("User created");
+                          } catch (error: any) {
+                            alert(error?.message || "Create user failed");
                           }
-                          await createAdminProjectApi({
-                            name: adminProjectName.trim(),
-                            description: adminProjectDescription || undefined,
-                          });
-                          setAdminProjectName("");
-                          setAdminProjectDescription("");
-                          await loadAdminWorkspaceData();
-                          alert("Project created");
-                        } catch (error: any) {
-                          alert(error?.message || "Create project failed");
-                        }
-                      }}
-                    >
-                      Create Project
-                    </button>
-                    <button
-                      className="button small"
-                      onClick={async () => {
-                        try {
-                          await loadAdminWorkspaceData();
-                        } catch (error: any) {
-                          alert(error?.message || "Refresh admin workspace failed");
-                        }
-                      }}
-                    >
-                      Refresh Admin Data
-                    </button>
-                  </div>
-                  {adminProjects.length > 0 && (
-                    <div className="listCompact">
-                      {adminProjects.map((project) => (
-                        <div className="row" key={project.id}>
-                          <span className="title">{project.name}</span>
-                          <span className="meta">{project.isActive ? "Active" : "Inactive"}</span>
-                          <button
-                            className="button small"
-                            onClick={async () => {
-                              try {
-                                await updateAdminProjectApi(project.id, { isActive: !Boolean(project.isActive) });
-                                await loadAdminWorkspaceData();
-                              } catch (error: any) {
-                                alert(error?.message || "Project update failed");
-                              }
-                            }}
-                          >
-                            {project.isActive ? "Deactivate" : "Activate"}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                    </>
-                  )}
-                     {activeFeature === "admin_manage_roles" && (
-  <section className="panel">
-    <h4>Manage Roles</h4>
+                        }}
+                      >
+                        Create User
+                      </button>
 
-    {adminUsers.length > 0 && (
-      <div className="simpleList">
-        {adminUsers.map((user) => (
-          <div
-            key={user.id}
-            className="simpleListItem"
-            onClick={() => setSelectedUser(user)}
-          >
-            <div className="listName">{user.name}</div>
-            <div className="listEmail">{user.email}</div>
-          </div>
-        ))}
-      </div>
-    )}
-  </section>
-)}
-                  {activeFeature === "admin_audit_logs" && (
-                    <>
-                  <h4 style={{ marginTop: "12px" }}>View Audit Logs</h4>
-                  <input
-                    className="input"
-                    placeholder="Filter entity type (optional)"
-                    value={adminAuditEntityType}
-                    onChange={(e) => setAdminAuditEntityType(e.target.value)}
-                  />
-                  <div className="note">Audit entries: {adminAuditLogs.length}</div>
-                  {adminAuditLogs.length > 0 && (
-                    <div className="listCompact">
-                      {adminAuditLogs.slice(0, 20).map((log) => (
-                        <div className="row" key={log.id}>
-                          <span className="title">{log.action}</span>
-                          <span className="meta">
-                            {log.entityType} | {new Date(log.createdAt).toLocaleString()}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                      <div className="panelHeader" style={{ marginTop: "12px" }}>
+                        <h4 style={{ marginBottom: 0 }}>Manage Users</h4>
+                        <button
+                          className="button small"
+                          onClick={async () => {
+                            try {
+                              await loadAdminUsers();
+                            } catch (error: any) {
+                              alert(error?.message || "Load users failed");
+                            }
+                          }}
+                        >
+                          Refresh Users
+                        </button>
+                      </div>
+                      <div className="listCompact">
+                        {adminUsers.length === 0 ? (
+                          <p className="note">No users found.</p>
+                        ) : (
+                          adminUsers.map((user) => {
+                            const isCurrentAdmin = user.id === currentUserId;
+                            const isSaving = adminUserSavingId === user.id;
+                            return (
+                              <div className="row adminUserRow" key={user.id}>
+                                <span className="title">
+                                  <strong>{user.name || "Unnamed user"}</strong>
+                                  <br />
+                                  {user.email}
+                                </span>
+                                <span className="meta">
+                                  {isCurrentAdmin ? "Current account" : user.isActive ? "Active" : "Inactive"}
+                                </span>
+                                <select
+                                  className="input adminRoleInput"
+                                  value={user.role || "TESTER"}
+                                  disabled={isSaving}
+                                  onChange={async (e) => {
+                                    try {
+                                      const nextRole = e.target.value;
+                                      setAdminUserSavingId(user.id);
+                                      await updateAdminRoleApi(user.id, nextRole);
+                                      await loadAdminUsers();
+                                    } catch (error: any) {
+                                      alert(error?.message || "Role update failed");
+                                    } finally {
+                                      setAdminUserSavingId("");
+                                    }
+                                  }}
+                                >
+                                  <option value="TESTER">TESTER</option>
+                                  <option value="DEVELOPER">DEVELOPER</option>
+                                  <option value="ADMIN">ADMIN</option>
+                                </select>
+                                <button
+                                  className="button small"
+                                  disabled={isSaving || isCurrentAdmin}
+                                  onClick={async () => {
+                                    try {
+                                      setAdminUserSavingId(user.id);
+                                      await updateAdminUserApi(user.id, { isActive: !Boolean(user.isActive) });
+                                      await loadAdminUsers();
+                                    } catch (error: any) {
+                                      alert(error?.message || "Status update failed");
+                                    } finally {
+                                      setAdminUserSavingId("");
+                                    }
+                                  }}
+                                >
+                                  {Boolean(user.isActive) ? "Deactivate" : "Activate"}
+                                </button>
+                                <button
+                                  className="button small danger"
+                                  disabled={isSaving || isCurrentAdmin}
+                                  onClick={async () => {
+                                    try {
+                                      const confirmed = window.confirm(
+                                        `Delete user ${user.email}? This action cannot be undone.`
+                                      );
+                                      if (!confirmed) return;
+                                      setAdminUserSavingId(user.id);
+                                      await deleteAdminUserApi(user.id);
+                                      await loadAdminUsers();
+                                    } catch (error: any) {
+                                      alert(error?.message || "Delete user failed");
+                                    } finally {
+                                      setAdminUserSavingId("");
+                                    }
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </>
                   )}
-                  {activeFeature === "admin_system_config" && (
+
+                  {activeMenuKey === "role_management" && (
                     <>
-                  <h4 style={{ marginTop: "12px" }}>System Configuration</h4>
-                  <input
-                    className="input"
-                    placeholder="Config key"
-                    value={adminConfigKey}
-                    onChange={(e) => setAdminConfigKey(e.target.value)}
-                  />
-                  <input
-                    className="input"
-                    placeholder="Config value"
-                    value={adminConfigValue}
-                    onChange={(e) => setAdminConfigValue(e.target.value)}
-                  />
-                  <button
-                    className="button small"
-                    onClick={async () => {
-                      try {
-                        if (!adminConfigKey.trim()) {
-                          alert("Config key is required");
-                          return;
-                        }
-                        await upsertAdminSystemConfigApi({
-                          key: adminConfigKey.trim(),
-                          value: adminConfigValue,
-                        });
-                        setAdminConfigKey("");
-                        setAdminConfigValue("");
-                        await loadAdminWorkspaceData();
-                        alert("System config saved");
-                      } catch (error: any) {
-                        alert(error?.message || "System config update failed");
-                      }
-                    }}
-                  >
-                    Save Config
-                  </button>
-                  {adminSystemConfigs.length > 0 && (
-                    <div className="listCompact">
-                      {adminSystemConfigs.slice(0, 20).map((cfg) => (
-                        <div className="row" key={cfg.id}>
-                          <span className="title">{cfg.key}</span>
-                          <span className="meta">{cfg.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                      <h4>Role Management</h4>
+                      <p className="note">Customize user roles and role permissions.</p>
+                      <div className="inlineGrid">
+                        <select
+                          className="input"
+                          value={editPermissionRole}
+                          onChange={(e) =>
+                            setEditPermissionRole(e.target.value as "ADMIN" | "TESTER" | "DEVELOPER")
+                          }
+                        >
+                          <option value="ADMIN">ADMIN</option>
+                          <option value="TESTER">TESTER</option>
+                          <option value="DEVELOPER">DEVELOPER</option>
+                        </select>
+                        <button
+                          className="button"
+                          disabled={rolePermissionSaving}
+                          onClick={async () => {
+                            try {
+                              setRolePermissionSaving(true);
+                              await upsertAdminSystemConfigApi({
+                                key: "ROLE_PERMISSIONS",
+                                value: JSON.stringify(rolePermissions),
+                              });
+                              alert("Role permissions updated");
+                            } catch (error: any) {
+                              alert(error?.message || "Failed to save role permissions");
+                            } finally {
+                              setRolePermissionSaving(false);
+                            }
+                          }}
+                        >
+                          {rolePermissionSaving ? "Saving..." : "Save Permissions"}
+                        </button>
+                      </div>
+                      <div className="listCompact">
+                        {permissionCatalog.map((permission) => (
+                          <label key={permission} className="row" style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                            <input
+                              type="checkbox"
+                              checked={(rolePermissions[editPermissionRole] || []).includes(permission)}
+                              onChange={() => toggleRolePermission(editPermissionRole, permission)}
+                            />
+                            <span>{permission}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <div className="panelHeader" style={{ marginTop: "12px" }}>
+                        <h4 style={{ marginBottom: 0 }}>Assign User Roles</h4>
+                      </div>
+                      <div className="listCompact">
+                        {adminUsers.length === 0 ? (
+                          <p className="note">No users found to manage roles.</p>
+                        ) : (
+                          adminUsers.map((user) => {
+                            const isSaving = adminUserSavingId === user.id;
+                            return (
+                              <div className="row adminUserRow" key={user.id}>
+                                <span className="title">
+                                  <strong>{user.name || "Unnamed user"}</strong>
+                                  <br />
+                                  {user.email}
+                                </span>
+                                <span className="meta">Current Role: {user.role || "TESTER"}</span>
+                                <select
+                                  className="input adminRoleInput"
+                                  value={user.role || "TESTER"}
+                                  disabled={isSaving}
+                                  onChange={async (e) => {
+                                    try {
+                                      setAdminUserSavingId(user.id);
+                                      await updateAdminRoleApi(user.id, e.target.value);
+                                      await loadAdminUsers();
+                                    } catch (error: any) {
+                                      alert(error?.message || "Role update failed");
+                                    } finally {
+                                      setAdminUserSavingId("");
+                                    }
+                                  }}
+                                >
+                                  <option value="TESTER">TESTER</option>
+                                  <option value="DEVELOPER">DEVELOPER</option>
+                                  <option value="ADMIN">ADMIN</option>
+                                </select>
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </>
                   )}
-                  {activeFeature === "admin_backup_mgmt" && (
+
+                  {activeMenuKey === "project_management" && (
                     <>
-                  <h4 style={{ marginTop: "12px" }}>Backup Management</h4>
-                  <input
-                    className="input"
-                    placeholder="Backup notes (optional)"
-                    value={adminBackupNotes}
-                    onChange={(e) => setAdminBackupNotes(e.target.value)}
-                  />
-                  <button
-                    className="button small"
-                    onClick={async () => {
-                      try {
-                        await triggerAdminBackupApi(adminBackupNotes || undefined);
-                        setAdminBackupNotes("");
-                        await loadAdminWorkspaceData();
-                        alert("Backup triggered");
-                      } catch (error: any) {
-                        alert(error?.message || "Backup trigger failed");
-                      }
-                    }}
-                  >
-                    Trigger Backup
-                  </button>
-                  {adminBackups.length > 0 && (
-                    <div className="listCompact">
-                      {adminBackups.slice(0, 20).map((backup) => (
-                        <div className="row" key={backup.id}>
-                          <span className="title">{backup.status || "UNKNOWN"}</span>
-                          <span className="meta">
-                            {new Date(backup.createdAt).toLocaleString()}
-                            {backup.notes ? ` | ${backup.notes}` : ""}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                      <h4>Project Management</h4>
+                      <p className="note">Create and configure projects.</p>
+                      <div className="inlineGrid">
+                        <input
+                          className="input"
+                          placeholder="Project Name"
+                          value={adminProjectName}
+                          onChange={(e) => setAdminProjectName(e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Project Description"
+                          value={adminProjectDescription}
+                          onChange={(e) => setAdminProjectDescription(e.target.value)}
+                        />
+                      </div>
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            if (!adminProjectName.trim()) {
+                              alert("Project name is required");
+                              return;
+                            }
+                            const created = await createAdminProjectApi({
+                              name: adminProjectName.trim(),
+                              description: adminProjectDescription.trim() || undefined,
+                            });
+                            setAdminProjects((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
+                            setAdminProjectName("");
+                            setAdminProjectDescription("");
+                            alert("Project created");
+                          } catch (error: any) {
+                            alert(error?.message || "Create project failed");
+                          }
+                        }}
+                      >
+                        Create Project
+                      </button>
+                      <div className="panelHeader" style={{ marginTop: "12px" }}>
+                        <h4 style={{ marginBottom: 0 }}>Project List</h4>
+                        <button className="button small" onClick={() => loadTestCaseData()}>
+                          Refresh Projects
+                        </button>
+                      </div>
+                      <div className="listCompact">
+                        {adminProjects.length === 0 ? (
+                          <p className="note">
+                            No projects found. Create one. Existing projects from linked test cases appear here.
+                          </p>
+                        ) : (
+                          adminProjects.map((project) => (
+                            <div className="row adminUserRow" key={project.id}>
+                              <span className="title">
+                                <strong>{project.name || "Unnamed project"}</strong>
+                                <br />
+                                {project.description || "No description"}
+                              </span>
+                              <span className="meta">{project.isActive === false ? "Inactive" : "Active"}</span>
+                              <button
+                                className="button small"
+                                disabled={adminProjectSavingId === project.id}
+                                onClick={async () => {
+                                  try {
+                                    setAdminProjectSavingId(project.id);
+                                    await updateAdminProjectApi(project.id, {
+                                      isActive: project.isActive === false ? true : false,
+                                    });
+                                    setAdminProjects((prev) =>
+                                      prev.map((item) =>
+                                        item.id === project.id
+                                          ? { ...item, isActive: !(project.isActive === false) }
+                                          : item
+                                      )
+                                    );
+                                  } catch (error: any) {
+                                    alert(error?.message || "Project update failed");
+                                  } finally {
+                                    setAdminProjectSavingId("");
+                                  }
+                                }}
+                              >
+                                {project.isActive === false ? "Activate" : "Deactivate"}
+                              </button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </>
                   )}
+
+                  {activeMenuKey === "audit_logs" && (
+                    <>
+                      <h4>Audit Logs</h4>
+                      <p className="note">View complete system audit trail.</p>
+                      <div className="inlineGrid">
+                        <input
+                          className="input"
+                          placeholder="Entity Type (optional)"
+                          value={auditEntityType}
+                          onChange={(e) => setAuditEntityType(e.target.value)}
+                        />
+                        <button
+                          className="button"
+                          onClick={async () => {
+                            try {
+                              await loadAdminAuditLogs(auditEntityType || undefined);
+                            } catch (error: any) {
+                              alert(error?.message || "Failed to load audit logs");
+                            }
+                          }}
+                        >
+                          Refresh Audit Logs
+                        </button>
+                      </div>
+                      <div className="listCompact">
+                        {adminAuditLogs.length === 0 ? (
+                          <p className="note">No audit logs found.</p>
+                        ) : (
+                          adminAuditLogs.map((log: any) => (
+                            <div className="row" key={log.id}>
+                              <strong>{log.action || "ACTION"}</strong>
+                              <div className="note">
+                                {log.entityType || "Entity"} {log.entityId || ""}
+                              </div>
+                              <div className="note">
+                                {(log.actor?.name || log.actor?.email || "Unknown")} |{" "}
+                                {log.createdAt ? new Date(log.createdAt).toLocaleString() : "N/A"}
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {activeMenuKey === "backup_management" && (
+                    <>
+                      <h4>Backup Management</h4>
+                      <p className="note">Trigger and monitor backup-related activity.</p>
+                      <div className="inlineGrid">
+                        <input
+                          className="input"
+                          placeholder="Backup notes"
+                          value={backupNotes}
+                          onChange={(e) => setBackupNotes(e.target.value)}
+                        />
+                        <button
+                          className="button"
+                          disabled={backupTriggering}
+                          onClick={async () => {
+                            try {
+                              setBackupTriggering(true);
+                              await triggerAdminBackupApi(backupNotes || undefined);
+                              setBackupNotes("");
+                              await loadAdminAuditLogs("BackupJob");
+                              alert("Backup triggered");
+                            } catch (error: any) {
+                              alert(error?.message || "Backup trigger failed");
+                            } finally {
+                              setBackupTriggering(false);
+                            }
+                          }}
+                        >
+                          {backupTriggering ? "Triggering..." : "Trigger Backup"}
+                        </button>
+                      </div>
+                      <div className="listCompact">
+                        {adminAuditLogs.length === 0 ? (
+                          <p className="note">No backup activity found.</p>
+                        ) : (
+                          adminAuditLogs
+                            .filter((log: any) =>
+                              (log.entityType || "").toLowerCase().includes("backup") ||
+                              (log.action || "").toUpperCase().includes("BACKUP")
+                            )
+                            .map((log: any) => (
+                              <div className="row" key={log.id}>
+                                <strong>{log.action || "BACKUP_EVENT"}</strong>
+                                <div className="note">
+                                  {log.createdAt ? new Date(log.createdAt).toLocaleString() : "N/A"}
+                                </div>
+                              </div>
+                            ))
+                        )}
+                      </div>
                     </>
                   )}
                 </section>
               )}
 
               {showCreateTestCase && (
-              <section className="panel">
+              <section className="panel createCasePanel">
                 <h4>Create Test Case</h4>
                 <label className="fieldLabel">Title</label>
                 <input className="input" placeholder="Title" value={tcTitle} onChange={(e) => setTcTitle(e.target.value)} />
@@ -2344,6 +2644,7 @@ onClick={() =>
                 <textarea className="input" placeholder='JSON array or one item per line' rows={3} value={tcEnvironmentRequirementsText} onChange={(e) => setTcEnvironmentRequirementsText(e.target.value)} />
                 <label className="fieldLabel">Module/Feature</label>
                 <select className="input" value={tcModule} onChange={(e) => setTcModule(e.target.value)}>
+                  <option value="">Select module</option>
                   <option value="Authentication">Authentication</option>
                   <option value="User Management">User Management</option>
                   <option value="Reporting">Reporting</option>
@@ -2361,6 +2662,7 @@ onClick={() =>
                 <input className="input" placeholder="5" value={tcEstimatedDurationMinutes} onChange={(e) => setTcEstimatedDurationMinutes(e.target.value)} />
                 <label className="fieldLabel">Automation Status</label>
                 <select className="input" value={tcAutomationStatus} onChange={(e) => setTcAutomationStatus(e.target.value)}>
+                  <option value="">Select automation status</option>
                   <option value="NOT_AUTOMATED">Not Automated</option>
                   <option value="IN_PROGRESS">In Progress</option>
                   <option value="AUTOMATED">Automated</option>
@@ -2371,12 +2673,14 @@ onClick={() =>
                 <label className="fieldLabel">Metadata Section</label>
                 <div className="inlineGrid">
                   <select className="input" value={tcPriority} onChange={(e) => setTcPriority(e.target.value)}>
+                    <option value="">Select priority</option>
                     <option value="CRITICAL">CRITICAL</option>
                     <option value="HIGH">HIGH</option>
                     <option value="MEDIUM">MEDIUM</option>
                     <option value="LOW">LOW</option>
                   </select>
                   <select className="input" value={tcSeverity} onChange={(e) => setTcSeverity(e.target.value)}>
+                    <option value="">Select severity</option>
                     <option value="BLOCKER">BLOCKER</option>
                     <option value="CRITICAL">CRITICAL</option>
                     <option value="MAJOR">MAJOR</option>
@@ -2386,6 +2690,7 @@ onClick={() =>
                 </div>
                 <div className="inlineGrid">
                   <select className="input" value={tcType} onChange={(e) => setTcType(e.target.value)}>
+                    <option value="">Select type</option>
                     <option value="FUNCTIONAL">FUNCTIONAL</option>
                     <option value="REGRESSION">REGRESSION</option>
                     <option value="SMOKE">SMOKE</option>
@@ -2396,6 +2701,7 @@ onClick={() =>
                     <option value="USABILITY">USABILITY</option>
                   </select>
                   <select className="input" value={tcStatus} onChange={(e) => setTcStatus(e.target.value)}>
+                    <option value="">Select status</option>
                     <option value="DRAFT">DRAFT</option>
                     <option value="READY_FOR_REVIEW">READY_FOR_REVIEW</option>
                     <option value="APPROVED">APPROVED</option>
@@ -2519,6 +2825,7 @@ onClick={() =>
               <section className="panel">
                 <h4>Bulk Operations</h4>
                 <select className="input" value={bulkOperation} onChange={(e) => setBulkOperation(e.target.value)}>
+                  <option value="">Select operation</option>
                   <option value="STATUS">STATUS</option>
                   <option value="ASSIGN">ASSIGN</option>
                   <option value="PRIORITY">PRIORITY</option>
@@ -2531,6 +2838,7 @@ onClick={() =>
                 </select>
                 {bulkOperation === "STATUS" && (
                   <select className="input" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
+                    <option value="">Select status</option>
                     <option value="DRAFT">DRAFT</option>
                     <option value="READY_FOR_REVIEW">READY_FOR_REVIEW</option>
                     <option value="APPROVED">APPROVED</option>
@@ -2543,6 +2851,7 @@ onClick={() =>
                 )}
                 {bulkOperation === "PRIORITY" && (
                   <select className="input" value={bulkPriority} onChange={(e) => setBulkPriority(e.target.value)}>
+                    <option value="">Select priority</option>
                     <option value="CRITICAL">CRITICAL</option>
                     <option value="HIGH">HIGH</option>
                     <option value="MEDIUM">MEDIUM</option>
@@ -2551,6 +2860,7 @@ onClick={() =>
                 )}
                 {bulkOperation === "SEVERITY" && (
                   <select className="input" value={bulkSeverityValue} onChange={(e) => setBulkSeverityValue(e.target.value)}>
+                    <option value="">Select severity</option>
                     <option value="BLOCKER">BLOCKER</option>
                     <option value="CRITICAL">CRITICAL</option>
                     <option value="MAJOR">MAJOR</option>
@@ -2596,11 +2906,11 @@ onClick={() =>
                         alert("Bulk export completed");
                       } else {
                         setSelectedIds([]);
-                        setBulkOperation("STATUS");
-                        setBulkStatus("READY_FOR_REVIEW");
-                        setBulkPriority("MEDIUM");
-                        setBulkSeverityValue("MAJOR");
-                        setBulkModule("General");
+                        setBulkOperation("");
+                        setBulkStatus("");
+                        setBulkPriority("");
+                        setBulkSeverityValue("");
+                        setBulkModule("");
                         setBulkSuiteId("");
                         setBulkAssignee("");
                         await loadTestCaseData();
@@ -2620,6 +2930,7 @@ onClick={() =>
               <section className="panel">
                 <h4>Import</h4>
                 <select className="input" value={importType} onChange={(e) => setImportType(e.target.value)}>
+                  <option value="">Select import source</option>
                   <option value="JSON">JSON</option>
                   <option value="CSV">CSV</option>
                   <option value="EXCEL">EXCEL</option>
@@ -2724,28 +3035,13 @@ onClick={() =>
                   value={runEndDate}
                   onChange={(e) => setRunEndDate(e.target.value)}
                 />
-                <label className="fieldLabel">Assign Testers</label>
-                <select
+                <textarea
                   className="input"
-                  multiple
-                  size={Math.min(Math.max(runTesterOptions.length, 3), 8)}
-                  value={runTesterIds}
-                  onChange={(e) => {
-                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                    setRunTesterIds(selected);
-                  }}
-                >
-                  {runTesterOptions.map((tester) => (
-                    <option key={tester.id} value={tester.id}>
-                      {tester.name} ({tester.email})
-                    </option>
-                  ))}
-                </select>
-                <div className="note">
-                  {runTesterIds.length > 0
-                    ? `${runTesterIds.length} tester(s) selected`
-                    : "Select one or more testers (optional)"}
-                </div>
+                  rows={3}
+                  placeholder="Tester IDs (comma or newline separated)"
+                  value={runTesterIdsText}
+                  onChange={(e) => setRunTesterIdsText(e.target.value)}
+                />
                 <button
                   className="button"
                   onClick={async () => {
@@ -2764,7 +3060,7 @@ onClick={() =>
                         targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
                         targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
                         testCaseIds: selectedIds,
-                        testerIds: runTesterIds,
+                        testerIds: parseIdsFromText(runTesterIdsText),
                       });
                       resetRunFields();
                       await loadTestCaseData();
@@ -2778,197 +3074,10 @@ onClick={() =>
                 </button>
                 <select
                   className="input"
-                  multiple
-                  size={Math.min(Math.max(runTesterOptions.length, 3), 8)}
-                  value={runTesterIds}
-                  onChange={(e) => {
-                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                    setRunTesterIds(selected);
-                  }}
-                >
-                  {runTesterOptions.map((tester) => (
-                    <option key={tester.id} value={tester.id}>
-                      {tester.name} ({tester.email})
-                    </option>
-                  ))}
-                </select>
-                <div className="note">
-                  {runTesterIds.length > 0
-                    ? `${runTesterIds.length} tester(s) selected`
-                    : "Select one or more testers (optional)"}
-                </div>
-
-                <label className="fieldLabel">Select Test Cases for This Run</label>
-                <input
-                  className="input"
-                  placeholder="Search test cases by title, code, or module..."
-                  value={runTestCaseSearchQuery}
-                  onChange={(e) => setRunTestCaseSearchQuery(e.target.value)}
-                />
-                <select
-                  className="input"
-                  value={runTestCaseFilterModule}
-                  onChange={(e) => setRunTestCaseFilterModule(e.target.value)}
-                >
-                  <option value="">All Modules</option>
-                  {Array.from(new Set(testCases.map((tc: any) => tc.module))).map((module: any) => (
-                    <option key={module} value={module}>
-                      {module}
-                    </option>
-                  ))}
-                </select>
-
-                <div className="note">
-                  {runSelectedTestCaseIds.length} test case(s) selected for this run
-                </div>
-
-                <div style={{ maxHeight: "400px", overflowY: "auto", border: "1px solid #ccc", padding: "8px" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ position: "sticky", top: 0, backgroundColor: "#f0f0f0" }}>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd", width: "40px" }}>
-                          <input
-                            type="checkbox"
-                            checked={
-                              testCases
-                                .filter((tc: any) => {
-                                  const matchesSearch = runTestCaseSearchQuery
-                                    ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                                      (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                                      (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
-                                    : true;
-                                  const matchesModule = runTestCaseFilterModule
-                                    ? tc.module === runTestCaseFilterModule
-                                    : true;
-                                  return matchesSearch && matchesModule;
-                                })
-                                .every((tc: any) => runSelectedTestCaseIds.includes(tc.id)) &&
-                              testCases.filter((tc: any) => {
-                                const matchesSearch = runTestCaseSearchQuery
-                                  ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                                    (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                                    (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
-                                  : true;
-                                const matchesModule = runTestCaseFilterModule
-                                  ? tc.module === runTestCaseFilterModule
-                                  : true;
-                                return matchesSearch && matchesModule;
-                              }).length > 0
-                            }
-                            onChange={(e) => {
-                              const filtered = testCases.filter((tc: any) => {
-                                const matchesSearch = runTestCaseSearchQuery
-                                  ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                                    (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                                    (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
-                                  : true;
-                                const matchesModule = runTestCaseFilterModule
-                                  ? tc.module === runTestCaseFilterModule
-                                  : true;
-                                return matchesSearch && matchesModule;
-                              });
-                              if (e.target.checked) {
-                                setRunSelectedTestCaseIds(
-                                  Array.from(new Set([...runSelectedTestCaseIds, ...filtered.map((tc: any) => tc.id)]))
-                                );
-                              } else {
-                                const toRemove = new Set(filtered.map((tc: any) => tc.id));
-                                setRunSelectedTestCaseIds(
-                                  runSelectedTestCaseIds.filter((id) => !toRemove.has(id))
-                                );
-                              }
-                            }}
-                          />
-                        </th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Code</th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Title</th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Module</th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Priority</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {testCases
-                        .filter((tc: any) => {
-                          const matchesSearch = runTestCaseSearchQuery
-                            ? tc.title.toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                              (tc.testCaseCode || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase()) ||
-                              (tc.module || "").toLowerCase().includes(runTestCaseSearchQuery.toLowerCase())
-                            : true;
-                          const matchesModule = runTestCaseFilterModule
-                            ? tc.module === runTestCaseFilterModule
-                            : true;
-                          return matchesSearch && matchesModule;
-                        })
-                        .map((tc: any) => (
-                          <tr key={tc.id} style={{ borderBottom: "1px solid #eee" }}>
-                            <td style={{ padding: "8px", textAlign: "center" }}>
-                              <input
-                                type="checkbox"
-                                checked={runSelectedTestCaseIds.includes(tc.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) {
-                                    setRunSelectedTestCaseIds([...runSelectedTestCaseIds, tc.id]);
-                                  } else {
-                                    setRunSelectedTestCaseIds(
-                                      runSelectedTestCaseIds.filter((id) => id !== tc.id)
-                                    );
-                                  }
-                                }}
-                              />
-                            </td>
-                            <td style={{ padding: "8px" }}>{tc.testCaseCode}</td>
-                            <td style={{ padding: "8px" }}>{tc.title}</td>
-                            <td style={{ padding: "8px" }}>{tc.module}</td>
-                            <td style={{ padding: "8px" }}>{tc.priority}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
-
-                <button
-                  className="button"
-                  disabled={!runName.trim() || runSelectedTestCaseIds.length === 0}
-                  onClick={async () => {
-                    try {
-                      if (!runName.trim()) {
-                        alert("Run name is required");
-                        return;
-                      }
-                      if (runSelectedTestCaseIds.length === 0) {
-                        alert("Select at least one test case");
-                        return;
-                      }
-                      await createTestRunApi({
-                        name: runName,
-                        description: runDescription || undefined,
-                        targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
-                        targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
-                        testCaseIds: runSelectedTestCaseIds,
-                        testerIds: runTesterIds,
-                      });
-                      resetRunFields();
-                      await loadTestCaseData();
-                      alert("Test run created successfully!");
-                    } catch (error: any) {
-                      alert(error?.message || "Create test run failed");
-                    }
-                  }}
-                  style={{
-                    opacity: !runName.trim() || runSelectedTestCaseIds.length === 0 ? 0.5 : 1,
-                    cursor:
-                      !runName.trim() || runSelectedTestCaseIds.length === 0 ? "not-allowed" : "pointer",
-                  }}
-                >
-                  Create Test Run ({runSelectedTestCaseIds.length} case{runSelectedTestCaseIds.length !== 1 ? "s" : ""})
-                </button>
-
-                <select
-                  className="input"
                   value={selectedRunId}
                   onChange={(e) => setSelectedRunId(e.target.value)}
                 >
-                  <option value="">Select Test Run to View</option>
+                  <option value="">Select Test Run</option>
                   {testRuns.map((run) => (
                     <option key={run.id} value={run.id}>
                       {run.name} ({run.progress?.completed || 0}/{run.progress?.total || 0})
@@ -3005,1061 +3114,689 @@ onClick={() =>
               </section>
               )}
 
-              {showTestSuites && (
+              {showSuiteManagement && (
               <section className="panel">
-                <h3>Test Suite Management</h3>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "10px" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <input
-                      type="checkbox"
-                      checked={showArchivedSuites}
-                      onChange={(e) => setShowArchivedSuites(e.target.checked)}
-                    />
-                    <span>Show Archived</span>
-                  </label>
-                  <span className="note">{suites.length} suite(s) available</span>
-                  {suiteToast ? <span className="note" style={{ color: "#065f46" }}>{suiteToast}</span> : null}
-                </div>
-                
-                <div style={{ 
-                  backgroundColor: editingSuiteId ? "#fff3cd" : "#f8f9fa",
-                  padding: "16px",
-                  borderRadius: "4px",
-                  marginTop: "16px",
-                  border: editingSuiteId ? "2px solid #ff9800" : "1px solid #dee2e6"
-                }}>
-                  <h4>{editingSuiteId ? "✏️ Edit Test Suite" : "➕ Create New Test Suite"}</h4>
+                <h4>Suite Management (4.5)</h4>
+                <label className="note" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <input
+                    type="checkbox"
+                    checked={showArchivedSuites}
+                    onChange={(e) => setShowArchivedSuites(e.target.checked)}
+                  />
+                  Show Archived Suites
+                </label>
+                <button
+                  className="button small"
+                  onClick={async () => {
+                    try {
+                      await loadTestCaseData();
+                      if (selectedSuiteId) {
+                        await loadSuiteDetails(selectedSuiteId);
+                      }
+                    } catch (error: any) {
+                      alert(getSuiteFriendlyError(error, "Refresh suites failed"));
+                    }
+                  }}
+                >
+                  Refresh Suites
+                </button>
+                <div className="inlineGrid">
                   <input
                     className="input"
                     placeholder="Suite Name"
-                    value={editingSuiteId ? editSuiteName : suiteName}
-                  onChange={(e) => editingSuiteId ? setEditSuiteName(e.target.value) : setSuiteName(e.target.value)}
-                  disabled={!!editingSuiteId}
+                    value={suiteName}
+                    onChange={(e) => setSuiteName(e.target.value)}
+                  />
+                  <input
+                    className="input"
+                    placeholder="Module (e.g., Authentication)"
+                    value={suiteModule}
+                    onChange={(e) => setSuiteModule(e.target.value)}
+                  />
+                </div>
+                <textarea
+                  className="input"
+                  rows={2}
+                  placeholder="Suite Description"
+                  value={suiteDescription}
+                  onChange={(e) => setSuiteDescription(e.target.value)}
                 />
+                <div className="inlineGrid">
+                  <select
+                    className="input"
+                    value={suiteParentId}
+                    onChange={(e) => setSuiteParentId(e.target.value)}
+                  >
+                    <option value="">No Parent Suite</option>
+                    {suites
+                      .filter((suite) => !suite.isArchived)
+                      .map((suite) => (
+                        <option key={suite.id} value={suite.id}>
+                          {suite.name}
+                        </option>
+                      ))}
+                  </select>
+                  <input
+                    className="input"
+                    placeholder="Project ID (optional)"
+                    value={suiteProjectId}
+                    onChange={(e) => setSuiteProjectId(e.target.value)}
+                  />
+                </div>
+                <div className="note">Select initial test cases</div>
                 <input
                   className="input"
-                  placeholder="Description"
-                  value={editingSuiteId ? editSuiteDescription : suiteDescription}
-                  onChange={(e) => editingSuiteId ? setEditSuiteDescription(e.target.value) : setSuiteDescription(e.target.value)}
+                  placeholder="Search test cases by title/code"
+                  value={suiteCreateCaseSearch}
+                  onChange={(e) => setSuiteCreateCaseSearch(e.target.value)}
                 />
-                <input
-                  className="input"
-                  placeholder="Module (optional)"
-                  value={editingSuiteId ? editSuiteModule : suiteModule}
-                  onChange={(e) => editingSuiteId ? setEditSuiteModule(e.target.value) : setSuiteModule(e.target.value)}
-                />
-                <label className="fieldLabel">Parent Suite (optional)</label>
-                <select
-                  className="input"
-                  value={editingSuiteId ? editSuiteParentId : suiteParentId}
-                  onChange={(e) => (editingSuiteId ? setEditSuiteParentId(e.target.value) : setSuiteParentId(e.target.value))}
-                >
-                  <option value="">No Parent</option>
-                  {suites
-                    .filter((suite: any) => !suite.isArchived && (!editingSuiteId || suite.id !== editingSuiteId))
-                    .map((suite: any) => (
-                      <option key={suite.id} value={suite.id}>
-                        {suite.name}
-                      </option>
-                    ))}
-                </select>
-
-                {!editingSuiteId && (
-                  <>
-                    <label className="fieldLabel">Suite Type</label>
-                    <select
-                      className="input"
-                      value={suiteType}
-                      onChange={(e) => setSuiteType(e.target.value)}
-                    >
-                      <option value="STATIC">STATIC - Fixed Test Cases</option>
-                      <option value="DYNAMIC">DYNAMIC - Filtered Test Cases</option>
-                    </select>
-                  </>
-                )}
-
-                {suiteType === "STATIC" && !editingSuiteId && (
-                  <>
-                    <label className="fieldLabel">Select Test Cases for Suite</label>
-                    <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #ccc", padding: "8px" }}>
-                      {testCases.map((tc: any) => (
-                        <div key={tc.id} style={{ display: "flex", alignItems: "center", marginBottom: "8px" }}>
-                          <input
-                            type="checkbox"
-                            checked={suiteStaticTestCases.includes(tc.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSuiteStaticTestCases([...suiteStaticTestCases, tc.id]);
-                              } else {
-                                setSuiteStaticTestCases(suiteStaticTestCases.filter((id) => id !== tc.id));
-                              }
-                            }}
-                          />
-                          <span style={{ marginLeft: "8px" }}>{tc.testCaseCode || "N/A"} - {tc.title}</span>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="note">{suiteStaticTestCases.length} test case(s) selected</div>
-                  </>
-                )}
-
-                {suiteType === "DYNAMIC" && !editingSuiteId && (
-                  <>
-                    <label className="fieldLabel">Filter Criteria for Dynamic Suite</label>
-                    <label style={{ fontSize: "0.9em" }}>Modules (multi-select)</label>
-                    <select
-                      className="input"
-                      multiple
-                      size={3}
-                      value={suiteFilterModules}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                        setSuiteFilterModules(selected);
-                      }}
-                    >
-                      {Array.from(new Set(testCases.map((tc: any) => tc.module).filter(Boolean))).map((mod: any) => (
-                        <option key={mod} value={mod}>{mod}</option>
-                      ))}
-                    </select>
-
-                    <label style={{ fontSize: "0.9em", marginTop: "8px", display: "block" }}>Priorities</label>
-                    <select
-                      className="input"
-                      multiple
-                      size={3}
-                      value={suiteFilterPriorities}
-                      onChange={(e) => {
-                        const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
-                        setSuiteFilterPriorities(selected);
-                      }}
-                    >
-                      {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((pri) => (
-                        <option key={pri} value={pri}>{pri}</option>
-                      ))}
-                    </select>
-
-                    {suiteFilterPreviewCount !== null && (
-                      <div className="note">
-                        <strong>Preview:</strong> {suiteFilterPreviewCount} test case(s) match this filter
-                      </div>
-                    )}
-
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          const filterJson = {
-                            modules: suiteFilterModules.length > 0 ? suiteFilterModules : undefined,
-                            priorities: suiteFilterPriorities.length > 0 ? suiteFilterPriorities : undefined,
-                            tags: suiteFilterTags.length > 0 ? suiteFilterTags : undefined,
-                            ...(suiteFilterAutoStatus && { automationStatus: suiteFilterAutoStatus }),
-                          };
-                          const result = await previewDynamicFilterApi(filterJson);
-                          setSuiteFilterPreviewCount(result.matchingCount || 0);
-                        } catch (error: any) {
-                          alert(error?.message || "Preview failed");
-                        }
-                      }}
-                      style={{ marginTop: "8px" }}
-                    >
-                      Preview Filter
-                    </button>
-                  </>
-                )}
-
-                <div style={{ marginTop: "16px", display: "flex", gap: "8px" }}>
+                <div className="toolbarActions" style={{ marginBottom: "8px" }}>
                   <button
-                    className="button"
-                    onClick={async () => {
-                      try {
-                        const fieldName = editingSuiteId ? editSuiteName : suiteName;
-                        if (!fieldName.trim()) {
-                          alert("Suite name is required");
-                          return;
-                        }
-
-                        if (editingSuiteId) {
-                          // EDIT MODE
-                          await updateSuiteApi(editingSuiteId, {
-                            description: editSuiteDescription || null,
-                            module: editSuiteModule || null,
-                            parentSuiteId: editSuiteParentId || null,
-                          });
-                          resetSuiteFields();
-                          await reloadSuites();
-                          showSuiteToast("Suite updated");
-                        } else {
-                          // CREATE MODE
-                          if (suiteType === "STATIC" && suiteStaticTestCases.length === 0) {
-                            alert("Select at least one test case for STATIC suite");
-                            return;
-                          }
-
-                          if (suiteType === "DYNAMIC" && suiteFilterPreviewCount === null) {
-                            alert("Preview filter first to ensure there are matching test cases");
-                            return;
-                          }
-
-                          const filterJson = {
-                            modules: suiteFilterModules.length > 0 ? suiteFilterModules : undefined,
-                            priorities: suiteFilterPriorities.length > 0 ? suiteFilterPriorities : undefined,
-                            tags: suiteFilterTags.length > 0 ? suiteFilterTags : undefined,
-                            ...(suiteFilterAutoStatus && { automationStatus: suiteFilterAutoStatus }),
-                          };
-
-                          const resolvedSuiteModule =
-                            suiteModule.trim() || (suiteType === "DYNAMIC" ? suiteFilterModules.join(", ") : "");
-
-                          await createSuiteApi({
-                            name: suiteName,
-                            description: suiteDescription || undefined,
-                            module: resolvedSuiteModule || undefined,
-                            parentSuiteId: suiteParentId || undefined,
-                            type: suiteType,
-                            testCaseIds: suiteType === "STATIC" ? suiteStaticTestCases : [],
-                            filterJson: suiteType === "DYNAMIC" ? filterJson : null,
-                          });
-
-                          resetSuiteFields();
-                          await reloadSuites();
-                          showSuiteToast("Suite created");
-                        }
-                      } catch (error: any) {
-                        alert(error?.message || (editingSuiteId ? "Update suite failed" : "Create suite failed"));
-                      }
+                    className="button small"
+                    onClick={() => {
+                      const term = suiteCreateCaseSearch.trim().toLowerCase();
+                      const visible = testCases.filter((tc) => {
+                        if (!term) return true;
+                        return (
+                          String(tc.title || "").toLowerCase().includes(term) ||
+                          String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
+                        );
+                      });
+                      setSuiteCreateCaseSelection(visible.map((tc) => tc.id));
                     }}
                   >
-                    {editingSuiteId ? "Save Changes" : "Create Test Suite"}
+                    Select Visible
                   </button>
-                  {editingSuiteId && (
-                    <button
-                      className="button"
-                      style={{ backgroundColor: "#666" }}
-                      onClick={() => resetSuiteFields()}
-                    >
-                      Cancel
-                    </button>
-                  )}
+                  <button className="button small" onClick={() => setSuiteCreateCaseSelection([])}>
+                    Clear Selection
+                  </button>
                 </div>
-                </div>
-
-                {!editingSuiteId && (
-                  <>
-                    <h4 style={{ marginTop: "24px" }}>Hierarchy Tree</h4>
-                    <div style={{ maxHeight: "220px", overflowY: "auto", marginBottom: "10px" }}>
-                      {renderSuiteTreeNodes(rootSuites)}
-                    </div>
-                    <h4 style={{ marginTop: "8px" }}>All Suites</h4>
-                    <div style={{ maxHeight: "400px", overflowY: "auto" }}>
-                      {suites.map((suite: any) => (
-                        <div key={suite.id} style={{ padding: "8px", border: "1px solid #ddd", marginBottom: "8px" }}>
-                          <div><strong>{suite.name}</strong> ({suite.type})</div>
-                          {suite.description && <div style={{ fontSize: "0.9em" }}>{suite.description}</div>}
-                          <div style={{ fontSize: "0.85em", color: "#666" }}>
-                        Cases: {suiteCaseCounts[suite.id] ?? suite._count?.suiteCases ?? 0} | Module: {suite.module || "N/A"}
-                      </div>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            await openSuiteDetails(suite.id);
-                          } catch (error: any) {
-                            alert(error?.message || "Load suite failed");
-                          }
-                        }}
-                        style={{ marginTop: "4px", marginRight: "4px" }}
-                      >
-                        View
-                      </button>
-                      <button
-                        className="button small"
-                        disabled={suite.isArchived}
-                        onClick={async () => {
-                          try {
-                            await openSuiteDetails(suite.id);
-                            setSuiteExecutionTesterIds(currentUserId ? [currentUserId] : []);
-                            setSuiteExecutionMode("SEQUENTIAL");
-                            setSuiteExecutionTargetStartDate("");
-                            setSuiteExecutionTargetEndDate("");
-                            setShowSuiteExecutionModal(true);
-                          } catch (error: any) {
-                            alert(error?.message || "Prepare suite execution failed");
-                          }
-                        }}
-                        style={{ marginTop: "4px", marginRight: "4px" }}
-                      >
-                        Execute
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={() => {
-                          setEditingSuiteId(suite.id);
-                          setEditSuiteName(suite.name);
-                          setEditSuiteDescription(suite.description || "");
-                          setEditSuiteModule(suite.module || "");
-                          setEditSuiteParentId(suite.parentSuiteId || "");
-                        }}
-                        style={{ marginTop: "4px", marginRight: "4px" }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const cloned = await cloneSuiteV2Api(suite.id);
-                            await reloadSuites();
-                            await openSuiteDetails(cloned.id);
-                            showSuiteToast("Suite cloned");
-                          } catch (error: any) {
-                            alert(error?.message || "Clone failed");
-                          }
-                        }}
-                        style={{ marginTop: "4px", marginRight: "4px" }}
-                      >
-                        Clone
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const confirmed = window.confirm(
-                              suite.isArchived ? "Restore this suite?" : "Archive this suite?"
-                            );
-                            if (!confirmed) return;
-                            if (suite.isArchived) {
-                              await restoreSuiteV2Api(suite.id);
-                              showSuiteToast("Suite restored");
-                            } else {
-                              await archiveSuiteV2Api(suite.id);
-                              showSuiteToast("Suite archived");
-                            }
-                            await reloadSuites();
-                          } catch (error: any) {
-                            alert(error?.message || "Operation failed");
-                          }
-                        }}
-                        style={{ marginTop: "4px" }}
-                      >
-                        {suite.isArchived ? "Restore" : "Archive"}
-                      </button>
-                    </div>
+                <div className="listCompact" style={{ maxHeight: "180px", overflow: "auto", marginBottom: "8px" }}>
+                  {testCases
+                    .filter((tc) => {
+                      const term = suiteCreateCaseSearch.trim().toLowerCase();
+                      if (!term) return true;
+                      return (
+                        String(tc.title || "").toLowerCase().includes(term) ||
+                        String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
+                      );
+                    })
+                    .map((tc) => (
+                    <label className="row" key={tc.id} style={{ marginBottom: 0 }}>
+                      <input
+                        type="checkbox"
+                        checked={suiteCreateCaseSelection.includes(tc.id)}
+                        onChange={() => toggleSelection(tc.id, setSuiteCreateCaseSelection)}
+                      />
+                      <span className="title">
+                        {tc.testCaseCode || tc.id} - {tc.title}
+                      </span>
+                    </label>
                   ))}
-                    </div>
-                  </>
-                )}
+                </div>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!suiteName.trim()) {
+                        alert("Suite name is required");
+                        return;
+                      }
+                      await createSuiteApi({
+                        name: suiteName,
+                        description: suiteDescription || undefined,
+                        module: suiteModule || undefined,
+                        parentSuiteId: suiteParentId || undefined,
+                        projectId: suiteProjectId || undefined,
+                        testCaseIds: suiteCreateCaseSelection,
+                      });
+                      setSuiteName("");
+                      setSuiteDescription("");
+                      setSuiteModule("");
+                      setSuiteParentId("");
+                      setSuiteProjectId("");
+                      setSuiteCreateCaseSelection([]);
+                      await loadTestCaseData();
+                      alert("Suite created");
+                    } catch (error: any) {
+                      alert(getSuiteFriendlyError(error, "Create suite failed"));
+                    }
+                  }}
+                >
+                  Create Suite
+                </button>
 
-                {suiteDetails && selectedSuiteId && (
-                  <div style={{ marginTop: "24px", padding: "16px", border: "2px solid #007bff", borderRadius: "4px", backgroundColor: "#f0f8ff" }}>
-                    <h4>Suite Details</h4>
-                    <div style={{ display: "flex", gap: "8px", marginBottom: "12px", flexWrap: "wrap" }}>
-                      <button
-                        className="button small"
-                        disabled={suiteDetails.isArchived || selectedSuiteExecutableCount === 0}
-                        onClick={() => {
-                          setSuiteExecutionTesterIds(currentUserId ? [currentUserId] : []);
-                          setSuiteExecutionMode("SEQUENTIAL");
-                          setSuiteExecutionTargetStartDate("");
-                          setSuiteExecutionTargetEndDate("");
-                          setShowSuiteExecutionModal(true);
-                        }}
-                      >
-                        Execute Suite
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const cloned = await cloneSuiteV2Api(suiteDetails.id);
-                            await reloadSuites();
-                            await openSuiteDetails(cloned.id);
-                            showSuiteToast("Suite cloned");
-                          } catch (error: any) {
-                            alert(error?.message || "Clone failed");
-                          }
-                        }}
-                      >
-                        Clone
-                      </button>
-                      <button
-                        className="button small"
-                        onClick={async () => {
-                          try {
-                            const confirmed = window.confirm(
-                              suiteDetails.isArchived ? "Restore this suite?" : "Archive this suite?"
-                            );
-                            if (!confirmed) return;
-                            if (suiteDetails.isArchived) {
-                              await restoreSuiteV2Api(suiteDetails.id);
-                              showSuiteToast("Suite restored");
-                            } else {
-                              await archiveSuiteV2Api(suiteDetails.id);
-                              showSuiteToast("Suite archived");
-                            }
-                            await reloadSuites();
-                            await openSuiteDetails(suiteDetails.id);
-                          } catch (error: any) {
-                            alert(error?.message || "Operation failed");
-                          }
-                        }}
-                      >
-                        {suiteDetails.isArchived ? "Restore" : "Archive"}
-                      </button>
-                    </div>
-                    <div style={{ border: "1px solid #cbd5e1", borderRadius: "8px", padding: "10px", marginBottom: "12px" }}>
-                      <h4 style={{ marginTop: 0 }}>Suite Run Controls (V2)</h4>
-                      <select
-                        className="input"
-                        value={suiteRunV2Id}
-                        onChange={(e) => {
-                          setSuiteRunV2Id(e.target.value);
-                          setSuiteRunV2Executions([]);
-                          setSuiteRunV2Summary(null);
-                          setSuiteRunV2ExecutionId("");
-                        }}
-                      >
-                        <option value="">Select Test Run</option>
-                        {testRuns.map((run: any) => (
-                          <option key={run.id} value={run.id}>
-                            {run.name} ({run.progress?.completed || 0}/{run.progress?.total || 0})
-                          </option>
-                        ))}
-                      </select>
-                      <div className="inlineGrid">
-                        <button
-                          className="button small"
-                          disabled={!suiteRunV2Id || isSuiteRunV2Loading}
-                          onClick={async () => {
-                            try {
-                              if (!suiteRunV2Id) return;
-                              setIsSuiteRunV2Loading(true);
-                              const data = await executeSuiteRunApi(suiteDetails.id, suiteRunV2Id);
-                              setSuiteRunV2Executions(Array.isArray(data?.executions) ? data.executions : []);
-                              showSuiteToast("Suite run synced/executed");
-                              await loadTestCaseData();
-                            } catch (error: any) {
-                              alert(error?.message || "Execute suite run failed");
-                            } finally {
-                              setIsSuiteRunV2Loading(false);
-                            }
-                          }}
-                        >
-                          Execute/Sync Run
-                        </button>
-                        <button
-                          className="button small"
-                          disabled={!suiteRunV2Id || isSuiteRunV2Loading}
-                          onClick={async () => {
-                            try {
-                              if (!suiteRunV2Id) return;
-                              setIsSuiteRunV2Loading(true);
-                              const data = await syncSuiteRunApi(suiteDetails.id, suiteRunV2Id);
-                              showSuiteToast(`Suite run synced (added: ${data?.added || 0}, obsolete: ${data?.obsoleteMarked || 0})`);
-                            } catch (error: any) {
-                              alert(error?.message || "Sync failed");
-                            } finally {
-                              setIsSuiteRunV2Loading(false);
-                            }
-                          }}
-                        >
-                          Sync Changes
-                        </button>
-                        <button
-                          className="button small"
-                          disabled={!suiteRunV2Id || isSuiteRunV2Loading}
-                          onClick={async () => {
-                            try {
-                              if (!suiteRunV2Id) return;
-                              setIsSuiteRunV2Loading(true);
-                              const data = await getTestRunSummaryApi(suiteRunV2Id);
-                              setSuiteRunV2Summary(data || null);
-                              showSuiteToast("Run summary loaded");
-                            } catch (error: any) {
-                              alert(error?.message || "Summary failed");
-                            } finally {
-                              setIsSuiteRunV2Loading(false);
-                            }
-                          }}
-                        >
-                          Load Summary
-                        </button>
-                      </div>
-                      <div className="inlineGrid">
-                        <select
-                          className="input"
-                          value={suiteRunV2BulkStatus}
-                          onChange={(e) => setSuiteRunV2BulkStatus(e.target.value)}
-                        >
-                          <option value="PASS">PASS</option>
-                          <option value="FAIL">FAIL</option>
-                          <option value="BLOCKED">BLOCKED</option>
-                          <option value="SKIPPED">SKIPPED</option>
-                          <option value="NOT_EXECUTED">NOT_EXECUTED</option>
-                        </select>
-                        <button
-                          className="button small"
-                          disabled={!suiteRunV2Id || isSuiteRunV2Loading}
-                          onClick={async () => {
-                            try {
-                              if (!suiteRunV2Id) return;
-                              setIsSuiteRunV2Loading(true);
-                              const data = await bulkMarkSuiteRunApi(
-                                suiteDetails.id,
-                                suiteRunV2Id,
-                                suiteRunV2BulkStatus as "PASS" | "FAIL" | "BLOCKED" | "SKIPPED" | "NOT_EXECUTED"
-                              );
-                              showSuiteToast(`Bulk mark done (${data?.updated || 0} records)`);
-                              const refreshed = await executeSuiteRunApi(suiteDetails.id, suiteRunV2Id);
-                              setSuiteRunV2Executions(Array.isArray(refreshed?.executions) ? refreshed.executions : []);
-                            } catch (error: any) {
-                              alert(error?.message || "Bulk mark failed");
-                            } finally {
-                              setIsSuiteRunV2Loading(false);
-                            }
-                          }}
-                        >
-                          Bulk Mark
-                        </button>
-                      </div>
-                      <div className="inlineGrid">
-                        <select
-                          className="input"
-                          value={suiteRunV2ResetMode}
-                          onChange={(e) => setSuiteRunV2ResetMode(e.target.value)}
-                        >
-                          <option value="ALL">ALL</option>
-                          <option value="FAILED_ONLY">FAILED_ONLY</option>
-                        </select>
-                        <button
-                          className="button small danger"
-                          disabled={!suiteRunV2Id || isSuiteRunV2Loading}
-                          onClick={async () => {
-                            try {
-                              if (!suiteRunV2Id) return;
-                              setIsSuiteRunV2Loading(true);
-                              const data = await resetSuiteRunApi(
-                                suiteDetails.id,
-                                suiteRunV2Id,
-                                suiteRunV2ResetMode as "ALL" | "FAILED_ONLY"
-                              );
-                              showSuiteToast(`Reset done (${data?.resetCount || 0} records)`);
-                              const refreshed = await executeSuiteRunApi(suiteDetails.id, suiteRunV2Id);
-                              setSuiteRunV2Executions(Array.isArray(refreshed?.executions) ? refreshed.executions : []);
-                            } catch (error: any) {
-                              alert(error?.message || "Reset failed");
-                            } finally {
-                              setIsSuiteRunV2Loading(false);
-                            }
-                          }}
-                        >
-                          Reset Run
-                        </button>
-                      </div>
-                      {suiteRunV2Summary && (
-                        <div className="testCaseDetails" style={{ marginTop: "8px" }}>
-                          <div><strong>Run Status:</strong> {suiteRunV2Summary.runStatus || "N/A"}</div>
-                          <div><strong>Progress:</strong> {suiteRunV2Summary.progressPercent || 0}%</div>
-                          <div>
-                            <strong>Total/Executed/Not Executed:</strong> {suiteRunV2Summary.total || 0}/
-                            {suiteRunV2Summary.executed || 0}/{suiteRunV2Summary.notExecuted || 0}
-                          </div>
-                          <div>
-                            <strong>Pass/Fail/Blocked/Skipped:</strong> {suiteRunV2Summary.passed || 0}/
-                            {suiteRunV2Summary.failed || 0}/{suiteRunV2Summary.blocked || 0}/
-                            {suiteRunV2Summary.skipped || 0}
-                          </div>
-                        </div>
-                      )}
-                      {suiteRunV2Executions.length > 0 && (
-                        <div style={{ marginTop: "8px" }}>
-                          <div className="inlineGrid">
-                            <select
-                              className="input"
-                              value={suiteRunV2ExecutionId}
-                              onChange={(e) => setSuiteRunV2ExecutionId(e.target.value)}
-                            >
-                              <option value="">Select execution record</option>
-                              {suiteRunV2Executions.map((row: any) => (
-                                <option key={row.id} value={row.id}>
-                                  {(row?.testCase?.testCaseCode || row.testCaseId) +
-                                    " | " +
-                                    row.status +
-                                    (row.isObsolete ? " | OBSOLETE" : "")}
-                                </option>
-                              ))}
-                            </select>
-                            <select
-                              className="input"
-                              value={suiteRunV2ExecutionStatus}
-                              onChange={(e) => setSuiteRunV2ExecutionStatus(e.target.value)}
-                            >
-                              <option value="PASS">PASS</option>
-                              <option value="FAIL">FAIL</option>
-                              <option value="BLOCKED">BLOCKED</option>
-                              <option value="SKIPPED">SKIPPED</option>
-                              <option value="NOT_EXECUTED">NOT_EXECUTED</option>
-                            </select>
-                            <button
-                              className="button small"
-                              disabled={!suiteRunV2ExecutionId || isSuiteRunV2Loading}
-                              onClick={async () => {
-                                try {
-                                  if (!suiteRunV2ExecutionId) return;
-                                  setIsSuiteRunV2Loading(true);
-                                  await updateSuiteExecutionStatusApi(
-                                    suiteRunV2ExecutionId,
-                                    suiteRunV2ExecutionStatus as "PASS" | "FAIL" | "BLOCKED" | "SKIPPED" | "NOT_EXECUTED"
-                                  );
-                                  if (suiteRunV2Id) {
-                                    const refreshed = await executeSuiteRunApi(suiteDetails.id, suiteRunV2Id);
-                                    setSuiteRunV2Executions(Array.isArray(refreshed?.executions) ? refreshed.executions : []);
-                                  }
-                                  showSuiteToast("Execution status updated");
-                                } catch (error: any) {
-                                  alert(error?.message || "Status update failed");
-                                } finally {
-                                  setIsSuiteRunV2Loading(false);
-                                }
-                              }}
-                            >
-                              Update One Status
-                            </button>
-                          </div>
-                          <div className="note">Loaded records: {suiteRunV2Executions.length}</div>
-                        </div>
-                      )}
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "150px 1fr", gap: "12px", marginBottom: "16px" }}>
-                      <strong>ID:</strong>
-                      <span>{suiteDetails.id}</span>
-                      <strong>Name:</strong>
-                      <span>{suiteDetails.name}</span>
-                      <strong>Description:</strong>
-                      <span>{suiteDetails.description || "N/A"}</span>
-                      <strong>Type:</strong>
-                      <span>{suiteDetails.type}</span>
-                      <strong>Module:</strong>
-                      <span>{suiteDetails.module || "N/A"}</span>
-                      <strong>Test Cases:</strong>
-                      <span>{suiteCaseCounts[suiteDetails.id] ?? suiteDetails._count?.suiteCases ?? 0}</span>
-                      <strong>Status:</strong>
-                      <span>{suiteDetails.isArchived ? "Archived" : "Active"}</span>
-                      <strong>Created:</strong>
-                      <span>{new Date(suiteDetails.createdAt).toLocaleString()}</span>
-                    </div>
-                    {suiteDetails.type === "DYNAMIC" && suiteDetails.filterJson && (
-                      <div style={{ marginBottom: "16px" }}>
-                        <strong>Filter Criteria:</strong>
-                        <pre style={{ backgroundColor: "#fff", padding: "8px", borderRadius: "4px", overflow: "auto" }}>
-                          {JSON.stringify(suiteDetails.filterJson, null, 2)}
-                        </pre>
-                      </div>
-                    )}
-                    <div style={{ display: "flex", gap: "8px", marginBottom: "10px" }}>
-                      <button className="button small" onClick={() => setSuiteActiveTab("testCases")}>Test Cases</button>
-                      <button className="button small" onClick={() => setSuiteActiveTab("analytics")}>Analytics</button>
-                      <button className="button small" onClick={() => setSuiteActiveTab("history")}>History</button>
-                    </div>
-                    {suiteActiveTab === "testCases" && suiteDetails.type === "STATIC" && (
-                      <div style={{ marginBottom: "12px" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
-                          <strong>Suite Cases: {suiteCases.length}</strong>
-                          <button
-                            className="button small"
-                            disabled={suiteDetails.isArchived}
-                            onClick={() => {
-                              setAddSuiteCaseSelection([]);
-                              setAddSuiteCaseSearch("");
-                              setAddSuiteCaseModule("");
-                              setShowAddSuiteCasesModal(true);
-                            }}
-                          >
-                            + Add Test Cases
-                          </button>
-                        </div>
-                        {suiteCases.map((item: any, idx: number) => (
-                          <div
-                            key={item.id}
-                            className="row"
-                            draggable={!suiteDetails.isArchived}
-                            onDragStart={() => setDraggingSuiteCaseId(item.id)}
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={async () => {
-                              if (!draggingSuiteCaseId || draggingSuiteCaseId === item.id) return;
-                              const prev = [...suiteCases];
-                              const dragIndex = prev.findIndex((row) => row.id === draggingSuiteCaseId);
-                              const dropIndex = prev.findIndex((row) => row.id === item.id);
-                              if (dragIndex < 0 || dropIndex < 0) return;
-                              const next = [...prev];
-                              const [moved] = next.splice(dragIndex, 1);
-                              next.splice(dropIndex, 0, moved);
-                              setSuiteCases(next);
-                              setDraggingSuiteCaseId("");
-                              try {
-                                await reorderSuiteTestCasesV2Api(
-                                  suiteDetails.id,
-                                  next.map((row: any) => row.id)
-                                );
-                                showSuiteToast("Order updated");
-                              } catch (error: any) {
-                                setSuiteCases(prev);
-                                alert(error?.message || "Reorder failed");
-                              }
-                            }}
-                          >
-                            <span className="title">{idx + 1}. {item.testCaseCode || "N/A"} - {item.title}</span>
-                            <div style={{ display: "flex", gap: "6px" }}>
-                              <button
-                                className="button small"
-                                disabled={suiteDetails.isArchived || idx === 0}
-                                onClick={async () => {
-                                  const prev = [...suiteCases];
-                                  if (idx <= 0) return;
-                                  const next = [...prev];
-                                  const tmp = next[idx - 1];
-                                  next[idx - 1] = next[idx];
-                                  next[idx] = tmp;
-                                  setSuiteCases(next);
-                                  try {
-                                    await reorderSuiteTestCasesV2Api(
-                                      suiteDetails.id,
-                                      next.map((row: any) => row.id)
-                                    );
-                                    showSuiteToast("Order updated");
-                                  } catch (error: any) {
-                                    setSuiteCases(prev);
-                                    alert(error?.message || "Reorder failed");
-                                  }
-                                }}
-                              >
-                                Up
-                              </button>
-                              <button
-                                className="button small"
-                                disabled={suiteDetails.isArchived || idx === suiteCases.length - 1}
-                                onClick={async () => {
-                                  const prev = [...suiteCases];
-                                  if (idx >= prev.length - 1) return;
-                                  const next = [...prev];
-                                  const tmp = next[idx + 1];
-                                  next[idx + 1] = next[idx];
-                                  next[idx] = tmp;
-                                  setSuiteCases(next);
-                                  try {
-                                    await reorderSuiteTestCasesV2Api(
-                                      suiteDetails.id,
-                                      next.map((row: any) => row.id)
-                                    );
-                                    showSuiteToast("Order updated");
-                                  } catch (error: any) {
-                                    setSuiteCases(prev);
-                                    alert(error?.message || "Reorder failed");
-                                  }
-                                }}
-                              >
-                                Down
-                              </button>
-                            </div>
-                            <button
-                              className="button small danger"
-                              disabled={suiteDetails.isArchived}
-                              onClick={async () => {
-                                try {
-                                  await removeSuiteTestCaseV2Api(suiteDetails.id, item.id);
-                                  await openSuiteDetails(suiteDetails.id);
-                                  await reloadSuites();
-                                  showSuiteToast("Test case removed");
-                                } catch (error: any) {
-                                  alert(error?.message || "Remove failed");
-                                }
-                              }}
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {suiteActiveTab === "testCases" && suiteDetails.type === "DYNAMIC" && (
-                      <div style={{ marginBottom: "12px" }}>
-                        <div style={{ marginBottom: "8px" }}>
-                          <strong>Matched Test Cases: {suiteCases.length}</strong>
-                        </div>
-                        {suiteCases.length === 0 ? (
-                          <div className="note">No test cases match current dynamic filter.</div>
-                        ) : (
-                          suiteCases.map((item: any, idx: number) => (
-                            <div key={item.id} className="row">
-                              <span className="title">
-                                {idx + 1}. {item.testCaseCode || "N/A"} - {item.title}
-                              </span>
-                              <span className="meta">
-                                {item.module || "N/A"} | {item.priority || "N/A"} | {item.status || "N/A"}
-                              </span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
-                    {suiteActiveTab === "analytics" && (
-                      <div className="testCaseDetails">
-                        <div><strong>Total Cases:</strong> {selectedSuiteExecutableCount}</div>
-                        <div><strong>Total Executions:</strong> {suiteExecutions.length}</div>
-                        <div><strong>Latest Status:</strong> {suiteExecutions[0]?.status || "N/A"}</div>
-                        <div><strong>Consolidated Passed:</strong> {suiteExecutionTotals.passed}</div>
-                        <div><strong>Consolidated Failed:</strong> {suiteExecutionTotals.failed}</div>
-                        <div><strong>Consolidated Blocked:</strong> {suiteExecutionTotals.blocked}</div>
-                        <div><strong>Consolidated Skipped:</strong> {suiteExecutionTotals.skipped}</div>
-                        <div><strong>Consolidated Pass Rate:</strong> {suiteExecutionPassRate}%</div>
-                      </div>
-                    )}
-                    {suiteActiveTab === "history" && (
-                      <div className="suiteHistoryList">
-                        {suiteExecutions.length === 0 ? (
-                          <div className="note">No suite execution history yet.</div>
-                        ) : (
-                          suiteExecutions.map((row: any) => (
-                            <div key={row.id} className="suiteHistoryItem">
-                              <div className="suiteHistoryTop">
-                                <span className="suiteHistoryId">{row.id}</span>
-                                <span>{row.status}</span>
-                              </div>
-                              <div className="suiteHistoryMeta">
-                                <span>Mode: {row.mode}</span>
-                                <span>
-                                  Pass/Fail/Blocked/Skipped: {row.passed || 0}/{row.failed || 0}/{row.blocked || 0}/{row.skipped || 0}
-                                </span>
-                                <span>Pass Rate: {typeof row.passRate === "number" ? `${row.passRate}%` : "N/A"}</span>
-                                <span>{row.startedAt ? new Date(row.startedAt).toLocaleString() : "Not started"}</span>
-                              </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    )}
+                <select
+                  className="input"
+                  value={selectedSuiteId}
+                  onChange={(e) => {
+                    setSelectedSuiteId(e.target.value);
+                    setSuiteDetails(null);
+                    setSuiteExecutionHistory([]);
+                    setSuiteExecutionId("");
+                    setSuiteExecutionDetails(null);
+                    setSuiteAddCaseSelection([]);
+                  }}
+                >
+                  <option value="">Select Suite</option>
+                  {suites.map((suite) => (
+                    <option key={suite.id} value={suite.id}>
+                      {suite.name}
+                      {suite.isArchived ? " [ARCHIVED]" : ""} ({suite._count?.suiteCases || 0} cases)
+                    </option>
+                  ))}
+                </select>
+                {selectedSuiteId && (
+                  <div className="row">
+                    <span className="title">
+                      <strong>Selected Suite ID:</strong> {selectedSuiteId}
+                    </span>
                     <button
                       className="button small"
-                      onClick={() => {
-                        setSuiteDetails(null);
-                        setSelectedSuiteId("");
-                        setSuiteCases([]);
-                        setSuiteExecutions([]);
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(selectedSuiteId);
+                          alert("Suite ID copied");
+                        } catch {
+                          alert(`Suite ID: ${selectedSuiteId}`);
+                        }
                       }}
                     >
-                      Close
+                      Copy ID
                     </button>
                   </div>
                 )}
-                {showAddSuiteCasesModal && suiteDetails && (
-                  <div className="modalBackdrop">
-                    <div className="modalCard">
-                      <h4>Add Test Cases</h4>
-                      <input
-                        className="input"
-                        placeholder="Search title/code"
-                        value={addSuiteCaseSearch}
-                        onChange={(e) => setAddSuiteCaseSearch(e.target.value)}
-                      />
-                      <select className="input" value={addSuiteCaseModule} onChange={(e) => setAddSuiteCaseModule(e.target.value)}>
-                        <option value="">All Modules</option>
-                        {modulesForAddFilter.map((mod) => (
-                          <option key={mod} value={mod}>{mod}</option>
-                        ))}
-                      </select>
-                      <div style={{ maxHeight: "280px", overflowY: "auto", border: "1px solid #e2e8f0", padding: "8px" }}>
-                        {addSuiteCaseCandidates.map((tc: any) => (
-                          <label key={tc.id} style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                            <input
-                              type="checkbox"
-                              checked={addSuiteCaseSelection.includes(tc.id)}
-                              onChange={(e) =>
-                                e.target.checked
-                                  ? setAddSuiteCaseSelection((prev) => [...prev, tc.id])
-                                  : setAddSuiteCaseSelection((prev) => prev.filter((id) => id !== tc.id))
-                              }
-                            />
-                            <span>{tc.testCaseCode || "N/A"} - {tc.title}</span>
-                          </label>
-                        ))}
-                      </div>
-                      <div className="toolbarActions">
-                        <button
-                          className="button small"
-                          disabled={addSuiteCaseSelection.length === 0}
-                          onClick={async () => {
-                            try {
-                              await addSuiteTestCasesV2Api(suiteDetails.id, addSuiteCaseSelection);
-                              setShowAddSuiteCasesModal(false);
-                              await openSuiteDetails(suiteDetails.id);
-                              await reloadSuites();
-                              showSuiteToast("Test cases added");
-                            } catch (error: any) {
-                              alert(error?.message || "Add failed");
-                            }
-                          }}
-                        >
-                          Add Selected
-                        </button>
-                        <button className="button small danger" onClick={() => setShowAddSuiteCasesModal(false)}>
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
+                <button
+                  className="button"
+                  onClick={async () => {
+                    try {
+                      if (!selectedSuiteId) {
+                        alert("Select a suite");
+                        return;
+                      }
+                      await loadSuiteDetails(selectedSuiteId);
+                    } catch (error: any) {
+                      alert(getSuiteFriendlyError(error, "Load suite details failed"));
+                    }
+                  }}
+                >
+                  View Suite Details
+                </button>
+
+                {suiteDetails && (
+                  <div className="testCaseDetails">
+                    <div><strong>Suite:</strong> {suiteDetails.name}</div>
+                    <div><strong>Module:</strong> {suiteDetails.module || "N/A"}</div>
+                    <div><strong>Archived:</strong> {suiteDetails.isArchived ? "Yes" : "No"}</div>
+                    <div><strong>Cases:</strong> {suiteDetails._count?.suiteCases || 0}</div>
+                    <div><strong>Parent:</strong> {suiteDetails.parentSuite?.name || "None"}</div>
+                    {suiteDetails.isArchived && (
+                      <div><strong>Note:</strong> This suite is archived. Restore it to modify cases or execute.</div>
+                    )}
                   </div>
                 )}
-                {showSuiteExecutionModal && suiteDetails && (
-                  <div className="modalBackdrop">
-                    <div className="modalCard">
-                      <h4>Execute Suite</h4>
-                      <div className="note" style={{ marginBottom: "8px" }}>
-                        {suiteDetails.name} | Cases: {selectedSuiteExecutableCount}
-                      </div>
-                      <label className="fieldLabel">Execution Mode</label>
+
+                {suiteDetails && (
+                  <>
+                    <div className="note">Add test cases to suite</div>
+                    <input
+                      className="input"
+                      placeholder="Search available test cases"
+                      value={suiteAddCaseSearch}
+                      onChange={(e) => setSuiteAddCaseSearch(e.target.value)}
+                    />
+                    <div className="toolbarActions" style={{ marginBottom: "8px" }}>
+                      <button
+                        className="button small"
+                        disabled={suiteDetails.isArchived}
+                        onClick={() => {
+                          const term = suiteAddCaseSearch.trim().toLowerCase();
+                          const visible = testCases.filter((tc) => {
+                            const alreadyInSuite = (suiteDetails.suiteCases || []).some(
+                              (item: any) => item.testCaseId === tc.id
+                            );
+                            if (alreadyInSuite) return false;
+                            if (!term) return true;
+                            return (
+                              String(tc.title || "").toLowerCase().includes(term) ||
+                              String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
+                            );
+                          });
+                          setSuiteAddCaseSelection(visible.map((tc) => tc.id));
+                        }}
+                      >
+                        Select Visible
+                      </button>
+                      <button className="button small" onClick={() => setSuiteAddCaseSelection([])}>
+                        Clear Selection
+                      </button>
+                    </div>
+                    <div className="listCompact" style={{ maxHeight: "180px", overflow: "auto", marginBottom: "8px" }}>
+                      {testCases
+                        .filter(
+                          (tc) => {
+                            const alreadyInSuite = (suiteDetails.suiteCases || []).some(
+                              (item: any) => item.testCaseId === tc.id
+                            );
+                            if (alreadyInSuite) return false;
+                            const term = suiteAddCaseSearch.trim().toLowerCase();
+                            if (!term) return true;
+                            return (
+                              String(tc.title || "").toLowerCase().includes(term) ||
+                              String(tc.testCaseCode || tc.id || "").toLowerCase().includes(term)
+                            );
+                          }
+                        )
+                        .map((tc) => (
+                          <label className="row" key={tc.id} style={{ marginBottom: 0 }}>
+                            <input
+                              type="checkbox"
+                              checked={suiteAddCaseSelection.includes(tc.id)}
+                              disabled={suiteDetails.isArchived}
+                              onChange={() => toggleSelection(tc.id, setSuiteAddCaseSelection)}
+                            />
+                            <span className="title">
+                              {tc.testCaseCode || tc.id} - {tc.title}
+                            </span>
+                          </label>
+                        ))}
+                    </div>
+                    <button
+                      className="button"
+                      disabled={suiteDetails.isArchived}
+                      onClick={async () => {
+                        try {
+                          if (!suiteAddCaseSelection.length) {
+                            alert("Select at least one test case");
+                            return;
+                          }
+                          await addSuiteTestCasesApi(suiteDetails.id, suiteAddCaseSelection);
+                          setSuiteAddCaseSelection([]);
+                          await loadSuiteDetails(suiteDetails.id);
+                          await loadTestCaseData();
+                          alert("Test case(s) added to suite");
+                        } catch (error: any) {
+                          alert(getSuiteFriendlyError(error, "Add to suite failed"));
+                        }
+                      }}
+                    >
+                      Add Test Cases
+                    </button>
+
+                    <div className="note">Reorder Suite Cases (no IDs needed)</div>
+                    <div className="listCompact" style={{ maxHeight: "220px", overflow: "auto", marginBottom: "8px" }}>
+                      {suiteReorderIds.map((testCaseId, idx) => {
+                        const caseRow = (suiteDetails.suiteCases || []).find(
+                          (item: any) => item.testCaseId === testCaseId
+                        );
+                        return (
+                          <div className="row" key={testCaseId} style={{ marginBottom: 0 }}>
+                            <span className="title">
+                              #{idx + 1} {caseRow?.testCase?.testCaseCode || testCaseId} -{" "}
+                              {caseRow?.testCase?.title || testCaseId}
+                            </span>
+                            <button
+                              className="button small"
+                              disabled={idx === 0}
+                              onClick={() => moveSuiteCase(testCaseId, "UP")}
+                            >
+                              Up
+                            </button>
+                            <button
+                              className="button small"
+                              disabled={idx === suiteReorderIds.length - 1}
+                              onClick={() => moveSuiteCase(testCaseId, "DOWN")}
+                            >
+                              Down
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <button
+                      className="button"
+                      disabled={suiteDetails.isArchived}
+                      onClick={async () => {
+                        try {
+                          if (!suiteReorderIds.length) {
+                            alert("No suite test cases available to reorder");
+                            return;
+                          }
+                          await reorderSuiteTestCasesApi(suiteDetails.id, suiteReorderIds);
+                          await loadSuiteDetails(suiteDetails.id);
+                          alert("Suite order updated");
+                        } catch (error: any) {
+                          alert(getSuiteFriendlyError(error, "Reorder failed"));
+                        }
+                      }}
+                    >
+                      Save Reorder
+                    </button>
+
+                    <input
+                      className="input"
+                      placeholder="Clone Name (optional)"
+                      value={suiteCloneName}
+                      onChange={(e) => setSuiteCloneName(e.target.value)}
+                    />
+                    <div className="inlineGrid">
+                      <button
+                        className="button"
+                        disabled={suiteDetails.isArchived}
+                        onClick={async () => {
+                          try {
+                            await cloneSuiteApi(suiteDetails.id, suiteCloneName || undefined);
+                            setSuiteCloneName("");
+                            await loadTestCaseData();
+                            alert("Suite cloned");
+                          } catch (error: any) {
+                            alert(getSuiteFriendlyError(error, "Clone suite failed"));
+                          }
+                        }}
+                      >
+                        Clone Suite
+                      </button>
+                      <button
+                        className="button"
+                        onClick={async () => {
+                          try {
+                            if (suiteDetails.isArchived) {
+                              if (!window.confirm("Restore this suite?")) {
+                                return;
+                              }
+                              await restoreSuiteApi(suiteDetails.id);
+                            } else {
+                              if (!window.confirm("Archive this suite? You can restore it later.")) {
+                                return;
+                              }
+                              await archiveSuiteApi(suiteDetails.id);
+                              setShowArchivedSuites(true);
+                            }
+                            await loadSuiteDetails(suiteDetails.id);
+                            await loadTestCaseData();
+                            alert(suiteDetails.isArchived ? "Suite restored" : "Suite archived");
+                          } catch (error: any) {
+                            alert(getSuiteFriendlyError(error, "Archive/restore failed"));
+                          }
+                        }}
+                      >
+                        {suiteDetails.isArchived ? "Restore Suite" : "Archive Suite"}
+                      </button>
+                    </div>
+                    <button
+                      className="button danger"
+                      disabled={!suiteDetails.isArchived}
+                      onClick={async () => {
+                        try {
+                          if (!suiteDetails.isArchived) {
+                            alert("Archive the suite first, then delete permanently.");
+                            return;
+                          }
+                          const ok = window.confirm(
+                            "Delete this suite permanently? This cannot be undone and removes suite execution history for this suite."
+                          );
+                          if (!ok) return;
+                          const finalOk = window.confirm("Type confirmation by clicking OK again to permanently delete.");
+                          if (!finalOk) return;
+                          await deleteSuiteApi(suiteDetails.id);
+                          setSelectedSuiteId("");
+                          setSuiteDetails(null);
+                          setSuiteExecutionHistory([]);
+                          setSuiteExecutionId("");
+                          setSuiteExecutionDetails(null);
+                          await loadTestCaseData();
+                          alert("Suite deleted permanently");
+                        } catch (error: any) {
+                          alert(getSuiteFriendlyError(error, "Delete suite failed"));
+                        }
+                      }}
+                    >
+                      Delete Suite Permanently
+                    </button>
+
+                    <h4>Suite Cases</h4>
+                    <div className="listCompact">
+                      {(suiteDetails.suiteCases || []).map((item: any) => (
+                        <div className="row" key={item.id}>
+                          <span className="title">
+                            #{item.position} {item.testCase?.testCaseCode || item.testCaseId} -{" "}
+                            {item.testCase?.title || item.testCaseId}
+                          </span>
+                          <button
+                            className="button small danger"
+                            onClick={async () => {
+                              try {
+                                await removeSuiteTestCaseApi(suiteDetails.id, item.testCaseId);
+                                await loadSuiteDetails(suiteDetails.id);
+                                await loadTestCaseData();
+                              } catch (error: any) {
+                                alert(getSuiteFriendlyError(error, "Remove from suite failed"));
+                              }
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <h4>Execute Suite</h4>
+                    <div className="inlineGrid">
                       <select
                         className="input"
                         value={suiteExecutionMode}
                         onChange={(e) => setSuiteExecutionMode(e.target.value)}
                       >
+                        <option value="">Select execution mode</option>
                         <option value="SEQUENTIAL">SEQUENTIAL</option>
                         <option value="PARALLEL">PARALLEL</option>
                       </select>
-                      <label className="fieldLabel">Assign Testers</label>
-                      <select
-                        multiple
-                        className="input"
-                        value={suiteExecutionTesterIds}
-                        onChange={(e) =>
-                          setSuiteExecutionTesterIds(
-                            Array.from(e.target.selectedOptions).map((opt) => opt.value)
-                          )
-                        }
-                        style={{ minHeight: "110px" }}
-                      >
-                        {runTesterOptions.map((tester: any) => (
-                          <option key={tester.id} value={tester.id}>
-                            {tester.name || tester.email} ({tester.email})
-                          </option>
-                        ))}
-                      </select>
-                      <label className="fieldLabel">Target Start Date (optional)</label>
-                      <input
-                        type="date"
-                        className="input"
-                        value={suiteExecutionTargetStartDate}
-                        onChange={(e) => setSuiteExecutionTargetStartDate(e.target.value)}
-                      />
-                      <label className="fieldLabel">Target End Date (optional)</label>
-                      <input
-                        type="date"
-                        className="input"
-                        value={suiteExecutionTargetEndDate}
-                        onChange={(e) => setSuiteExecutionTargetEndDate(e.target.value)}
-                      />
-                      <div className="toolbarActions">
-                        <button
-                          className="button small"
-                          disabled={suiteDetails.isArchived || selectedSuiteExecutableCount === 0 || isStartingSuiteExecution}
-                          onClick={async () => {
-                            setIsStartingSuiteExecution(true);
-                            try {
-                              const historyRows = await listSuiteExecutionsApi(suiteDetails.id).catch(() => []);
-                              const activeExecution = Array.isArray(historyRows)
-                                ? [...historyRows]
-                                    .sort(
-                                      (a: any, b: any) =>
-                                        new Date(b.createdAt || b.startedAt || 0).getTime() -
-                                        new Date(a.createdAt || a.startedAt || 0).getTime()
-                                    )
-                                    .find((row: any) => row.status === "RUNNING" || row.status === "PLANNED")
-                                : null;
-
-                              const startedSuiteExecution =
-                                activeExecution ||
-                                (await startSuiteExecutionApi({
-                                  suiteId: suiteDetails.id,
-                                  mode: suiteExecutionMode,
-                                  testerIds: suiteExecutionTesterIds,
-                                  targetStartDate: suiteExecutionTargetStartDate || undefined,
-                                  targetEndDate: suiteExecutionTargetEndDate || undefined,
-                                }));
-
-                              const executionDetails = await getSuiteExecutionApi(startedSuiteExecution.id);
-                              const orderedCases = Array.isArray(executionDetails?.cases)
-                                ? [...executionDetails.cases].sort(
-                                    (a: any, b: any) => Number(a.position || 0) - Number(b.position || 0)
-                                  )
-                                : [];
-                              const runId = startedSuiteExecution?.linkedTestRunId || executionDetails?.linkedTestRun?.id || "";
-                              const firstCaseId = orderedCases[0]?.testCaseId || "";
-
-                              setActiveSuiteExecutionId(startedSuiteExecution.id);
-                              setActiveSuiteExecutionName(suiteDetails.name || "");
-                              setActiveSuiteExecutionMode(startedSuiteExecution.mode || suiteExecutionMode);
-                              setActiveSuiteExecutionCases(orderedCases);
-                              setExecutionRunId(runId);
-                              setExecutionCaseId(firstCaseId);
-                              setShowSuiteExecutionModal(false);
-                              await openSuiteDetails(suiteDetails.id);
-                              setActiveFeature("execute_tests");
-                              showSuiteToast(
-                                activeExecution
-                                  ? "Active suite execution resumed in Execute Tests"
-                                  : "Suite execution started and redirected to Execute Tests"
-                              );
-                              if (firstCaseId) {
-                                await openExecutionSession(firstCaseId, runId);
-                              }
-                            } catch (error: any) {
-                              alert(error?.message || "Start suite execution failed");
-                            } finally {
-                              setIsStartingSuiteExecution(false);
-                            }
-                          }}
-                        >
-                          {isStartingSuiteExecution ? "Starting..." : "Start Execution"}
-                        </button>
-                        <button
-                          className="button small danger"
-                          disabled={isStartingSuiteExecution}
-                          onClick={() => setShowSuiteExecutionModal(false)}
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                {showDynamicFilterModal && suiteDetails && (
-                  <div className="modalBackdrop">
-                    <div className="modalCard">
-                      <h4>Edit Dynamic Filters</h4>
                       <textarea
                         className="input"
-                        rows={10}
-                        value={dynamicFilterDraftText}
-                        onChange={(e) => setDynamicFilterDraftText(e.target.value)}
+                        rows={2}
+                        placeholder="Tester IDs (comma/newline, optional)"
+                        value={suiteExecutionTesterIdsText}
+                        onChange={(e) => setSuiteExecutionTesterIdsText(e.target.value)}
                       />
-                      <div className="toolbarActions">
-                        <button
-                          className="button small"
-                          onClick={async () => {
-                            try {
-                              const filterJson = JSON.parse(dynamicFilterDraftText || "{}");
-                              await updateSuiteApi(suiteDetails.id, { filterJson });
-                              setShowDynamicFilterModal(false);
-                              await openSuiteDetails(suiteDetails.id);
-                              await reloadSuites();
-                              showSuiteToast("Dynamic filter updated");
-                            } catch (error: any) {
-                              alert(error?.message || "Invalid filter JSON");
+                    </div>
+                    <button
+                      className="button"
+                      disabled={suiteDetails.isArchived}
+                      onClick={async () => {
+                        try {
+                          const started = await startSuiteExecutionApi({
+                            suiteId: suiteDetails.id,
+                            mode: suiteExecutionMode,
+                            testerIds: parseIdsFromText(suiteExecutionTesterIdsText),
+                          });
+                          setSuiteExecutionId(started.id);
+                          const detail = await getSuiteExecutionApi(started.id);
+                          setSuiteExecutionDetails(detail);
+                          await loadSuiteDetails(suiteDetails.id);
+                          alert("Suite execution started");
+                        } catch (error: any) {
+                          alert(getSuiteFriendlyError(error, "Start suite execution failed"));
+                        }
+                      }}
+                    >
+                      Start Suite Execution
+                    </button>
+
+                    <select
+                      className="input"
+                      value={suiteExecutionId}
+                      onChange={(e) => setSuiteExecutionId(e.target.value)}
+                    >
+                      <option value="">Select Suite Execution</option>
+                      {suiteExecutionHistory.map((item: any) => (
+                        <option key={item.id} value={item.id}>
+                          {item.id.slice(0, 8)} | {item.status} | {item.passed}/{item.totalCases}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      className="button"
+                      onClick={async () => {
+                        try {
+                          if (!suiteExecutionId) {
+                            alert("Select suite execution");
+                            return;
+                          }
+                          const detail = await getSuiteExecutionApi(suiteExecutionId);
+                          setSuiteExecutionDetails(detail);
+                        } catch (error: any) {
+                          alert(getSuiteFriendlyError(error, "Load suite execution failed"));
+                        }
+                      }}
+                    >
+                      View Suite Report
+                    </button>
+                    {suiteExecutionHistory.length > 0 && (
+                      <div className="suiteHistoryList">
+                        {suiteExecutionHistory.map((item: any) => {
+                          const total = Number(item.totalCases || 0);
+                          const completed =
+                            Number(item.passed || 0) +
+                            Number(item.failed || 0) +
+                            Number(item.blocked || 0) +
+                            Number(item.skipped || 0);
+                          const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+                          const pending = Math.max(0, total - completed);
+                          return (
+                            <div
+                              key={item.id}
+                              className={`suiteHistoryItem ${suiteExecutionId === item.id ? "active" : ""}`}
+                            >
+                              <div className="suiteHistoryTop">
+                                <span className="suiteHistoryId">#{item.id.slice(0, 8)}</span>
+                                <span className="suitePendingBadge">Pending: {pending}</span>
+                              </div>
+                              <div className="suiteProgressTrack">
+                                <div className="suiteProgressFill" style={{ width: `${percent}%` }} />
+                              </div>
+                              <div className="suiteHistoryMeta">
+                                <span>{item.status}</span>
+                                <span>{completed}/{total} ({percent}%)</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {suiteExecutionDetails && (
+                  <div className="testCaseDetails">
+                    <div><strong>Execution Status:</strong> {suiteExecutionDetails.status}</div>
+                    <div><strong>Mode:</strong> {suiteExecutionDetails.mode}</div>
+                    <div>
+                      <strong>Summary:</strong> Total {suiteExecutionDetails.totalCases} | Passed{" "}
+                      {suiteExecutionDetails.passed} | Failed {suiteExecutionDetails.failed} | Blocked{" "}
+                      {suiteExecutionDetails.blocked} | Skipped {suiteExecutionDetails.skipped}
+                    </div>
+                    <div><strong>Pass Rate:</strong> {suiteExecutionDetails.passRate ?? 0}%</div>
+                    <div><strong>Linked Run:</strong> {suiteExecutionDetails.linkedTestRun?.name || "N/A"}</div>
+                    <div style={{ marginTop: "8px" }}>
+                      <button
+                        className="button small"
+                        onClick={async () => {
+                          try {
+                            const freshDetail = await getSuiteExecutionApi(suiteExecutionDetails.id);
+                            setSuiteExecutionDetails(freshDetail);
+                          } catch (error: any) {
+                            alert(getSuiteFriendlyError(error, "Refresh suite report failed"));
+                          }
+                        }}
+                      >
+                        Refresh Suite Report
+                      </button>
+                      <button
+                        className="button small"
+                        disabled={
+                          (Number(suiteExecutionDetails.totalCases) > 0 &&
+                            Number(suiteExecutionDetails.passed || 0) +
+                              Number(suiteExecutionDetails.failed || 0) +
+                              Number(suiteExecutionDetails.blocked || 0) +
+                              Number(suiteExecutionDetails.skipped || 0) >=
+                              Number(suiteExecutionDetails.totalCases)) ||
+                          !suiteExecutionDetails.id
+                        }
+                        onClick={async () => {
+                          try {
+                            const freshDetail = await getSuiteExecutionApi(suiteExecutionDetails.id);
+                            setSuiteExecutionDetails(freshDetail);
+                            const completed =
+                              Number(freshDetail?.passed || 0) +
+                              Number(freshDetail?.failed || 0) +
+                              Number(freshDetail?.blocked || 0) +
+                              Number(freshDetail?.skipped || 0);
+                            const total = Number(freshDetail?.totalCases || 0);
+                            if (total > 0 && completed >= total) {
+                              alert("No pending suite cases. Suite execution is already complete.");
+                              return;
                             }
-                          }}
-                        >
-                          Save
-                        </button>
-                        <button className="button small danger" onClick={() => setShowDynamicFilterModal(false)}>
-                          Cancel
-                        </button>
+                            const cases = Array.isArray(freshDetail?.cases)
+                              ? freshDetail.cases
+                              : [];
+                            const nextPending = cases.find((item: any) => item.status === "NOT_RUN");
+                            if (!nextPending) {
+                              alert("No pending suite cases. All cases are already executed.");
+                              return;
+                            }
+                            const linkedRunId = freshDetail?.linkedTestRun?.id || "";
+                            if (!linkedRunId) {
+                              alert("Linked run not found for this suite execution.");
+                              return;
+                            }
+                            await openSuiteExecutionCase(freshDetail, nextPending);
+                            alert("Opened next pending suite case in Execute Tests.");
+                          } catch (error: any) {
+                            alert(getSuiteFriendlyError(error, "Open next pending case failed"));
+                          }
+                        }}
+                      >
+                        {String(suiteExecutionDetails.mode || "").toUpperCase() === "PARALLEL"
+                          ? "Open Any Pending Case"
+                          : "Execute Next Pending Case"}
+                      </button>
+                    </div>
+                    <div style={{ marginTop: "10px" }}>
+                      <strong>Suite Cases</strong>
+                      <div className="listCompact" style={{ marginTop: "6px" }}>
+                        {(suiteExecutionDetails.cases || []).map((item: any) => (
+                          <div className="row" key={item.id}>
+                            <span className="title">
+                              #{item.position} {item.testCase?.testCaseCode || item.testCaseId} -{" "}
+                              {item.testCase?.title || item.testCaseId}
+                            </span>
+                            <span className="meta">{item.status}</span>
+                            <button
+                              className="button small"
+                              disabled={item.status !== "NOT_RUN"}
+                              onClick={async () => {
+                                try {
+                                  const fresh = await getSuiteExecutionApi(suiteExecutionDetails.id);
+                                  setSuiteExecutionDetails(fresh);
+                                  const freshCase = (fresh?.cases || []).find((c: any) => c.id === item.id);
+                                  if (!freshCase) {
+                                    alert("Suite case not found in latest report.");
+                                    return;
+                                  }
+                                  if (freshCase.status !== "NOT_RUN") {
+                                    alert("This suite case is already executed.");
+                                    return;
+                                  }
+                                  await openSuiteExecutionCase(fresh, freshCase);
+                                } catch (error: any) {
+                                  alert(getSuiteFriendlyError(error, "Open suite case failed"));
+                                }
+                              }}
+                            >
+                              Open
+                            </button>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -4069,42 +3806,10 @@ onClick={() =>
 
               {showExecute && (
               <section className="panel">
-                <div className="note">Dashboard &gt; Test Run &gt; Execution</div>
-                <h4>Test Execution</h4>
-                {activeSuiteExecutionId && (
-                  <div className="testCaseDetails" style={{ marginBottom: "10px" }}>
-                    <div><strong>Suite Flow:</strong> {activeSuiteExecutionName || activeSuiteExecutionId}</div>
-                    <div><strong>Mode:</strong> {activeSuiteExecutionMode || "N/A"}</div>
-                    <div>
-                      <strong>Cases in Flow:</strong>{" "}
-                      {activeSuiteExecutionCases.filter((row: any) => row.status !== "NOT_RUN").length}/
-                      {activeSuiteExecutionCases.length}
-                    </div>
-                    <div>
-                      <strong>Flow Guidance:</strong>{" "}
-                      {activeSuiteExecutionMode === "SEQUENTIAL"
-                        ? "Execute only next pending case in order."
-                        : "Execute any pending case; testers can run in parallel."}
-                    </div>
-                    <button
-                      className="button small danger"
-                      onClick={() => {
-                        setActiveSuiteExecutionId("");
-                        setActiveSuiteExecutionName("");
-                        setActiveSuiteExecutionMode("");
-                        setActiveSuiteExecutionCases([]);
-                      }}
-                    >
-                      Exit Suite Flow
-                    </button>
-                  </div>
-                )}
+                <h4>Execute Test Case</h4>
                 <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
                   <option value="">Select Test Case</option>
-                  {(activeSuiteExecutionCases.length > 0
-                    ? testCases.filter((tc) => activeSuiteExecutionCases.some((row: any) => row.testCaseId === tc.id))
-                    : testCases
-                  ).map((tc) => (
+                  {executionSelectableCases.map((tc) => (
                     <option key={tc.id} value={tc.id}>
                       {tc.testCaseCode || tc.id} - {tc.title}
                     </option>
@@ -4122,9 +3827,17 @@ onClick={() =>
                   className="button"
                   onClick={async () => {
                     try {
+                      setActiveSuiteExecutionContext(null);
                       if (!executionCaseId) {
                         alert("Select a test case");
                         return;
+                      }
+                      if (executionRunId) {
+                        const inRun = executionSelectableCases.some((tc) => tc.id === executionCaseId);
+                        if (!inRun) {
+                          alert("Selected test case is not part of the selected test run.");
+                          return;
+                        }
                       }
                       await openExecutionSession(executionCaseId, executionRunId || undefined);
                     } catch (error: any) {
@@ -4134,52 +3847,16 @@ onClick={() =>
                 >
                   Open Execution Mode
                 </button>
-                {activeSuiteExecutionMode === "SEQUENTIAL" && activeSuiteExecutionCases.length > 0 && (
-                  <button
-                    className="button"
-                    onClick={async () => {
-                      try {
-                        const nextPending = activeSuiteExecutionCases.find((row: any) => row.status === "NOT_RUN");
-                        if (!nextPending?.testCaseId) {
-                          showExecutionToast("No pending suite case");
-                          return;
-                        }
-                        setExecutionCaseId(nextPending.testCaseId);
-                        if (executionRunId) {
-                          await openExecutionSession(nextPending.testCaseId, executionRunId);
-                        }
-                      } catch (error: any) {
-                        alert(error?.message || "Failed to open next pending suite case");
-                      }
-                    }}
-                  >
-                    Open Next Pending Suite Case
-                  </button>
-                )}
                 {executionId && executionSteps.length > 0 && (
                   <>
-                    <div className="testCaseDetails">
-                      <div><strong>Status:</strong> {executionCompletedAt ? "Finalized" : "In Progress"}</div>
-                      <div><strong>Progress:</strong> {executionSteps.filter((s) => s.status !== "NOT_EXECUTED").length}/{executionSteps.length}</div>
-                      <div>
-                        <strong>Timer:</strong>{" "}
-                        {typeof executionDurationSeconds === "number" ? `${executionDurationSeconds}s` : "N/A"}{" "}
-                        {executionTimerState ? `(${executionTimerState})` : ""}
-                      </div>
-                      {executionToast ? <div className="note" style={{ color: "#166534" }}>{executionToast}</div> : null}
-                    </div>
+                    <div className="note">Progress: {executionProgress}% (auto-saved)</div>
                     <div className="inlineGrid">
                       <button
                         className="button"
-                        disabled={Boolean(executionCompletedAt) || executionTimerState === "RUNNING"}
                         onClick={async () => {
                           try {
                             const timer = await startExecutionTimerApi(executionId);
                             setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                            setExecutionDurationSeconds(
-                              typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                            );
-                            setExecutionTimerState(String(timer?.timerState || "RUNNING"));
                           } catch (error: any) {
                             alert(error?.message || "Failed to start timer");
                           }
@@ -4189,47 +3866,6 @@ onClick={() =>
                       </button>
                       <button
                         className="button"
-                        disabled={Boolean(executionCompletedAt) || executionTimerState !== "RUNNING"}
-                        onClick={async () => {
-                          try {
-                            const timer = await pauseExecutionTimerApi(executionId);
-                            setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                            setExecutionCompletedAt(timer?.completedAt || "");
-                            setExecutionDurationSeconds(
-                              typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                            );
-                            setExecutionTimerState(String(timer?.timerState || "PAUSED"));
-                            showExecutionToast("Timer paused");
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to pause timer");
-                          }
-                        }}
-                      >
-                        Pause Timer
-                      </button>
-                      <button
-                        className="button"
-                        disabled={Boolean(executionCompletedAt) || executionTimerState !== "PAUSED"}
-                        onClick={async () => {
-                          try {
-                            const timer = await resumeExecutionTimerApi(executionId);
-                            setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                            setExecutionCompletedAt(timer?.completedAt || "");
-                            setExecutionDurationSeconds(
-                              typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                            );
-                            setExecutionTimerState(String(timer?.timerState || "RUNNING"));
-                            showExecutionToast("Timer resumed");
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to resume timer");
-                          }
-                        }}
-                      >
-                        Resume Timer
-                      </button>
-                      <button
-                        className="button"
-                        disabled={Boolean(executionCompletedAt) || executionTimerState === "STOPPED"}
                         onClick={async () => {
                           try {
                             const timer = await stopExecutionTimerApi(executionId);
@@ -4238,52 +3874,12 @@ onClick={() =>
                             setExecutionDurationSeconds(
                               typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
                             );
-                            setExecutionTimerState(String(timer?.timerState || "STOPPED"));
-                            setExecutionManualMinutes(
-                              typeof timer?.durationSeconds === "number" ? toMinutesString(timer.durationSeconds) : executionManualMinutes
-                            );
-                            showExecutionToast("Timer stopped");
                           } catch (error: any) {
                             alert(error?.message || "Failed to stop timer");
                           }
                         }}
                       >
                         Stop Timer
-                      </button>
-                    </div>
-                    <div className="inlineGrid">
-                      <input
-                        className="input"
-                        type="number"
-                        min="0"
-                        step="1"
-                        placeholder="Manual time (minutes)"
-                        value={executionManualMinutes}
-                        onChange={(e) => setExecutionManualMinutes(e.target.value)}
-                        disabled={Boolean(executionCompletedAt)}
-                      />
-                      <button
-                        className="button"
-                        disabled={Boolean(executionCompletedAt)}
-                        onClick={async () => {
-                          try {
-                            const minutes = Number(executionManualMinutes);
-                            if (!Number.isFinite(minutes) || minutes < 0) {
-                              alert("Enter a valid non-negative manual time in minutes");
-                              return;
-                            }
-                            const manual = await setExecutionManualTimeApi(executionId, Math.round(minutes * 60));
-                            setExecutionDurationSeconds(
-                              typeof manual?.durationSeconds === "number" ? manual.durationSeconds : executionDurationSeconds
-                            );
-                            setExecutionTimerState(String(manual?.timerState || executionTimerState || "RUNNING"));
-                            showExecutionToast("Manual time saved");
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to save manual time");
-                          }
-                        }}
-                      >
-                        Save Manual Time
                       </button>
                     </div>
                     <div className="note">
@@ -4294,11 +3890,9 @@ onClick={() =>
                     <select
                       className="input"
                       value={executionSelectedStepNumber}
-                      onChange={(e) => {
-                        setExecutionSelectedStepNumber(e.target.value);
-                        setExecutionBugStepNumber(e.target.value);
-                      }}
+                      onChange={(e) => setExecutionSelectedStepNumber(e.target.value)}
                     >
+                      <option value="">Select step</option>
                       {executionSteps.map((step) => (
                         <option key={step.stepNumber} value={step.stepNumber}>
                           Step {step.stepNumber}: {step.action} [{step.status}]
@@ -4310,6 +3904,7 @@ onClick={() =>
                       value={executionStepStatus}
                       onChange={(e) => setExecutionStepStatus(e.target.value)}
                     >
+                      <option value="">Select step status</option>
                       <option value="PASSED">PASSED</option>
                       <option value="FAILED">FAILED</option>
                       <option value="BLOCKED">BLOCKED</option>
@@ -4345,31 +3940,17 @@ onClick={() =>
                             alert("Select a valid step");
                             return;
                           }
-                          if (!executionActualResult.trim()) {
-                            alert("Actual Result is required");
-                            return;
-                          }
-                          const evidence =
-                            executionStepStatus === "FAILED" && evidenceUrl.trim() && evidenceName.trim()
-                              ? [{ fileType: evidenceType, fileUrl: evidenceUrl.trim(), fileName: evidenceName.trim() }]
-                              : undefined;
-                          const saved = await saveExecutionStepV2Api(executionId, {
-                            stepNumber,
+                          const saved = await saveExecutionStepApi(executionId, stepNumber, {
                             status: executionStepStatus,
                             actualResult: executionActualResult,
                             notes: executionStepNotes,
-                            evidence,
+                            executionNotes,
                           });
                           const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
                           setExecutionSteps(nextSteps);
                           setExecutionProgress(saved?.progressPercent || 0);
                           setExecutionActualResult("");
                           setExecutionStepNotes("");
-                          showExecutionToast("Step saved");
-                          const currentIndex = nextSteps.findIndex((step: any) => step.stepNumber === stepNumber);
-                          if (currentIndex >= 0 && currentIndex + 1 < nextSteps.length) {
-                            setExecutionSelectedStepNumber(String(nextSteps[currentIndex + 1].stepNumber));
-                          }
                         } catch (error: any) {
                           alert(error?.message || "Auto-save failed");
                         }
@@ -4378,60 +3959,63 @@ onClick={() =>
                       Save Step (Auto-save)
                     </button>
                     <button
-                      className="button danger"
-                      disabled={Boolean(executionCompletedAt)}
+                      className="button"
                       onClick={async () => {
                         try {
-                          const stepNumber = Number(executionSelectedStepNumber);
-                          if (!Number.isFinite(stepNumber)) {
-                            alert("Select a valid step");
-                            return;
-                          }
-                          if (!executionActualResult.trim()) {
-                            alert("Actual Result is required");
-                            return;
-                          }
-                          const evidence =
-                            evidenceUrl.trim() && evidenceName.trim()
-                              ? [{ fileType: evidenceType, fileUrl: evidenceUrl.trim(), fileName: evidenceName.trim() }]
-                              : undefined;
-                          const saved = await saveExecutionStepV2Api(executionId, {
-                            stepNumber,
-                            status: "FAILED",
-                            actualResult: executionActualResult,
-                            notes: executionStepNotes,
-                            evidence,
+                          const final = await finalizeExecutionApi(executionId, {
+                            notes: executionNotes,
                           });
-                          const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
-                          setExecutionSteps(nextSteps);
-                          setExecutionProgress(saved?.progressPercent || 0);
-                          setExecutionStepStatus("FAILED");
-                          const issue = await createBugFromExecutionStepApi(executionId, {
-                            stepNumber,
-                            severity: quickBugSeverity,
-                            environment: bugCreateEnvironment || undefined,
-                          });
-                          setSelectedBugId(issue.id);
+                          await loadTestCaseData();
+                          let freshSuiteExecution: any = null;
+                          if (
+                            activeSuiteExecutionContext?.suiteExecutionId &&
+                            activeSuiteExecutionContext?.runId &&
+                            executionRunId &&
+                            activeSuiteExecutionContext.runId === executionRunId
+                          ) {
+                            try {
+                              freshSuiteExecution = await getSuiteExecutionApi(activeSuiteExecutionContext.suiteExecutionId);
+                              setSuiteExecutionDetails(freshSuiteExecution);
+                            } catch {
+                              // ignore secondary refresh failures
+                            }
+                          }
+                          setSelectedExecutionReportId(final.id);
+                          setExecutionCompletedAt(final?.completedAt || executionCompletedAt);
+                          setExecutionDurationSeconds(
+                            typeof final?.durationSeconds === "number" ? final.durationSeconds : executionDurationSeconds
+                          );
+                          setExecutionNotes("");
+                          setExecutionSelectedStepNumber("");
+                          setExecutionStepStatus("");
                           setExecutionActualResult("");
                           setExecutionStepNotes("");
-                          showExecutionToast(`Failed step saved and bug created: ${issue.id}`);
+                          if (
+                            freshSuiteExecution &&
+                            String(activeSuiteExecutionContext?.mode || "").toUpperCase() === "SEQUENTIAL"
+                          ) {
+                            const nextPending = (freshSuiteExecution.cases || []).find(
+                              (item: any) => item.status === "NOT_RUN"
+                            );
+                            if (nextPending) {
+                              await openSuiteExecutionCase(freshSuiteExecution, nextPending);
+                              alert(`Execution finalized: ${final.result}. Opened next pending suite case.`);
+                              return;
+                            }
+                            setActiveSuiteExecutionContext(null);
+                          }
+                          alert(`Execution finalized: ${final.result}`);
                         } catch (error: any) {
-                          alert(error?.message || "Fail & Report Bug failed");
+                          alert(error?.message || "Finalize failed");
                         }
                       }}
-                    >
-                      Fail & Report Bug
-                    </button>
-                    <button
-                      className="button"
-                      disabled={Boolean(executionCompletedAt) || executionSteps.some((step) => step.status === "NOT_EXECUTED")}
-                      onClick={() => setShowFinalizeSummary(true)}
                     >
                       Finalize Execution
                     </button>
                     <h4>Execution Evidence</h4>
                     <div className="inlineGrid">
                       <select className="input" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
+                        <option value="">Select evidence type</option>
                         <option value="IMAGE">IMAGE</option>
                         <option value="VIDEO">VIDEO</option>
                         <option value="LOG">LOG</option>
@@ -4521,85 +4105,6 @@ onClick={() =>
                     )}
                   </>
                 )}
-                {executionId && (
-                  <>
-                    <h4>Execution History & Compare</h4>
-                    <select
-                      className="input"
-                      value={compareExecutionId}
-                      onChange={(e) => setCompareExecutionId(e.target.value)}
-                    >
-                      <option value="">Select previous execution for compare</option>
-                      {executionHistory
-                        .filter((row: any) => row.id !== executionId)
-                        .map((row: any) => (
-                          <option key={row.id} value={row.id}>
-                            {new Date(row.executedAt).toLocaleString()} | {row.result} |{" "}
-                            {typeof row?.timer?.durationSeconds === "number" ? `${row.timer.durationSeconds}s` : "N/A"}
-                          </option>
-                        ))}
-                    </select>
-                    <div className="inlineGrid">
-                      <button
-                        className="button"
-                        disabled={!compareExecutionId}
-                        onClick={async () => {
-                          try {
-                            const compared = await compareExecutionsApi(executionId, compareExecutionId);
-                            setExecutionCompareResult(compared);
-                            showExecutionToast("Execution comparison loaded");
-                          } catch (error: any) {
-                            alert(error?.message || "Comparison failed");
-                          }
-                        }}
-                      >
-                        Compare with Selected
-                      </button>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            const rows = await listExecutionHistoryApi(executionId);
-                            setExecutionHistory(Array.isArray(rows) ? rows : []);
-                            showExecutionToast("Execution history refreshed");
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to refresh history");
-                          }
-                        }}
-                      >
-                        Refresh History
-                      </button>
-                    </div>
-                    {executionCompareResult?.current && executionCompareResult?.previous && (
-                      <div className="testCaseDetails">
-                        <div>
-                          <strong>Current:</strong> {executionCompareResult.current.result} |{" "}
-                          {new Date(executionCompareResult.current.executedAt).toLocaleString()} |{" "}
-                          {typeof executionCompareResult.current.durationSeconds === "number"
-                            ? `${executionCompareResult.current.durationSeconds}s`
-                            : "N/A"}
-                        </div>
-                        <div>
-                          <strong>Previous:</strong> {executionCompareResult.previous.result} |{" "}
-                          {new Date(executionCompareResult.previous.executedAt).toLocaleString()} |{" "}
-                          {typeof executionCompareResult.previous.durationSeconds === "number"
-                            ? `${executionCompareResult.previous.durationSeconds}s`
-                            : "N/A"}
-                        </div>
-                        <div style={{ maxHeight: "220px", overflow: "auto", marginTop: "8px" }}>
-                          {(executionCompareResult.steps || []).map((row: any) => (
-                            <div key={row.stepNumber} className="note" style={{ marginBottom: "6px" }}>
-                              Step {row.stepNumber}: {row.action}
-                              <br />
-                              Current: {row.current?.status || "NOT_EXECUTED"} | Previous:{" "}
-                              {row.previous?.status || "NOT_EXECUTED"}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                )}
                 <h4>Quick Bug / Re-execution</h4>
                 <select
                   className="input"
@@ -4628,6 +4133,7 @@ onClick={() =>
                   onChange={(e) => setQuickBugDescription(e.target.value)}
                 />
                 <select className="input" value={quickBugSeverity} onChange={(e) => setQuickBugSeverity(e.target.value)}>
+                  <option value="">Select severity</option>
                   <option value="LOW">LOW</option>
                   <option value="MEDIUM">MEDIUM</option>
                   <option value="HIGH">HIGH</option>
@@ -4638,23 +4144,17 @@ onClick={() =>
                     className="button"
                     onClick={async () => {
                       try {
-                        if (!executionId) {
-                          alert("Open an execution first");
+                        if (!selectedExecutionReportId) {
+                          alert("Select an execution report");
                           return;
                         }
-                        const stepNumber = Number(executionSelectedStepNumber || executionBugStepNumber);
-                        if (!Number.isFinite(stepNumber)) {
-                          alert("Select a step");
-                          return;
-                        }
-                        const issue = await createBugFromExecutionStepApi(executionId, {
-                          stepNumber,
+                        const issue = await createBugFromExecutionApi(selectedExecutionReportId, {
+                          title: quickBugTitle || undefined,
+                          description: quickBugDescription || undefined,
                           severity: quickBugSeverity,
-                          environment: bugCreateEnvironment || undefined,
                         });
                         resetQuickBugFields();
-                        setSelectedBugId(issue.id);
-                        showExecutionToast(`Bug created: ${issue.id}`);
+                        alert(`Bug created: ${issue.id}`);
                       } catch (error: any) {
                         alert(error?.message || "Quick bug creation failed");
                       }
@@ -4666,11 +4166,11 @@ onClick={() =>
                     className="button"
                     onClick={async () => {
                       try {
-                        if (!executionId) {
-                          alert("Open an execution first");
+                        if (!selectedExecutionReportId) {
+                          alert("Select an execution report");
                           return;
                         }
-                        const restarted = await reexecuteExecutionV2Api(executionId, {
+                        const restarted = await reexecuteExecutionApi(selectedExecutionReportId, {
                           notes: "Re-execution requested",
                         });
                         setExecutionId(restarted.id);
@@ -4687,18 +4187,8 @@ onClick={() =>
                         setExecutionStartedAt(restarted.startedAt || "");
                         setExecutionCompletedAt("");
                         setExecutionDurationSeconds(null);
-                        setExecutionTimerState("RUNNING");
-                        setExecutionManualMinutes("");
                         setExecutionEvidence([]);
-                        setCompareExecutionId("");
-                        setExecutionCompareResult(null);
-                        try {
-                          const historyRows = await listExecutionHistoryApi(restarted.id);
-                          setExecutionHistory(Array.isArray(historyRows) ? historyRows : []);
-                        } catch {
-                          setExecutionHistory([]);
-                        }
-                        showExecutionToast("Re-execution draft created");
+                        alert("Re-execution draft created");
                       } catch (error: any) {
                         alert(error?.message || "Re-execution failed");
                       }
@@ -4707,108 +4197,6 @@ onClick={() =>
                     Re-execute
                   </button>
                 </div>
-                <h4 style={{ marginTop: "14px" }}>Reports Dashboard</h4>
-                <div className="dashboardGrid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))" }}>
-                  <div className="panel"><strong>Total Executed</strong><div>{executionReports.length}</div></div>
-                  <div className="panel">
-                    <strong>Pass Rate %</strong>
-                    <div>
-                      {executionReports.length === 0
-                        ? 0
-                        : Math.round((executionReports.filter((r) => r.result === "PASSED").length / executionReports.length) * 100)}
-                      %
-                    </div>
-                  </div>
-                  <div className="panel"><strong>Failed Count</strong><div>{executionReports.filter((r) => r.result === "FAILED").length}</div></div>
-                  <div className="panel"><strong>Linked Bugs</strong><div>{bugs.filter((b) => b.executionId).length}</div></div>
-                </div>
-                <h4>Recent Runs</h4>
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Execution ID</th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Test Case</th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Result</th>
-                        <th style={{ textAlign: "left", padding: "8px", borderBottom: "1px solid #ddd" }}>Executed At</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {executionReports.slice(0, 8).map((row) => (
-                        <tr key={row.id}>
-                          <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{row.id}</td>
-                          <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{row.testCase?.title || row.testCaseId}</td>
-                          <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{row.result}</td>
-                          <td style={{ padding: "8px", borderBottom: "1px solid #eee" }}>{new Date(row.executedAt).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                {showFinalizeSummary && executionId && (
-                  <div className="modalBackdrop">
-                    <div className="modalCard">
-                      <h4>Execution Summary</h4>
-                      <div className="testCaseDetails">
-                        <div><strong>Total:</strong> {executionSteps.length}</div>
-                        <div><strong>Passed:</strong> {executionSteps.filter((s) => s.status === "PASSED").length}</div>
-                        <div><strong>Failed:</strong> {executionSteps.filter((s) => s.status === "FAILED").length}</div>
-                        <div><strong>Blocked:</strong> {executionSteps.filter((s) => s.status === "BLOCKED").length}</div>
-                      </div>
-                      <div className="toolbarActions">
-                        <button
-                          className="button small"
-                          onClick={async () => {
-                            try {
-                              const final = await finalizeExecutionV2Api(executionId, { notes: executionNotes });
-                              await loadTestCaseData();
-                              if (activeSuiteExecutionId) {
-                                try {
-                                  const refreshedSuiteExecution = await getSuiteExecutionApi(activeSuiteExecutionId);
-                                  const refreshedCases = Array.isArray(refreshedSuiteExecution?.cases)
-                                    ? [...refreshedSuiteExecution.cases].sort(
-                                        (a: any, b: any) => Number(a.position || 0) - Number(b.position || 0)
-                                      )
-                                    : [];
-                                  setActiveSuiteExecutionCases(refreshedCases);
-                                } catch {
-                                  // no-op, execution finalize succeeded
-                                }
-                              }
-                              setSelectedExecutionReportId(final.id);
-                              setExecutionCompletedAt(final?.completedAt || executionCompletedAt);
-                              setExecutionDurationSeconds(
-                                typeof final?.durationSeconds === "number" ? final.durationSeconds : executionDurationSeconds
-                              );
-                              setExecutionTimerState(String(final?.timerState || "STOPPED"));
-                              setExecutionManualMinutes(
-                                typeof final?.durationSeconds === "number"
-                                  ? toMinutesString(final.durationSeconds)
-                                  : executionManualMinutes
-                              );
-                              try {
-                                const historyRows = await listExecutionHistoryApi(final.id);
-                                setExecutionHistory(Array.isArray(historyRows) ? historyRows : []);
-                              } catch {
-                                setExecutionHistory([]);
-                              }
-                              clearExecutionDraftStorage();
-                              setShowFinalizeSummary(false);
-                              showExecutionToast(`Execution finalized: ${final.result}`);
-                            } catch (error: any) {
-                              alert(error?.message || "Finalize failed");
-                            }
-                          }}
-                        >
-                          Confirm Finalize
-                        </button>
-                        <button className="button small danger" onClick={() => setShowFinalizeSummary(false)}>
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
               </section>
               )}
 
@@ -4870,6 +4258,7 @@ onClick={() =>
                           value={bugCreateSeverity}
                           onChange={(e) => setBugCreateSeverity(e.target.value)}
                         >
+                          <option value="">Select severity</option>
                           <option value="LOW">LOW</option>
                           <option value="MEDIUM">MEDIUM</option>
                           <option value="HIGH">HIGH</option>
@@ -4883,6 +4272,7 @@ onClick={() =>
                           value={bugCreatePriority}
                           onChange={(e) => setBugCreatePriority(e.target.value)}
                         >
+                          <option value="">Select priority</option>
                           <option value="P1_URGENT">P1_URGENT</option>
                           <option value="P2_HIGH">P2_HIGH</option>
                           <option value="P3_MEDIUM">P3_MEDIUM</option>
@@ -5217,6 +4607,7 @@ onClick={() =>
                       value={bugTransitionToStatus}
                       onChange={(e) => setBugTransitionToStatus(e.target.value)}
                     >
+                      <option value="">Select target status</option>
                       <option value="OPEN">OPEN</option>
                       <option value="IN_PROGRESS">IN_PROGRESS</option>
                       <option value="FIXED">FIXED</option>
@@ -5258,7 +4649,7 @@ onClick={() =>
                                 duplicateOfBugCode: bugTransitionDuplicateOf || undefined,
                               });
                             }
-                            setBugTransitionToStatus("OPEN");
+                            setBugTransitionToStatus("");
                             setBugTransitionReason("");
                             setBugTransitionDuplicateOf("");
                             await loadTestCaseData();
@@ -5290,6 +4681,7 @@ onClick={() =>
                   <>
                     <h4 style={{ marginTop: "12px" }}>Developer Resolution</h4>
                     <select className="input" value={bugResolveAction} onChange={(e) => setBugResolveAction(e.target.value)}>
+                      <option value="">Select action</option>
                       <option value="START_PROGRESS">START_PROGRESS</option>
                       <option value="MARK_FIXED">MARK_FIXED</option>
                       <option value="REQUEST_RETEST">REQUEST_RETEST</option>
@@ -5318,7 +4710,7 @@ onClick={() =>
                             commitLink: bugResolveCommitLink || undefined,
                             reason: bugTransitionReason || undefined,
                           });
-                          setBugResolveAction("START_PROGRESS");
+                          setBugResolveAction("");
                           setBugResolveFixNotes("");
                           setBugResolveCommitLink("");
                           await loadTestCaseData();
@@ -5613,6 +5005,7 @@ onClick={() =>
                     <input id="edit-estimated-duration" className="input" value={editEstimatedDurationMinutes} onChange={(e) => setEditEstimatedDurationMinutes(e.target.value)} />
                     <label className="fieldLabel" htmlFor="edit-automation-status">Automation Status</label>
                     <select id="edit-automation-status" className="input" value={editAutomationStatus} onChange={(e) => setEditAutomationStatus(e.target.value)}>
+                      <option value="">Select automation status</option>
                       <option value="NOT_AUTOMATED">Not Automated</option>
                       <option value="IN_PROGRESS">In Progress</option>
                       <option value="AUTOMATED">Automated</option>
@@ -5626,6 +5019,7 @@ onClick={() =>
                       <div>
                         <label className="fieldLabel" htmlFor="edit-priority">Priority</label>
                         <select id="edit-priority" className="input" value={editPriority} onChange={(e) => setEditPriority(e.target.value)}>
+                          <option value="">Select priority</option>
                           <option value="LOW">LOW</option>
                           <option value="MEDIUM">MEDIUM</option>
                           <option value="HIGH">HIGH</option>
@@ -5635,6 +5029,7 @@ onClick={() =>
                       <div>
                         <label className="fieldLabel" htmlFor="edit-severity">Severity</label>
                         <select id="edit-severity" className="input" value={editSeverity} onChange={(e) => setEditSeverity(e.target.value)}>
+                          <option value="">Select severity</option>
                           <option value="BLOCKER">BLOCKER</option>
                           <option value="CRITICAL">CRITICAL</option>
                           <option value="MAJOR">MAJOR</option>
@@ -5647,6 +5042,7 @@ onClick={() =>
                       <div>
                         <label className="fieldLabel" htmlFor="edit-type">Type</label>
                         <select id="edit-type" className="input" value={editType} onChange={(e) => setEditType(e.target.value)}>
+                          <option value="">Select type</option>
                           <option value="FUNCTIONAL">FUNCTIONAL</option>
                           <option value="REGRESSION">REGRESSION</option>
                           <option value="SMOKE">SMOKE</option>
@@ -5660,6 +5056,7 @@ onClick={() =>
                       <div>
                         <label className="fieldLabel" htmlFor="edit-status">Status</label>
                         <select id="edit-status" className="input" value={editStatus} onChange={(e) => setEditStatus(e.target.value)}>
+                          <option value="">Select status</option>
                           <option value="DRAFT">DRAFT</option>
                           <option value="READY_FOR_REVIEW">READY_FOR_REVIEW</option>
                           <option value="APPROVED">APPROVED</option>
@@ -5719,77 +5116,12 @@ onClick={() =>
               )}
             </section>
             )}
-            {adminEditUserId && (
-              <div className="modalBackdrop">
-                <div className="modalCard">
-                  <h4>Edit User</h4>
-                  <label className="fieldLabel" htmlFor="admin-edit-name">Name</label>
-                  <input
-                    id="admin-edit-name"
-                    className="input"
-                    value={adminEditName}
-                    onChange={(e) => setAdminEditName(e.target.value)}
-                  />
-                  <label className="fieldLabel" htmlFor="admin-edit-role">Role</label>
-                  <select
-                    id="admin-edit-role"
-                    className="input"
-                    value={adminEditRole}
-                    onChange={(e) => setAdminEditRole(e.target.value)}
-                  >
-                    <option value="TESTER">TESTER</option>
-                    <option value="DEVELOPER">DEVELOPER</option>
-                    <option value="ADMIN">ADMIN</option>
-                  </select>
-                  <label className="fieldLabel" htmlFor="admin-edit-active">Status</label>
-                  <select
-                    id="admin-edit-active"
-                    className="input"
-                    value={adminEditActive ? "active" : "inactive"}
-                    onChange={(e) => setAdminEditActive(e.target.value === "active")}
-                  >
-                    <option value="active">Active</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                  <div className="toolbarActions">
-                    <button
-                      className="button small"
-                      onClick={async () => {
-                        try {
-                          if (!adminEditName.trim()) {
-                            alert("Name is required");
-                            return;
-                          }
-                          await updateAdminUserApi(adminEditUserId, {
-                            name: adminEditName.trim(),
-                            role: adminEditRole,
-                            isActive: adminEditActive,
-                          });
-                          setAdminEditUserId("");
-                          await loadAdminUsers();
-                          alert("User updated");
-                        } catch (error: any) {
-                          alert(error?.message || "Update user failed");
-                        }
-                      }}
-                    >
-                      Save User
-                    </button>
-                    <button
-                      className="button small danger"
-                      onClick={() => setAdminEditUserId("")}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-              </div>
-            </div>
-          </div>
+          </DashboardLayout>
         )}
-      </div>)}
-
+      </div>
+    </div>
+  );
+}
 
 export default App;
+

@@ -3,10 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import path from "path";
 import authRoutes from "./routes/auth.routes";
-import executionsRoutes from "./modules/executions/executions.routes";
 import testcaseRoutes from "./routes/testcase.routes";
-import testSuitesRoutes from "./modules/test-suites/test-suites.routes";
-import suiteExecutionRoutes from "./modules/suite-execution/suite-execution.routes";
 
 
 
@@ -17,7 +14,7 @@ dotenv.config({ path: path.resolve(process.cwd(), "../../.env"), override: false
 const app = express();
 const allowedOrigins = (
   process.env.FRONTEND_ORIGINS ??
-  "http://localhost:3000,http://localhost:3001,http://localhost:5173,http://localhost:4173"
+  "http://localhost:3000,http://localhost:3001"
 )
   .split(",")
   .map((origin) => origin.trim())
@@ -32,7 +29,7 @@ app.use(
       }
       callback(new Error("CORS blocked for this origin"));
     },
-    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
@@ -40,10 +37,7 @@ app.use(
 app.use(express.json());
 
 app.use("/api/auth", authRoutes);
-app.use("/api", executionsRoutes);
-app.use("/api", suiteExecutionRoutes);
 app.use("/api", testcaseRoutes);
-app.use("/api", testSuitesRoutes);
 
 
 app.get("/", (req, res) => {
