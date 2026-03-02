@@ -977,6 +977,79 @@ body {
   padding: 16px;
 }
 
+.dashboardPageContent .bugDetailsGrid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.dashboardPageContent .bugDetailsCard {
+  border: 1px solid #dbe7f3;
+  border-radius: 10px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.dashboardPageContent .bugDetailsHeading {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #0f172a;
+}
+
+.dashboardPageContent .bugDetailsMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 12px;
+  margin-bottom: 8px;
+}
+
+.dashboardPageContent .bugDetailsField {
+  margin-bottom: 8px;
+}
+
+.dashboardPageContent .bugDetailsField:last-child {
+  margin-bottom: 0;
+}
+
+.dashboardPageContent .bugDetailsField p {
+  margin: 4px 0 0;
+  color: #334155;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dashboardPageContent .bugSectionTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.dashboardPageContent .bugModalHeaderTop {
+  align-items: center;
+  gap: 8px;
+}
+
+.dashboardPageContent .bugActionModalBackdrop {
+  background: rgba(15, 23, 42, 0.5);
+  z-index: 140;
+}
+
+.dashboardPageContent .bugActionModalCard {
+  width: min(720px, 94vw);
+  max-height: 86vh;
+}
+
+.dashboardPageContent .bugSectionTab {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.dashboardPageContent .bugSectionTab.active {
+  background: #2563eb;
+  color: #fff;
+}
+
 .suiteExecModal {
   width: min(980px, 96vw);
   max-height: 92vh;
@@ -1051,6 +1124,10 @@ body {
 
 @media (max-width: 980px) {
   .dashboardPageContent .inlineGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboardPageContent .bugDetailsMetaGrid {
     grid-template-columns: 1fr;
   }
 
@@ -1401,6 +1478,22 @@ body {
   outline: none;
 }
 
+.bugTableActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bugQuickSelect {
+  width: 180px;
+  margin-bottom: 0;
+}
+
+.bugReadonlyNote {
+  margin-bottom: 0;
+}
+
 .truncateCell {
   max-width: 300px;
   white-space: nowrap;
@@ -1582,6 +1675,15 @@ body {
 @media (max-width: 900px) {
   .truncateCell {
     max-width: 180px;
+  }
+
+  .bugTableActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bugQuickSelect {
+    width: 100%;
   }
 
   .testCaseModal {

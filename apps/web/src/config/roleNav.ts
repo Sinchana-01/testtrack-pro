@@ -17,7 +17,6 @@ export const testerNavItems: DashboardNavItem[] = [
 export const developerNavItems: DashboardNavItem[] = [
   { key: "dashboard_home", label: "Dashboard", icon: "D" },
   { key: "my_assigned_bugs", label: "My Assigned Bugs", icon: "!" },
-  { key: "all_bugs", label: "All Bugs", icon: "A" },
   { key: "test_reports", label: "Test Reports", icon: "P" },
   { key: "performance_report", label: "Performance Report", icon: "F" },
   { key: "linked_commits", label: "Linked Commits", icon: "C" },

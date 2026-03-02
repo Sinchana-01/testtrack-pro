@@ -3737,12 +3737,14 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
 
 router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const mineOnly = String(req.query.mine || "") === "1";
+  const scope = asString(req.query.scope).toLowerCase();
+  const developerAllScope = req.user!.role === Role.DEVELOPER && scope === "all";
   const statusFilter = asString(req.query.status).toUpperCase();
   const priorityFilter = asString(req.query.priority).toUpperCase();
   const severityFilter = asString(req.query.severity).toUpperCase();
   const rows = await prismaAny.issue.findMany({
     where:
-      req.user!.role === Role.DEVELOPER
+      req.user!.role === Role.DEVELOPER && !developerAllScope
         ? {
             assignedTo: req.user!.userId,
             ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
@@ -3789,6 +3791,8 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
 });
 
 router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const scope = asString(req.query.scope).toLowerCase();
+  const developerAllScope = req.user!.role === Role.DEVELOPER && scope === "all";
   const issue = await prismaAny.issue.findUnique({
     where: { id: req.params.id },
     include: {
@@ -3801,7 +3805,7 @@ router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
     },
   });
   if (!issue) return res.status(404).json({ message: "Bug not found" });
-  if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
+  if (req.user!.role === Role.DEVELOPER && !developerAllScope && issue.assignedTo !== req.user!.userId) {
     return res.status(403).json({ message: "You can view only assigned bugs" });
   }
   return res.json(enrichIssue(issue));
