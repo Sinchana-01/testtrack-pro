@@ -17,13 +17,12 @@ export const testerNavItems: DashboardNavItem[] = [
 export const developerNavItems: DashboardNavItem[] = [
   { key: "dashboard_home", label: "Dashboard", icon: "D" },
   { key: "my_assigned_bugs", label: "My Assigned Bugs", icon: "!" },
-  { key: "test_reports", label: "Test Reports", icon: "P" },
-  { key: "performance_report", label: "Performance Report", icon: "F" },
-  { key: "linked_commits", label: "Linked Commits", icon: "C" },
+  { key: "reports", label: "Reports", icon: "P" },
 ];
 
 export const adminNavItems: DashboardNavItem[] = [
   { key: "dashboard_home", label: "Dashboard", icon: "D" },
+  { key: "reports", label: "Reports", icon: "P" },
   { key: "user_management", label: "User Management", icon: "U" },
   { key: "role_management", label: "Role Management", icon: "L" },
   { key: "project_management", label: "Project Management", icon: "J" },
@@ -57,9 +56,9 @@ const permissionToMenuKeys: Record<string, string[]> = {
   Reports: ["reports"],
   "My Assigned Bugs": ["my_assigned_bugs"],
   "All Bugs": ["all_bugs"],
-  "Test Reports": ["test_reports"],
-  "Performance Report": ["performance_report"],
-  "Linked Commits": ["linked_commits"],
+  "Test Reports": ["reports"],
+  "Performance Report": ["reports"],
+  "Linked Commits": ["reports"],
 };
 
 export const permissionCatalog = [

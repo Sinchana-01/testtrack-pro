@@ -20,6 +20,7 @@ import { Router, Response } from "express";
 import prisma from "../prisma";
 import { authenticate, AuthRequest } from "../middleware/auth.middleware";
 import { authorizeRoles } from "../middleware/role.middleware";
+import { sendGenericEmail } from "../utils/email";
 
 const router = Router();
 const prismaAny = prisma as any;
@@ -36,6 +37,48 @@ const parseEnum = <T extends Record<string, string>>(enumType: T, value: unknown
   }
 
   return (Object.values(enumType) as string[]).includes(value) ? (value as T[keyof T]) : null;
+};
+
+const asDate = (value: unknown): Date | null => {
+  const input = asString(value);
+  if (!input) return null;
+  const parsed = new Date(input);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const csvEscape = (value: unknown): string => `"${String(value ?? "").replace(/\"/g, "\"\"")}"`;
+
+const buildSimplePdf = (lines: string[]): Buffer => {
+  const safeLines = lines.map((line) => String(line || "").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)"));
+  const content = ["BT", "/F1 11 Tf", "50 790 Td"]
+    .concat(
+      safeLines.flatMap((line, idx) => (idx === 0 ? [`(${line}) Tj`] : ["0 -14 Td", `(${line}) Tj`]))
+    )
+    .concat(["ET"])
+    .join("\n");
+
+  const objects = [
+    "1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj",
+    "2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj",
+    "3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj",
+    "4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj",
+    `5 0 obj << /Length ${Buffer.byteLength(content, "utf8")} >> stream\n${content}\nendstream endobj`,
+  ];
+
+  let pdf = "%PDF-1.4\n";
+  const offsets: number[] = [];
+  objects.forEach((obj) => {
+    offsets.push(Buffer.byteLength(pdf, "utf8"));
+    pdf += `${obj}\n`;
+  });
+  const xrefStart = Buffer.byteLength(pdf, "utf8");
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += "0000000000 65535 f \n";
+  offsets.forEach((offset) => {
+    pdf += `${String(offset).padStart(10, "0")} 00000 n \n`;
+  });
+  pdf += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return Buffer.from(pdf, "utf8");
 };
 
 const parseJsonValue = (value: unknown, fallback: Prisma.InputJsonValue): Prisma.InputJsonValue => {
@@ -472,6 +515,9 @@ const BUG_WORKFLOW_STATUS = {
   DUPLICATE: "DUPLICATE",
 } as const;
 type BugWorkflowStatus = (typeof BUG_WORKFLOW_STATUS)[keyof typeof BUG_WORKFLOW_STATUS];
+
+const parseBugWorkflowStatus = (value: unknown): BugWorkflowStatus | null =>
+  parseEnum(BUG_WORKFLOW_STATUS, value);
 
 type BugMeta = {
   bugCode?: string;
@@ -3606,6 +3652,1029 @@ router.get(
   }
 );
 
+router.get(
+  "/reports/test-executions/summary",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const testRunId = asString(req.query.testRunId);
+    const from = asString(req.query.from);
+    const to = asString(req.query.to);
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+    const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
+    const validTo = toDate && !Number.isNaN(toDate.getTime()) ? toDate : null;
+
+    const where: Prisma.TestExecutionWhereInput = {
+      isDraft: false,
+      ...(testRunId ? { testRunId } : {}),
+      ...(validFrom || validTo
+        ? {
+            executedAt: {
+              ...(validFrom ? { gte: validFrom } : {}),
+              ...(validTo ? { lte: validTo } : {}),
+            },
+          }
+        : {}),
+    };
+
+    // Reports are read-only for developers, but should use the same shared execution dataset.
+    // Do not scope to only self-executed/self-assigned cases here.
+
+    const executions = await prisma.testExecution.findMany({
+      where,
+      include: {
+        testCase: { select: { id: true, testCaseCode: true, title: true, module: true } },
+        executor: { select: { id: true, name: true, email: true } },
+        testRun: { select: { id: true, name: true } },
+      },
+      orderBy: { executedAt: "asc" },
+    });
+
+    const totalExecuted = executions.length;
+    const passed = executions.filter((item) => item.result === ExecutionStatus.PASSED).length;
+    const failed = executions.filter((item) => item.result === ExecutionStatus.FAILED).length;
+    const blocked = executions.filter((item) => item.result === ExecutionStatus.BLOCKED).length;
+    const skipped = executions.filter((item) => item.result === ExecutionStatus.SKIPPED).length;
+    const passRate = totalExecuted > 0 ? Number(((passed / totalExecuted) * 100).toFixed(1)) : 0;
+
+    const byTesterMap = new Map<string, { testerId: string; testerName: string; total: number; passed: number; failed: number; blocked: number; skipped: number }>();
+    const byModuleMap = new Map<string, { module: string; total: number; passed: number; failed: number; blocked: number; skipped: number }>();
+    const timelineMap = new Map<string, { date: string; total: number; passed: number; failed: number; blocked: number; skipped: number }>();
+
+    const bumpResult = <T extends { total: number; passed: number; failed: number; blocked: number; skipped: number }>(
+      row: T,
+      result: ExecutionStatus
+    ) => {
+      row.total += 1;
+      if (result === ExecutionStatus.PASSED) row.passed += 1;
+      if (result === ExecutionStatus.FAILED) row.failed += 1;
+      if (result === ExecutionStatus.BLOCKED) row.blocked += 1;
+      if (result === ExecutionStatus.SKIPPED) row.skipped += 1;
+    };
+
+    executions.forEach((item) => {
+      const testerId = item.executor?.id || item.executedBy;
+      const testerName = item.executor?.name || item.executor?.email || item.executedBy;
+      const moduleName = item.testCase?.module || "General";
+      const dayKey = item.executedAt.toISOString().slice(0, 10);
+
+      const testerRow =
+        byTesterMap.get(testerId) ||
+        { testerId, testerName, total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 };
+      bumpResult(testerRow, item.result);
+      byTesterMap.set(testerId, testerRow);
+
+      const moduleRow =
+        byModuleMap.get(moduleName) ||
+        { module: moduleName, total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 };
+      bumpResult(moduleRow, item.result);
+      byModuleMap.set(moduleName, moduleRow);
+
+      const timelineRow =
+        timelineMap.get(dayKey) ||
+        { date: dayKey, total: 0, passed: 0, failed: 0, blocked: 0, skipped: 0 };
+      bumpResult(timelineRow, item.result);
+      timelineMap.set(dayKey, timelineRow);
+    });
+
+    const executionByTester = Array.from(byTesterMap.values()).sort((a, b) => b.total - a.total);
+    const executionByModule = Array.from(byModuleMap.values()).sort((a, b) => b.total - a.total);
+    const executionTimeline = Array.from(timelineMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+    const byRunMap = new Map<
+      string,
+      {
+        testRunId: string;
+        testRunName: string;
+        total: number;
+        passed: number;
+        failed: number;
+        blocked: number;
+        skipped: number;
+        passRate: number;
+      }
+    >();
+    executions.forEach((item) => {
+      const runId = item.testRun?.id || "unlinked";
+      const runName = item.testRun?.name || "Unlinked Executions";
+      const row =
+        byRunMap.get(runId) || {
+          testRunId: runId,
+          testRunName: runName,
+          total: 0,
+          passed: 0,
+          failed: 0,
+          blocked: 0,
+          skipped: 0,
+          passRate: 0,
+        };
+      bumpResult(row, item.result);
+      byRunMap.set(runId, row);
+    });
+    const executionByTestRun = Array.from(byRunMap.values())
+      .map((row) => ({
+        ...row,
+        passRate: row.total > 0 ? Number(((row.passed / row.total) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+    const failedTestCases = executions
+      .filter((item) => item.result === ExecutionStatus.FAILED)
+      .map((item) => ({
+        executionId: item.id,
+        testCaseId: item.testCaseId,
+        testCaseCode: item.testCase?.testCaseCode || null,
+        testCaseTitle: item.testCase?.title || null,
+        module: item.testCase?.module || "General",
+        tester: item.executor?.name || item.executor?.email || item.executedBy,
+        executedAt: item.executedAt,
+        notes: parseExecutionNotes(item.notes).userNotes || "",
+      }))
+      .sort((a, b) => b.executedAt.getTime() - a.executedAt.getTime());
+    const topFailedModules = executionByModule
+      .filter((row) => row.failed > 0)
+      .sort((a, b) => b.failed - a.failed)
+      .slice(0, 3)
+      .map((row, idx) => ({ rank: idx + 1, module: row.module, failures: row.failed }));
+
+    const reportStart =
+      validFrom?.toISOString() ||
+      (executions.length > 0 ? executions[0].executedAt.toISOString() : null);
+    const reportEnd =
+      validTo?.toISOString() ||
+      (executions.length > 0 ? executions[executions.length - 1].executedAt.toISOString() : null);
+    const runName =
+      testRunId && executions.length > 0
+        ? executions.find((item) => item.testRun?.id === testRunId)?.testRun?.name || "Selected Test Run"
+        : "All Test Runs";
+
+    const payload = {
+      runName,
+      period: { from: reportStart, to: reportEnd },
+      totalExecuted,
+      breakdown: { passed, failed, blocked, skipped },
+      passRate,
+      executionByTester,
+      executionByModule,
+      executionByTestRun,
+      executionTimeline,
+      failedTestCases,
+      topFailedModules,
+    };
+
+    const exportFormat = asString(req.query.export).toLowerCase();
+    if (exportFormat === "csv" || exportFormat === "excel") {
+      const header = [
+        "runName",
+        "periodFrom",
+        "periodTo",
+        "totalExecuted",
+        "passed",
+        "failed",
+        "blocked",
+        "skipped",
+        "passRate",
+      ];
+      const row = [
+        payload.runName,
+        payload.period.from || "",
+        payload.period.to || "",
+        payload.totalExecuted,
+        payload.breakdown.passed,
+        payload.breakdown.failed,
+        payload.breakdown.blocked,
+        payload.breakdown.skipped,
+        payload.passRate,
+      ];
+      const csv = [header.map(csvEscape).join(","), row.map(csvEscape).join(",")].join("\n");
+      res.setHeader(
+        "Content-Type",
+        exportFormat === "excel" ? "application/vnd.ms-excel; charset=utf-8" : "text/csv; charset=utf-8"
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=\"test-execution-report.${exportFormat === "excel" ? "xls" : "csv"}\"`
+      );
+      return res.send(csv);
+    }
+
+    if (exportFormat === "pdf") {
+      const pdf = buildSimplePdf([
+        "Test Execution Report",
+        `Test Run: ${payload.runName}`,
+        `Period: ${payload.period.from || "N/A"} - ${payload.period.to || "N/A"}`,
+        `Total Executed: ${payload.totalExecuted}`,
+        `Passed: ${payload.breakdown.passed}`,
+        `Failed: ${payload.breakdown.failed}`,
+        `Blocked: ${payload.breakdown.blocked}`,
+        `Skipped: ${payload.breakdown.skipped}`,
+        `Pass Rate: ${payload.passRate}%`,
+      ]);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "attachment; filename=\"test-execution-report.pdf\"");
+      return res.send(pdf);
+    }
+
+    return res.json(payload);
+  }
+);
+
+router.get(
+  "/reports/tester-performance",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const testerId = asString(req.query.testerId);
+    const fromDate = asDate(req.query.from);
+    const toDate = asDate(req.query.to);
+
+    const executionWhere: Prisma.TestExecutionWhereInput = {
+      isDraft: false,
+      ...(testerId ? { executedBy: testerId } : {}),
+      ...(fromDate || toDate
+        ? {
+            executedAt: {
+              ...(fromDate ? { gte: fromDate } : {}),
+              ...(toDate ? { lte: toDate } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const executions = await prisma.testExecution.findMany({
+      where: executionWhere,
+      include: {
+        executor: { select: { id: true, name: true, email: true } },
+        testCase: { select: { id: true, estimatedDurationMinutes: true } },
+      },
+      orderBy: { executedAt: "asc" },
+    });
+
+    const testerIds = [...new Set(executions.map((item) => item.executedBy))];
+    const bugs = testerIds.length
+      ? await prismaAny.issue.findMany({
+          where: {
+            reportedBy: { in: testerIds },
+            ...(fromDate || toDate
+              ? {
+                  createdAt: {
+                    ...(fromDate ? { gte: fromDate } : {}),
+                    ...(toDate ? { lte: toDate } : {}),
+                  },
+                }
+              : {}),
+          },
+          select: { id: true, reportedBy: true },
+        })
+      : [];
+
+    const totalRepositoryCases = await prisma.testCase.count({ where: { isDeleted: false } });
+
+    const byTester = new Map<
+      string,
+      {
+        testerId: string;
+        testerName: string;
+        executed: number;
+        uniqueCaseIds: Set<string>;
+        durationSecondsTotal: number;
+        durationSamples: number;
+        estimatedSecondsTotal: number;
+        onTimeCount: number;
+        bugsDetected: number;
+      }
+    >();
+
+    executions.forEach((item) => {
+      const row = byTester.get(item.executedBy) || {
+        testerId: item.executedBy,
+        testerName: item.executor?.name || item.executor?.email || item.executedBy,
+        executed: 0,
+        uniqueCaseIds: new Set<string>(),
+        durationSecondsTotal: 0,
+        durationSamples: 0,
+        estimatedSecondsTotal: 0,
+        onTimeCount: 0,
+        bugsDetected: 0,
+      };
+      row.executed += 1;
+      row.uniqueCaseIds.add(item.testCaseId);
+
+      const meta = parseExecutionNotes(item.notes).meta;
+      const durationSeconds = typeof meta.durationSeconds === "number" ? meta.durationSeconds : null;
+      const estimatedSeconds =
+        typeof item.testCase?.estimatedDurationMinutes === "number" ? item.testCase.estimatedDurationMinutes * 60 : null;
+      if (typeof durationSeconds === "number" && durationSeconds >= 0) {
+        row.durationSecondsTotal += durationSeconds;
+        row.durationSamples += 1;
+      }
+      if (typeof estimatedSeconds === "number" && estimatedSeconds > 0) {
+        row.estimatedSecondsTotal += estimatedSeconds;
+        if (typeof durationSeconds === "number" && durationSeconds <= estimatedSeconds) {
+          row.onTimeCount += 1;
+        }
+      }
+      byTester.set(item.executedBy, row);
+    });
+
+    bugs.forEach((bug: any) => {
+      const row = byTester.get(String(bug.reportedBy));
+      if (row) {
+        row.bugsDetected += 1;
+      }
+    });
+
+    const testerMetrics = Array.from(byTester.values()).map((row) => {
+      const bugDetectionRate = row.executed > 0 ? Number(((row.bugsDetected / row.executed) * 100).toFixed(1)) : 0;
+      const avgDurationMinutes =
+        row.durationSamples > 0 ? Number((row.durationSecondsTotal / row.durationSamples / 60).toFixed(2)) : 0;
+      const onTimeRate =
+        row.executed > 0 && row.estimatedSecondsTotal > 0
+          ? Number(((row.onTimeCount / row.executed) * 100).toFixed(1))
+          : 0;
+      const efficiencyScore =
+        row.estimatedSecondsTotal > 0 && row.durationSecondsTotal > 0
+          ? Number(Math.min(100, (row.estimatedSecondsTotal / row.durationSecondsTotal) * 100).toFixed(1))
+          : onTimeRate;
+      const coveragePercent =
+        totalRepositoryCases > 0
+          ? Number(((row.uniqueCaseIds.size / totalRepositoryCases) * 100).toFixed(1))
+          : 0;
+
+      return {
+        testerId: row.testerId,
+        testerName: row.testerName,
+        testCasesExecuted: row.executed,
+        bugsDetected: row.bugsDetected,
+        bugDetectionRate,
+        avgDurationMinutes,
+        onTimeRate,
+        efficiencyScore,
+        coveragePercent,
+      };
+    });
+
+    const summary = {
+      totalExecuted: testerMetrics.reduce((sum, row) => sum + row.testCasesExecuted, 0),
+      avgBugDetectionRate:
+        testerMetrics.length > 0
+          ? Number((testerMetrics.reduce((sum, row) => sum + row.bugDetectionRate, 0) / testerMetrics.length).toFixed(1))
+          : 0,
+      avgEfficiencyScore:
+        testerMetrics.length > 0
+          ? Number((testerMetrics.reduce((sum, row) => sum + row.efficiencyScore, 0) / testerMetrics.length).toFixed(1))
+          : 0,
+      avgCoveragePercent:
+        testerMetrics.length > 0
+          ? Number((testerMetrics.reduce((sum, row) => sum + row.coveragePercent, 0) / testerMetrics.length).toFixed(1))
+          : 0,
+    };
+
+    const payload = {
+      period: { from: fromDate?.toISOString() || null, to: toDate?.toISOString() || null },
+      totalRepositoryCases,
+      summary,
+      testerMetrics: testerMetrics.sort((a, b) => b.testCasesExecuted - a.testCasesExecuted),
+    };
+
+    const exportFormat = asString(req.query.export).toLowerCase();
+    if (exportFormat === "csv" || exportFormat === "excel") {
+      const header = [
+        "testerName",
+        "testCasesExecuted",
+        "bugsDetected",
+        "bugDetectionRate",
+        "avgDurationMinutes",
+        "onTimeRate",
+        "efficiencyScore",
+        "coveragePercent",
+      ];
+      const rows = payload.testerMetrics.map((item) =>
+        [
+          item.testerName,
+          item.testCasesExecuted,
+          item.bugsDetected,
+          item.bugDetectionRate,
+          item.avgDurationMinutes,
+          item.onTimeRate,
+          item.efficiencyScore,
+          item.coveragePercent,
+        ]
+          .map(csvEscape)
+          .join(",")
+      );
+      const csv = [header.map(csvEscape).join(","), ...rows].join("\n");
+      res.setHeader(
+        "Content-Type",
+        exportFormat === "excel" ? "application/vnd.ms-excel; charset=utf-8" : "text/csv; charset=utf-8"
+      );
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename=\"tester-performance-report.${exportFormat === "excel" ? "xls" : "csv"}\"`
+      );
+      return res.send(csv);
+    }
+
+    if (exportFormat === "pdf") {
+      const pdf = buildSimplePdf([
+        "Tester Performance Report",
+        `Period: ${payload.period.from || "N/A"} - ${payload.period.to || "N/A"}`,
+        `Total Executed: ${payload.summary.totalExecuted}`,
+        `Avg Bug Detection Rate: ${payload.summary.avgBugDetectionRate}%`,
+        `Avg Efficiency: ${payload.summary.avgEfficiencyScore}%`,
+        `Avg Coverage: ${payload.summary.avgCoveragePercent}%`,
+      ]);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", "attachment; filename=\"tester-performance-report.pdf\"");
+      return res.send(pdf);
+    }
+
+    return res.json(payload);
+  }
+);
+
+type ReportScheduleFrequency = "DAILY" | "WEEKLY";
+type ReportScheduleType = "TEST_EXECUTION_SUMMARY" | "TESTER_PERFORMANCE";
+type ReportSchedule = {
+  id: string;
+  reportType: ReportScheduleType;
+  format: "PDF" | "EXCEL" | "CSV";
+  recipients: string[];
+  frequency: ReportScheduleFrequency;
+  weekday: number;
+  hour: number;
+  minute: number;
+  active: boolean;
+  createdBy: string;
+  createdAt: string;
+  lastSentAt: string | null;
+  nextRunAt: string | null;
+};
+
+const REPORT_SCHEDULE_CONFIG_KEY = "REPORT_EMAIL_SCHEDULES_V1";
+
+const computeNextRunAt = (schedule: Pick<ReportSchedule, "frequency" | "weekday" | "hour" | "minute">): string => {
+  const now = new Date();
+  const next = new Date(now);
+  next.setSeconds(0, 0);
+  next.setHours(schedule.hour, schedule.minute, 0, 0);
+  if (schedule.frequency === "DAILY") {
+    if (next.getTime() <= now.getTime()) {
+      next.setDate(next.getDate() + 1);
+    }
+    return next.toISOString();
+  }
+  const targetWeekday = Math.max(0, Math.min(6, schedule.weekday));
+  const diff = (targetWeekday - next.getDay() + 7) % 7;
+  next.setDate(next.getDate() + diff);
+  if (next.getTime() <= now.getTime()) {
+    next.setDate(next.getDate() + 7);
+  }
+  return next.toISOString();
+};
+
+const loadReportSchedules = async (): Promise<ReportSchedule[]> => {
+  const config = await prisma.systemConfig.findUnique({ where: { key: REPORT_SCHEDULE_CONFIG_KEY } });
+  if (!config?.value) return [];
+  try {
+    const parsed = JSON.parse(config.value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as ReportSchedule[];
+  } catch {
+    return [];
+  }
+};
+
+const resolveScheduleUpdaterId = async (): Promise<string | null> => {
+  const admin = await prisma.user.findFirst({ where: { role: Role.ADMIN }, select: { id: true } });
+  if (admin?.id) return admin.id;
+  const anyUser = await prisma.user.findFirst({ select: { id: true } });
+  return anyUser?.id || null;
+};
+
+const saveReportSchedules = async (schedules: ReportSchedule[], updatedBy?: string) => {
+  const updaterId = updatedBy || (await resolveScheduleUpdaterId());
+  if (!updaterId) return;
+  await prisma.systemConfig.upsert({
+    where: { key: REPORT_SCHEDULE_CONFIG_KEY },
+    update: { value: JSON.stringify(schedules) },
+    create: { key: REPORT_SCHEDULE_CONFIG_KEY, value: JSON.stringify(schedules), updatedBy: updaterId },
+  });
+};
+
+const runScheduledReport = async (schedule: ReportSchedule) => {
+  const lines: string[] = [];
+  if (schedule.reportType === "TEST_EXECUTION_SUMMARY") {
+    const executions = await prisma.testExecution.findMany({ where: { isDraft: false } });
+    const total = executions.length;
+    const passed = executions.filter((item) => item.result === ExecutionStatus.PASSED).length;
+    const failed = executions.filter((item) => item.result === ExecutionStatus.FAILED).length;
+    const blocked = executions.filter((item) => item.result === ExecutionStatus.BLOCKED).length;
+    const skipped = executions.filter((item) => item.result === ExecutionStatus.SKIPPED).length;
+    lines.push("Test Execution Summary");
+    lines.push(`Total Executed: ${total}`);
+    lines.push(`Passed: ${passed}`);
+    lines.push(`Failed: ${failed}`);
+    lines.push(`Blocked: ${blocked}`);
+    lines.push(`Skipped: ${skipped}`);
+  } else {
+    const executions = await prisma.testExecution.count({ where: { isDraft: false } });
+    const bugs = await prismaAny.issue.count();
+    lines.push("Tester Performance Summary");
+    lines.push(`Executions: ${executions}`);
+    lines.push(`Bugs Reported: ${bugs}`);
+  }
+
+  const html = `
+    <div style="font-family: Arial, sans-serif; color: #111; line-height: 1.5;">
+      <h3 style="margin: 0 0 12px;">Scheduled ${schedule.reportType.replace(/_/g, " ")}</h3>
+      <pre style="background: #f8fafc; border: 1px solid #e2e8f0; padding: 12px; border-radius: 8px;">${lines.join("\n")}</pre>
+      <p style="font-size: 12px; color: #64748b;">Generated at ${new Date().toISOString()}</p>
+    </div>
+  `;
+  await sendGenericEmail(schedule.recipients, `Scheduled Report: ${schedule.reportType}`, html);
+};
+
+router.get("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const schedules = await loadReportSchedules();
+  return res.json(schedules.sort((a, b) => (a.nextRunAt || "").localeCompare(b.nextRunAt || "")));
+});
+
+router.post("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const reportType = asString(req.body.reportType).toUpperCase() as ReportScheduleType;
+  const format = asString(req.body.format).toUpperCase() as ReportSchedule["format"];
+  const frequency = asString(req.body.frequency).toUpperCase() as ReportScheduleFrequency;
+  const recipients = asStringArray(req.body.recipients);
+  const weekday = Number(req.body.weekday);
+  const hour = Number(req.body.hour);
+  const minute = Number(req.body.minute);
+  const active = req.body.active !== false;
+
+  if (!["TEST_EXECUTION_SUMMARY", "TESTER_PERFORMANCE"].includes(reportType)) {
+    return res.status(400).json({ message: "reportType must be TEST_EXECUTION_SUMMARY or TESTER_PERFORMANCE" });
+  }
+  if (!["PDF", "EXCEL", "CSV"].includes(format)) {
+    return res.status(400).json({ message: "format must be PDF, EXCEL, or CSV" });
+  }
+  if (!["DAILY", "WEEKLY"].includes(frequency)) {
+    return res.status(400).json({ message: "frequency must be DAILY or WEEKLY" });
+  }
+  if (recipients.length === 0) {
+    return res.status(400).json({ message: "recipients are required" });
+  }
+
+  const now = new Date().toISOString();
+  const schedule: ReportSchedule = {
+    id: `sched_${Date.now()}`,
+    reportType,
+    format,
+    frequency,
+    recipients,
+    weekday: Number.isFinite(weekday) ? weekday : 1,
+    hour: Number.isFinite(hour) ? hour : 9,
+    minute: Number.isFinite(minute) ? minute : 0,
+    active,
+    createdBy: req.user!.userId,
+    createdAt: now,
+    lastSentAt: null,
+    nextRunAt: computeNextRunAt({
+      frequency,
+      weekday: Number.isFinite(weekday) ? weekday : 1,
+      hour: Number.isFinite(hour) ? hour : 9,
+      minute: Number.isFinite(minute) ? minute : 0,
+    }),
+  };
+
+  const schedules = await loadReportSchedules();
+  schedules.push(schedule);
+  await saveReportSchedules(schedules, req.user!.userId);
+  return res.status(201).json(schedule);
+});
+
+router.post(
+  "/reports/schedules/:id/send-now",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const schedules = await loadReportSchedules();
+    const idx = schedules.findIndex((item) => item.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: "Schedule not found" });
+    await runScheduledReport(schedules[idx]);
+    schedules[idx].lastSentAt = new Date().toISOString();
+    schedules[idx].nextRunAt = computeNextRunAt(schedules[idx]);
+    await saveReportSchedules(schedules, req.user!.userId);
+    return res.json({ message: "Report email sent", schedule: schedules[idx] });
+  }
+);
+
+router.delete("/reports/schedules/:id", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+  const schedules = await loadReportSchedules();
+  const filtered = schedules.filter((item) => item.id !== req.params.id);
+  if (filtered.length === schedules.length) {
+    return res.status(404).json({ message: "Schedule not found" });
+  }
+  await saveReportSchedules(filtered, req.user!.userId);
+  return res.status(204).send();
+});
+
+router.get(
+  "/reports/bugs/summary",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (_req: AuthRequest, res: Response) => {
+    const now = Date.now();
+    const bugs = await prismaAny.issue.findMany({
+      include: {
+        assignee: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const byStatus = new Map<string, number>();
+    const bySeverity = new Map<string, number>();
+    const byPriority = new Map<string, number>();
+    const byDeveloper = new Map<string, { developerId: string; developerName: string; total: number }>();
+    const trendByDay = new Map<string, { date: string; created: number; resolved: number }>();
+    const agingBuckets = {
+      "0-3": 0,
+      "4-7": 0,
+      "8-14": 0,
+      "15+": 0,
+    };
+    const resolutionDays: number[] = [];
+
+    const closedLikeStatuses = new Set(["FIXED", "VERIFIED", "CLOSED", "WONT_FIX", "DUPLICATE"]);
+
+    const bump = (map: Map<string, number>, key: string) => {
+      map.set(key, (map.get(key) || 0) + 1);
+    };
+
+    bugs.forEach((bug: any) => {
+      const status = String(bug.workflowStatus || bug.status || "OPEN").toUpperCase();
+      const severity = String(bug.severity || "MEDIUM").toUpperCase();
+      const priority = String(bug.bugPriority || "P3_MEDIUM").toUpperCase();
+      const createdDay = new Date(bug.createdAt).toISOString().slice(0, 10);
+      const trendRow = trendByDay.get(createdDay) || { date: createdDay, created: 0, resolved: 0 };
+      trendRow.created += 1;
+      trendByDay.set(createdDay, trendRow);
+
+      bump(byStatus, status);
+      bump(bySeverity, severity);
+      bump(byPriority, priority);
+
+      const developerId = String(bug.assignedTo || "");
+      const developerName =
+        bug.assignee?.name || bug.assignee?.email || (developerId ? "Assigned Developer" : "Unassigned");
+      const developerKey = developerId || "unassigned";
+      const developerRow = byDeveloper.get(developerKey) || {
+        developerId: developerId || "unassigned",
+        developerName,
+        total: 0,
+      };
+      developerRow.total += 1;
+      byDeveloper.set(developerKey, developerRow);
+
+      if (!closedLikeStatuses.has(status)) {
+        const ageDays = Math.max(0, Math.floor((now - new Date(bug.createdAt).getTime()) / 86_400_000));
+        if (ageDays <= 3) agingBuckets["0-3"] += 1;
+        else if (ageDays <= 7) agingBuckets["4-7"] += 1;
+        else if (ageDays <= 14) agingBuckets["8-14"] += 1;
+        else agingBuckets["15+"] += 1;
+      } else {
+        const resolvedDay = new Date(bug.updatedAt).toISOString().slice(0, 10);
+        const resolvedTrend = trendByDay.get(resolvedDay) || { date: resolvedDay, created: 0, resolved: 0 };
+        resolvedTrend.resolved += 1;
+        trendByDay.set(resolvedDay, resolvedTrend);
+
+        const days = Math.max(
+          0,
+          Number(((new Date(bug.updatedAt).getTime() - new Date(bug.createdAt).getTime()) / 86_400_000).toFixed(2))
+        );
+        resolutionDays.push(days);
+      }
+    });
+
+    const sortedResolution = [...resolutionDays].sort((a, b) => a - b);
+    const averageResolutionDays =
+      resolutionDays.length > 0
+        ? Number((resolutionDays.reduce((sum, value) => sum + value, 0) / resolutionDays.length).toFixed(2))
+        : 0;
+    const medianResolutionDays =
+      sortedResolution.length === 0
+        ? 0
+        : sortedResolution.length % 2 === 1
+        ? sortedResolution[Math.floor(sortedResolution.length / 2)]
+        : Number(
+            (
+              (sortedResolution[sortedResolution.length / 2 - 1] +
+                sortedResolution[sortedResolution.length / 2]) /
+              2
+            ).toFixed(2)
+          );
+
+    return res.json({
+      totalBugs: bugs.length,
+      totalByStatus: Array.from(byStatus.entries())
+        .map(([status, total]) => ({ status, total }))
+        .sort((a, b) => b.total - a.total),
+      bugAging: agingBuckets,
+      bySeverity: Array.from(bySeverity.entries())
+        .map(([severity, total]) => ({ severity, total }))
+        .sort((a, b) => b.total - a.total),
+      byPriority: Array.from(byPriority.entries())
+        .map(([priority, total]) => ({ priority, total }))
+        .sort((a, b) => b.total - a.total),
+      byDeveloper: Array.from(byDeveloper.values()).sort((a, b) => b.total - a.total),
+      trendsOverTime: Array.from(trendByDay.values()).sort((a, b) => a.date.localeCompare(b.date)),
+      resolutionTime: {
+        resolvedCount: resolutionDays.length,
+        averageDays: averageResolutionDays,
+        medianDays: medianResolutionDays,
+        minDays: sortedResolution.length > 0 ? sortedResolution[0] : 0,
+        maxDays: sortedResolution.length > 0 ? sortedResolution[sortedResolution.length - 1] : 0,
+      },
+    });
+  }
+);
+
+router.get(
+  "/reports/developer-performance",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const developerIdFilter = asString(req.query.developerId);
+    const from = asString(req.query.from);
+    const to = asString(req.query.to);
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+    const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
+    const validTo = toDate && !Number.isNaN(toDate.getTime()) ? toDate : null;
+
+    const activeDevelopers = await prisma.user.findMany({
+      where: { role: Role.DEVELOPER, isActive: true },
+      select: { id: true, name: true, email: true },
+      orderBy: [{ name: "asc" }, { email: "asc" }],
+    });
+
+    const developerMap = new Map(
+      activeDevelopers.map((item) => [item.id, { id: item.id, name: item.name || item.email, email: item.email }])
+    );
+
+    let scopedDeveloperIds: string[] = [];
+    if (req.user!.role === Role.DEVELOPER) {
+      scopedDeveloperIds = [req.user!.userId];
+    } else if (developerIdFilter) {
+      scopedDeveloperIds = developerMap.has(developerIdFilter) ? [developerIdFilter] : [];
+    } else {
+      scopedDeveloperIds = activeDevelopers.map((item) => item.id);
+    }
+
+    if (scopedDeveloperIds.length === 0) {
+      return res.json({
+        period: { from: validFrom?.toISOString() || null, to: validTo?.toISOString() || null },
+        summary: {
+          developerCount: 0,
+          bugsAssigned: 0,
+          bugsResolved: 0,
+          avgResolutionDays: 0,
+          reopenRate: 0,
+        },
+        developers: [],
+        trend: [],
+      });
+    }
+
+    const where: Prisma.IssueWhereInput = {
+      assignedTo: { in: scopedDeveloperIds },
+      ...(validFrom || validTo
+        ? {
+            createdAt: {
+              ...(validFrom ? { gte: validFrom } : {}),
+              ...(validTo ? { lte: validTo } : {}),
+            },
+          }
+        : {}),
+    };
+
+    const issues = await prismaAny.issue.findMany({
+      where,
+      select: {
+        id: true,
+        assignedTo: true,
+        workflowStatus: true,
+        createdAt: true,
+        updatedAt: true,
+        fixNotes: true,
+        commitLink: true,
+        retestRequested: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+
+    const issueIds = issues.map((item: any) => item.id);
+    const transitions =
+      issueIds.length > 0
+        ? await prisma.auditLog.findMany({
+            where: {
+              action: { in: ["BUG_WORKFLOW_TRANSITION", "BUG_QUICK_STATUS_UPDATE"] },
+              entityType: "Issue",
+              entityId: { in: issueIds },
+            },
+            select: { entityId: true, metadata: true },
+          })
+        : [];
+
+    const reopenedIssueIds = new Set<string>();
+    transitions.forEach((log) => {
+      const meta = log.metadata as Record<string, unknown> | null;
+      const toStatus = asString(meta?.to || meta?.toStatus || meta?.status).toUpperCase();
+      if (toStatus === BUG_WORKFLOW_STATUS.REOPENED) {
+        reopenedIssueIds.add(log.entityId);
+      }
+    });
+
+    const resolvedStatuses: Set<BugWorkflowStatus> = new Set([
+      BUG_WORKFLOW_STATUS.FIXED,
+      BUG_WORKFLOW_STATUS.VERIFIED,
+      BUG_WORKFLOW_STATUS.CLOSED,
+      BUG_WORKFLOW_STATUS.WONT_FIX,
+      BUG_WORKFLOW_STATUS.DUPLICATE,
+    ]);
+
+    type DeveloperMetric = {
+      developerId: string;
+      developerName: string;
+      developerEmail: string;
+      bugsAssigned: number;
+      bugsResolved: number;
+      reopenedCount: number;
+      reopenRate: number;
+      avgResolutionDays: number;
+      fixQuality: {
+        firstPassFixRate: number;
+        fixNotesCoverage: number;
+        commitLinkCoverage: number;
+        retestRequestRate: number;
+      };
+    };
+
+    const byDeveloper = new Map<
+      string,
+      {
+        assigned: number;
+        resolved: number;
+        reopened: number;
+        resolutionDays: number[];
+        withFixNotes: number;
+        withCommitLink: number;
+        withRetestRequest: number;
+        firstPassFixed: number;
+      }
+    >();
+
+    const trendMap = new Map<string, { date: string; assigned: number; resolved: number }>();
+
+    issues.forEach((issue: any) => {
+      const developerId = String(issue.assignedTo || "");
+      if (!developerId) return;
+
+      const row =
+        byDeveloper.get(developerId) || {
+          assigned: 0,
+          resolved: 0,
+          reopened: 0,
+          resolutionDays: [] as number[],
+          withFixNotes: 0,
+          withCommitLink: 0,
+          withRetestRequest: 0,
+          firstPassFixed: 0,
+        };
+      row.assigned += 1;
+
+      const createdDay = new Date(issue.createdAt).toISOString().slice(0, 10);
+      const createdTrend = trendMap.get(createdDay) || { date: createdDay, assigned: 0, resolved: 0 };
+      createdTrend.assigned += 1;
+      trendMap.set(createdDay, createdTrend);
+
+      const status = parseBugWorkflowStatus(issue.workflowStatus);
+      const isResolved = status ? resolvedStatuses.has(status) : false;
+      const isReopened = reopenedIssueIds.has(issue.id);
+
+      if (isResolved) {
+        row.resolved += 1;
+        if (isReopened) {
+          row.reopened += 1;
+        } else {
+          row.firstPassFixed += 1;
+        }
+        if (asString(issue.fixNotes)) row.withFixNotes += 1;
+        if (asString(issue.commitLink)) row.withCommitLink += 1;
+        if (Boolean(issue.retestRequested)) row.withRetestRequest += 1;
+
+        const days = Math.max(
+          0,
+          Number(
+            (
+              (new Date(issue.updatedAt).getTime() - new Date(issue.createdAt).getTime()) /
+              86_400_000
+            ).toFixed(2)
+          )
+        );
+        row.resolutionDays.push(days);
+
+        const resolvedDay = new Date(issue.updatedAt).toISOString().slice(0, 10);
+        const resolvedTrend = trendMap.get(resolvedDay) || { date: resolvedDay, assigned: 0, resolved: 0 };
+        resolvedTrend.resolved += 1;
+        trendMap.set(resolvedDay, resolvedTrend);
+      }
+
+      byDeveloper.set(developerId, row);
+    });
+
+    const developers: DeveloperMetric[] = scopedDeveloperIds.map((developerId) => {
+      const person = developerMap.get(developerId);
+      const row =
+        byDeveloper.get(developerId) || {
+          assigned: 0,
+          resolved: 0,
+          reopened: 0,
+          resolutionDays: [] as number[],
+          withFixNotes: 0,
+          withCommitLink: 0,
+          withRetestRequest: 0,
+          firstPassFixed: 0,
+        };
+      const avgResolutionDays =
+        row.resolutionDays.length > 0
+          ? Number((row.resolutionDays.reduce((sum, v) => sum + v, 0) / row.resolutionDays.length).toFixed(2))
+          : 0;
+      const reopenRate = row.resolved > 0 ? Number(((row.reopened / row.resolved) * 100).toFixed(1)) : 0;
+      return {
+        developerId,
+        developerName: person?.name || person?.email || "Unknown Developer",
+        developerEmail: person?.email || "",
+        bugsAssigned: row.assigned,
+        bugsResolved: row.resolved,
+        reopenedCount: row.reopened,
+        reopenRate,
+        avgResolutionDays,
+        fixQuality: {
+          firstPassFixRate: row.resolved > 0 ? Number(((row.firstPassFixed / row.resolved) * 100).toFixed(1)) : 0,
+          fixNotesCoverage: row.resolved > 0 ? Number(((row.withFixNotes / row.resolved) * 100).toFixed(1)) : 0,
+          commitLinkCoverage:
+            row.resolved > 0 ? Number(((row.withCommitLink / row.resolved) * 100).toFixed(1)) : 0,
+          retestRequestRate:
+            row.resolved > 0 ? Number(((row.withRetestRequest / row.resolved) * 100).toFixed(1)) : 0,
+        },
+      };
+    });
+
+    const summary = {
+      developerCount: developers.length,
+      bugsAssigned: developers.reduce((sum, row) => sum + row.bugsAssigned, 0),
+      bugsResolved: developers.reduce((sum, row) => sum + row.bugsResolved, 0),
+      avgResolutionDays:
+        developers.reduce((sum, row) => sum + row.avgResolutionDays, 0) / Math.max(developers.length, 1),
+      reopenRate:
+        developers.reduce((sum, row) => sum + row.reopenedCount, 0) /
+        Math.max(developers.reduce((sum, row) => sum + row.bugsResolved, 0), 1),
+    };
+    const normalizedSummary = {
+      ...summary,
+      avgResolutionDays: Number(summary.avgResolutionDays.toFixed(2)),
+      reopenRate: Number((summary.reopenRate * 100).toFixed(1)),
+    };
+
+    const payload = {
+      period: { from: validFrom?.toISOString() || null, to: validTo?.toISOString() || null },
+      summary: normalizedSummary,
+      developers: developers.sort((a, b) => b.bugsAssigned - a.bugsAssigned),
+      trend: Array.from(trendMap.values()).sort((a, b) => a.date.localeCompare(b.date)),
+    };
+
+    if (String(req.query.export || "").toLowerCase() === "csv") {
+      const header =
+        "developerId,developerName,developerEmail,bugsAssigned,bugsResolved,avgResolutionDays,reopenedCount,reopenRate,firstPassFixRate,fixNotesCoverage,commitLinkCoverage,retestRequestRate";
+      const rows = payload.developers.map((row) =>
+        [
+          row.developerId,
+          row.developerName,
+          row.developerEmail,
+          row.bugsAssigned,
+          row.bugsResolved,
+          row.avgResolutionDays,
+          row.reopenedCount,
+          row.reopenRate,
+          row.fixQuality.firstPassFixRate,
+          row.fixQuality.fixNotesCoverage,
+          row.fixQuality.commitLinkCoverage,
+          row.fixQuality.retestRequestRate,
+        ]
+          .map((value) => `"${String(value).replace(/\"/g, "\"\"")}"`)
+          .join(",")
+      );
+      res.setHeader("Content-Type", "text/csv");
+      return res.send([header, ...rows].join("\n"));
+    }
+
+    return res.json(payload);
+  }
+);
+
 router.post(
   "/issues/from-executions/:executionId",
   authorizeRoles(Role.TESTER),
@@ -3739,7 +4808,7 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
   const mineOnly = String(req.query.mine || "") === "1";
   const scope = asString(req.query.scope).toLowerCase();
   const developerAllScope = req.user!.role === Role.DEVELOPER && scope === "all";
-  const statusFilter = asString(req.query.status).toUpperCase();
+  const statusFilter = parseBugWorkflowStatus(req.query.status);
   const priorityFilter = asString(req.query.priority).toUpperCase();
   const severityFilter = asString(req.query.severity).toUpperCase();
   const rows = await prismaAny.issue.findMany({
@@ -3747,19 +4816,19 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
       req.user!.role === Role.DEVELOPER && !developerAllScope
         ? {
             assignedTo: req.user!.userId,
-            ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
+            ...(statusFilter ? { workflowStatus: statusFilter } : {}),
             ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
             ...(severityFilter ? { severity: severityFilter as Severity } : {}),
           }
         : mineOnly
         ? {
             reportedBy: req.user!.userId,
-            ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
+            ...(statusFilter ? { workflowStatus: statusFilter } : {}),
             ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
             ...(severityFilter ? { severity: severityFilter as Severity } : {}),
           }
         : {
-            ...(statusFilter ? { workflowStatus: statusFilter as BugWorkflowStatus } : {}),
+            ...(statusFilter ? { workflowStatus: statusFilter } : {}),
             ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
             ...(severityFilter ? { severity: severityFilter as Severity } : {}),
           },
@@ -3933,12 +5002,13 @@ router.get("/developer/bugs", authorizeRoles(Role.DEVELOPER), async (req: AuthRe
   if (req.query.severity) query.severity = String(req.query.severity);
   if (req.query.status) query.status = String(req.query.status);
   if (req.query.sortBy) query.sortBy = String(req.query.sortBy);
+  const statusFilter = parseBugWorkflowStatus(query.status);
   const rows = await prismaAny.issue.findMany({
     where: {
       assignedTo: req.user!.userId,
       ...(query.priority ? { bugPriority: query.priority as BugPriority } : {}),
       ...(query.severity ? { severity: query.severity as Severity } : {}),
-      ...(query.status ? { workflowStatus: query.status as BugWorkflowStatus } : {}),
+      ...(statusFilter ? { workflowStatus: statusFilter } : {}),
     },
     orderBy: { updatedAt: "desc" },
     include: { comments: true, attachments: true },
@@ -4280,6 +5350,135 @@ router.post(
   }
 );
 
+type DashboardWidgetSize = "S" | "M" | "L";
+type DashboardWidgetLayoutItem = {
+  id: string;
+  visible: boolean;
+  order: number;
+  size: DashboardWidgetSize;
+};
+
+const DASHBOARD_WIDGET_LAYOUTS_KEY = "DASHBOARD_WIDGET_LAYOUTS_V1";
+const DASHBOARD_WIDGETS_BY_ROLE: Record<Role, string[]> = {
+  [Role.TESTER]: [
+    "pending_tests",
+    "recent_failures",
+    "execution_trend",
+    "status_breakdown",
+    "quick_actions",
+  ],
+  [Role.DEVELOPER]: [
+    "assigned_bugs_counter",
+    "critical_bugs_counter",
+    "bug_aging_chart",
+    "bug_status_chart",
+    "recent_activity",
+  ],
+  [Role.ADMIN]: [
+    "total_users",
+    "active_projects",
+    "total_test_cases",
+    "system_activity_chart",
+    "recent_audit_logs",
+  ],
+};
+
+const toDefaultDashboardLayout = (role: Role): DashboardWidgetLayoutItem[] =>
+  (DASHBOARD_WIDGETS_BY_ROLE[role] || []).map((id, index) => ({
+    id,
+    visible: true,
+    order: index,
+    size: "M",
+  }));
+
+const sanitizeDashboardLayout = (role: Role, raw: unknown): DashboardWidgetLayoutItem[] => {
+  const allowed = new Set(DASHBOARD_WIDGETS_BY_ROLE[role] || []);
+  if (!Array.isArray(raw)) return toDefaultDashboardLayout(role);
+  const rows = raw
+    .filter((item) => item && typeof item === "object")
+    .map((item: any, index) => {
+      const id = asString(item.id);
+      if (!allowed.has(id)) return null;
+      const size = asString(item.size).toUpperCase();
+      const normalizedSize: DashboardWidgetSize = size === "S" || size === "L" ? (size as DashboardWidgetSize) : "M";
+      return {
+        id,
+        visible: item.visible !== false,
+        order: Number.isFinite(Number(item.order)) ? Number(item.order) : index,
+        size: normalizedSize,
+      };
+    })
+    .filter(Boolean) as DashboardWidgetLayoutItem[];
+
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  (DASHBOARD_WIDGETS_BY_ROLE[role] || []).forEach((id) => {
+    if (!byId.has(id)) {
+      byId.set(id, {
+        id,
+        visible: true,
+        order: byId.size,
+        size: "M",
+      });
+    }
+  });
+
+  return Array.from(byId.values())
+    .sort((a, b) => a.order - b.order)
+    .map((row, idx) => ({ ...row, order: idx }));
+};
+
+const loadDashboardWidgetLayouts = async (): Promise<Record<string, DashboardWidgetLayoutItem[]>> => {
+  const config = await prisma.systemConfig.findUnique({
+    where: { key: DASHBOARD_WIDGET_LAYOUTS_KEY },
+    select: { value: true },
+  });
+  if (!config?.value) return {};
+  try {
+    const parsed = JSON.parse(config.value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, DashboardWidgetLayoutItem[]>)
+      : {};
+  } catch {
+    return {};
+  }
+};
+
+router.get(
+  "/dashboard/widgets",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const layoutsByUser = await loadDashboardWidgetLayouts();
+    const role = req.user!.role as Role;
+    const persisted = layoutsByUser[req.user!.userId];
+    const widgets = sanitizeDashboardLayout(role, persisted);
+    return res.json({ widgets });
+  }
+);
+
+router.put(
+  "/dashboard/widgets",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const role = req.user!.role as Role;
+    const widgets = sanitizeDashboardLayout(role, req.body?.widgets);
+    const layoutsByUser = await loadDashboardWidgetLayouts();
+    layoutsByUser[req.user!.userId] = widgets;
+    await prisma.systemConfig.upsert({
+      where: { key: DASHBOARD_WIDGET_LAYOUTS_KEY },
+      create: {
+        key: DASHBOARD_WIDGET_LAYOUTS_KEY,
+        value: JSON.stringify(layoutsByUser),
+        updatedBy: req.user!.userId,
+      },
+      update: {
+        value: JSON.stringify(layoutsByUser),
+        updatedBy: req.user!.userId,
+      },
+    });
+    return res.json({ widgets });
+  }
+);
+
 router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
   const where = req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId };
   const [assignedCount, fixedCount, openCount] = await Promise.all([
@@ -4317,6 +5516,13 @@ router.get(
   "/admin/role-permissions/me",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
+    const withMandatoryPermissions = (role: "ADMIN" | "TESTER" | "DEVELOPER", permissions: string[]): string[] => {
+      const next = Array.from(new Set(permissions.filter(Boolean)));
+      if (!next.includes("Reports")) next.push("Reports");
+      if (role === "ADMIN" && !next.includes("All Bugs")) next.push("All Bugs");
+      return next;
+    };
+
     const defaults: Record<string, string[]> = {
       ADMIN: [
         "Manage Users",
@@ -4324,9 +5530,12 @@ router.get(
         "Manage Roles",
         "View Audit Logs",
         "Backup Management",
+        "Reports",
+        "All Bugs",
       ],
       TESTER: ["Create Test Cases", "Execute Tests", "Bug Management", "Reports"],
       DEVELOPER: [
+        "Reports",
         "My Assigned Bugs",
         "All Bugs",
         "Test Reports",
@@ -4345,15 +5554,24 @@ router.get(
       try {
         const parsed = JSON.parse(config.value) as Record<string, unknown>;
         rolePermissions = {
-          ADMIN: Array.isArray(parsed?.ADMIN)
+          ADMIN: withMandatoryPermissions(
+            "ADMIN",
+            Array.isArray(parsed?.ADMIN)
             ? (parsed.ADMIN as unknown[]).map((x) => asString(x)).filter(Boolean)
-            : defaults.ADMIN,
-          TESTER: Array.isArray(parsed?.TESTER)
+            : defaults.ADMIN
+          ),
+          TESTER: withMandatoryPermissions(
+            "TESTER",
+            Array.isArray(parsed?.TESTER)
             ? (parsed.TESTER as unknown[]).map((x) => asString(x)).filter(Boolean)
-            : defaults.TESTER,
-          DEVELOPER: Array.isArray(parsed?.DEVELOPER)
+            : defaults.TESTER
+          ),
+          DEVELOPER: withMandatoryPermissions(
+            "DEVELOPER",
+            Array.isArray(parsed?.DEVELOPER)
             ? (parsed.DEVELOPER as unknown[]).map((x) => asString(x)).filter(Boolean)
-            : defaults.DEVELOPER,
+            : defaults.DEVELOPER
+          ),
         };
       } catch {
         rolePermissions = defaults;
@@ -4534,5 +5752,32 @@ router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthReques
   await writeAuditLog(req.user!.userId, "ADMIN_TRIGGER_BACKUP", "BackupJob", completed.id);
   return res.status(201).json(completed);
 });
+
+let reportSchedulerBusy = false;
+setInterval(async () => {
+  if (reportSchedulerBusy) return;
+  reportSchedulerBusy = true;
+  try {
+    const schedules = await loadReportSchedules();
+    const now = new Date();
+    let changed = false;
+    for (const schedule of schedules) {
+      if (!schedule.active || !schedule.nextRunAt) continue;
+      const dueAt = new Date(schedule.nextRunAt);
+      if (Number.isNaN(dueAt.getTime()) || dueAt.getTime() > now.getTime()) continue;
+      await runScheduledReport(schedule);
+      schedule.lastSentAt = now.toISOString();
+      schedule.nextRunAt = computeNextRunAt(schedule);
+      changed = true;
+    }
+    if (changed) {
+      await saveReportSchedules(schedules);
+    }
+  } catch (error) {
+    console.error("REPORT_SCHEDULER_ERROR", error);
+  } finally {
+    reportSchedulerBusy = false;
+  }
+}, 60 * 1000);
 
 export default router;

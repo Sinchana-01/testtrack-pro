@@ -75,6 +75,8 @@ import ExecuteTestsSection from "./features/execution/ExecuteTestsSection";
 import SuiteManagementSection from "./features/suites/SuiteManagementSection";
 import BugDetailsModal from "./features/bugs/BugDetailsModal";
 import DeveloperWorkspacePanel from "./features/developer/DeveloperWorkspacePanel";
+import ReportsHub from "./features/reports/ReportsHub";
+import DashboardWidgetsBoard from "./features/dashboard/DashboardWidgetsBoard";
 import {
   getDeveloperAssignedExecutionReports,
   getDeveloperLinkedCommitBugs,
@@ -334,6 +336,7 @@ function App() {
       "Manage Roles",
       "View Audit Logs",
       "Backup Management",
+      "Reports",
     ],
     TESTER: [
       "Create Test Cases",
@@ -342,6 +345,7 @@ function App() {
       "Reports",
     ],
     DEVELOPER: [
+      "Reports",
       "My Assigned Bugs",
       "All Bugs",
       "Test Reports",
@@ -364,6 +368,7 @@ function App() {
   const canSeeSelectionControls = hasPermission("Create Test Cases");
   const canExecuteTests = hasPermission("Execute Tests");
   const canManageTestRuns = hasPermission("Create Test Cases") || hasPermission("Execute Tests");
+  const canAccessReports = hasPermission("Reports");
   const canViewBugs =
     hasPermission("Bug Management") || hasPermission("My Assigned Bugs") || hasPermission("All Bugs");
   const canCreateBugs = hasPermission("Bug Management");
@@ -386,12 +391,12 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     test_runs: "test_runs",
     execute_tests: "execute_tests",
     bug_management: "bug_management",
-    reports: "execute_tests",
+    reports: "reports",
     my_assigned_bugs: "bug_management",
     all_bugs: "bug_management",
-    test_reports: "test_reports",
-    performance_report: "performance_report",
-    linked_commits: "linked_commits",
+    test_reports: "reports",
+    performance_report: "reports",
+    linked_commits: "reports",
     user_management: "admin_workspace",
     role_management: "admin_workspace",
     project_management: "admin_workspace",
@@ -445,6 +450,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   const showTestRuns = canManageTestRuns && normalizedFeature === "test_runs";
   const showSuiteManagement = canManageSuites && normalizedFeature === "suite_management";
   const showExecute = canExecuteTests && normalizedFeature === "execute_tests";
+  const showReports = normalizedFeature === "reports" || activeMenuKey === "reports";
   const showBugs =
     canViewBugs &&
     (normalizedFeature === "bug_management" || (isDeveloper && normalizedFeature === "developer_workspace"));
@@ -466,9 +472,6 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       : `${selectedIds.length} test cases selected`;
   const showRolePanel = normalizedFeature === "developer_workspace" || normalizedFeature === "admin_workspace";
   const showDeveloperWorkspacePanel = isDeveloper && normalizedFeature === "developer_workspace";
-  const showDeveloperPerformancePanel = isDeveloper && normalizedFeature === "performance_report";
-  const showDeveloperLinkedCommitsPanel = isDeveloper && normalizedFeature === "linked_commits";
-  const showDeveloperTestReportsPanel = isDeveloper && normalizedFeature === "test_reports";
   const selectedExecutionRun = testRuns.find((run) => run.id === executionRunId) || null;
   const executionRunCaseIds = new Set(
     (selectedExecutionRun?.testCases || [])
@@ -528,6 +531,12 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     .slice(0, 6);
   const developerAssignedExecutionReports = getDeveloperAssignedExecutionReports(executionReports, currentUserId);
   const developerLinkedCommitBugs = getDeveloperLinkedCommitBugs(developerDashboardBugRows);
+  const reportAssignedExecutionReports =
+    roleName === "DEVELOPER" ? developerAssignedExecutionReports : executionReports;
+  const reportLinkedCommitBugs =
+    roleName === "DEVELOPER"
+      ? developerLinkedCommitBugs
+      : bugs.filter((item) => String(item?.commitLink || "").trim().length > 0);
   const failedExecutions = executionReports.filter((item) => item.result === "FAILED");
   const testerPendingTests = testCases
     .filter((item) => item.status === "DRAFT" || item.status === "READY_FOR_REVIEW")
@@ -838,11 +847,11 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       ] = await Promise.allSettled([
         shouldFetchTestCases ? getTestCasesApi() : Promise.resolve([]),
         canUseTemplates ? listTemplatesApi() : Promise.resolve([]),
-        canManageTestRuns ? listTestRunsApi() : Promise.resolve([]),
+        canManageTestRuns || canAccessReports ? listTestRunsApi() : Promise.resolve([]),
         canManageSuites
           ? listSuitesApi(showArchivedSuites ? { includeArchived: "true" } : undefined)
           : Promise.resolve([]),
-        canExecuteTests ? listExecutionReportsApi() : Promise.resolve([]),
+        canExecuteTests || canAccessReports ? listExecutionReportsApi() : Promise.resolve([]),
         canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
       ]);
 
@@ -2375,6 +2384,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         mappedFeature === "suite_management" ||
         mappedFeature === "test_runs" ||
         mappedFeature === "execute_tests" ||
+        mappedFeature === "reports" ||
         mappedFeature === "bug_management" ||
         mappedFeature === "test_cases" ||
         mappedFeature === "developer_workspace" ||
@@ -2537,6 +2547,17 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
           >
             {activeFeature === "none" && (
               <>
+                <DashboardWidgetsBoard
+                  roleName={roleName}
+                  testCases={testCases}
+                  executionReports={executionReports}
+                  bugs={bugs}
+                  adminUsers={adminUsers}
+                  adminProjects={adminProjects}
+                  adminAuditLogs={adminAuditLogs}
+                  currentUserId={currentUserId}
+                  onNavigate={handleDashboardNavSelect}
+                />
                 {isTester && (
                   <>
                     <section className="panel">
@@ -2729,48 +2750,6 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               {showDeveloperWorkspacePanel && (
                 <DeveloperWorkspacePanel
                   mode="workspace"
-                  assignedBugCount={developerAssignedBugCount}
-                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
-                  needsVerificationCount={developerBugStatusCounts.FIXED}
-                  assignedBugs={developerDashboardBugRows}
-                  assignedExecutionReports={developerAssignedExecutionReports}
-                  linkedCommitBugs={developerLinkedCommitBugs}
-                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
-                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
-                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
-                />
-              )}
-              {showDeveloperPerformancePanel && (
-                <DeveloperWorkspacePanel
-                  mode="performance_report"
-                  assignedBugCount={developerAssignedBugCount}
-                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
-                  needsVerificationCount={developerBugStatusCounts.FIXED}
-                  assignedBugs={developerDashboardBugRows}
-                  assignedExecutionReports={developerAssignedExecutionReports}
-                  linkedCommitBugs={developerLinkedCommitBugs}
-                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
-                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
-                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
-                />
-              )}
-              {showDeveloperLinkedCommitsPanel && (
-                <DeveloperWorkspacePanel
-                  mode="linked_commits"
-                  assignedBugCount={developerAssignedBugCount}
-                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
-                  needsVerificationCount={developerBugStatusCounts.FIXED}
-                  assignedBugs={developerDashboardBugRows}
-                  assignedExecutionReports={developerAssignedExecutionReports}
-                  linkedCommitBugs={developerLinkedCommitBugs}
-                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
-                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
-                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
-                />
-              )}
-              {showDeveloperTestReportsPanel && (
-                <DeveloperWorkspacePanel
-                  mode="test_reports"
                   assignedBugCount={developerAssignedBugCount}
                   inProgressCount={developerBugStatusCounts.IN_PROGRESS}
                   needsVerificationCount={developerBugStatusCounts.FIXED}
@@ -4128,6 +4107,17 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     await loadTestCaseData();
                     await loadBugDetails(issue.id);
                   }}
+                />
+              )}
+              {showReports && (
+                <ReportsHub
+                  roleName={roleName}
+                  rolePermissions={currentRolePermissions}
+                  testRuns={testRuns}
+                  executionReports={executionReports}
+                  bugs={bugs}
+                  assignedExecutionReports={reportAssignedExecutionReports}
+                  linkedCommitBugs={reportLinkedCommitBugs}
                 />
               )}
 

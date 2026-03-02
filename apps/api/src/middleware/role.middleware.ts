@@ -11,15 +11,23 @@ const DEFAULT_ROLE_PERMISSIONS: RolePermissionMap = {
     "Manage Roles",
     "View Audit Logs",
     "Backup Management",
+    "Reports",
   ],
   TESTER: ["Create Test Cases", "Execute Tests", "Bug Management", "Reports"],
   DEVELOPER: [
+    "Reports",
     "My Assigned Bugs",
     "All Bugs",
     "Test Reports",
     "Performance Report",
     "Linked Commits",
   ],
+};
+
+const MANDATORY_ROLE_PERMISSIONS: RolePermissionMap = {
+  ADMIN: ["Reports", "All Bugs"],
+  TESTER: ["Reports"],
+  DEVELOPER: ["Reports"],
 };
 
 let cachedPermissions: RolePermissionMap | null = null;
@@ -87,6 +95,12 @@ const sanitizeRolePermissions = (raw: unknown): RolePermissionMap => {
         .map((item) => (typeof item === "string" ? item.trim() : ""))
         .filter(Boolean);
     }
+    const mandatory = MANDATORY_ROLE_PERMISSIONS[role] || [];
+    mandatory.forEach((permission) => {
+      if (!output[role].includes(permission)) {
+        output[role].push(permission);
+      }
+    });
   });
   return output;
 };

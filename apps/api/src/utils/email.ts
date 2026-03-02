@@ -51,3 +51,12 @@ export const sendResetEmail = async (to: string, link: string) => {
     html: `<a href="${link}">Reset Password</a>`,
   });
 };
+
+export const sendGenericEmail = async (to: string | string[], subject: string, html: string) => {
+  await transporter.sendMail({
+    from: `"TestTrack Pro" <${process.env.EMAIL_USER}>`,
+    to,
+    subject,
+    html,
+  });
+};
