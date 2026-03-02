@@ -191,6 +191,20 @@ export async function getTestCasesApi() {
   return authJson("/testcases");
 }
 
+export async function getDashboardWidgetsLayoutApi() {
+  return authJson("/dashboard/widgets");
+}
+
+export async function saveDashboardWidgetsLayoutApi(payload: {
+  widgets: Array<{ id: string; visible: boolean; order: number; size: "S" | "M" | "L" }>;
+}) {
+  return authJson("/dashboard/widgets", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function createTestCaseApi(payload: {
   title: string;
   description: string;
@@ -346,6 +360,126 @@ export async function listExecutionReportsApi() {
   return authJson("/reports/test-executions");
 }
 
+export async function getTestExecutionReportSummaryApi(params?: {
+  testRunId?: string;
+  from?: string;
+  to?: string;
+  export?: "csv" | "excel" | "pdf";
+}) {
+  const query = params
+    ? `?${new URLSearchParams(
+        Object.entries(params).filter(([, v]) => String(v || "").trim().length > 0)
+      ).toString()}`
+    : "";
+  return authJson(`/reports/test-executions/summary${query}`);
+}
+
+export async function getBugReportSummaryApi() {
+  return authJson("/reports/bugs/summary");
+}
+
+export async function getTesterPerformanceReportApi(params?: {
+  testerId?: string;
+  from?: string;
+  to?: string;
+  export?: "csv" | "excel" | "pdf";
+}) {
+  const query = params
+    ? `?${new URLSearchParams(
+        Object.entries(params).filter(([, v]) => String(v || "").trim().length > 0)
+      ).toString()}`
+    : "";
+  return authJson(`/reports/tester-performance${query}`);
+}
+
+export async function exportTesterPerformanceReportApi(
+  format: "csv" | "excel" | "pdf",
+  params?: { testerId?: string; from?: string; to?: string }
+) {
+  const query = new URLSearchParams(
+    Object.entries({ ...(params || {}), export: format }).filter(([, v]) => String(v || "").trim().length > 0)
+  ).toString();
+  const res = await authFetch(`${TEST_API_URL}/reports/tester-performance?${query}`);
+  if (!res.ok) {
+    const body = await parseJson(res);
+    throw new Error(body?.message || "Failed to export tester performance report");
+  }
+  return res.blob();
+}
+
+export async function exportTestExecutionReportApi(
+  format: "csv" | "excel" | "pdf",
+  params?: { testRunId?: string; from?: string; to?: string }
+) {
+  const query = new URLSearchParams(
+    Object.entries({ ...(params || {}), export: format }).filter(([, v]) => String(v || "").trim().length > 0)
+  ).toString();
+  const res = await authFetch(`${TEST_API_URL}/reports/test-executions/summary?${query}`);
+  if (!res.ok) {
+    const body = await parseJson(res);
+    throw new Error(body?.message || "Failed to export test execution report");
+  }
+  return res.blob();
+}
+
+export async function listReportSchedulesApi() {
+  return authJson("/reports/schedules");
+}
+
+export async function createReportScheduleApi(payload: {
+  reportType: "TEST_EXECUTION_SUMMARY" | "TESTER_PERFORMANCE";
+  format: "PDF" | "EXCEL" | "CSV";
+  recipients: string[];
+  frequency: "DAILY" | "WEEKLY";
+  weekday: number;
+  hour: number;
+  minute: number;
+  active?: boolean;
+}) {
+  return authJson("/reports/schedules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function sendReportScheduleNowApi(id: string) {
+  return authJson(`/reports/schedules/${id}/send-now`, { method: "POST" });
+}
+
+export async function deleteReportScheduleApi(id: string) {
+  return authJson(`/reports/schedules/${id}`, { method: "DELETE" });
+}
+
+export async function getDeveloperPerformanceReportApi(params?: {
+  developerId?: string;
+  from?: string;
+  to?: string;
+}) {
+  const query = params
+    ? `?${new URLSearchParams(
+        Object.entries(params).filter(([, v]) => String(v || "").trim().length > 0)
+      ).toString()}`
+    : "";
+  return authJson(`/reports/developer-performance${query}`);
+}
+
+export async function exportDeveloperPerformanceReportCsvApi(params?: {
+  developerId?: string;
+  from?: string;
+  to?: string;
+}) {
+  const queryParams = new URLSearchParams(
+    Object.entries({ ...(params || {}), export: "csv" }).filter(([, v]) => String(v || "").trim().length > 0)
+  ).toString();
+  const res = await authFetch(`${TEST_API_URL}/reports/developer-performance?${queryParams}`);
+  if (!res.ok) {
+    const payload = await parseJson(res);
+    throw new Error(payload?.message || "Failed to export developer performance report");
+  }
+  return res.text();
+}
+
 export async function startExecutionTimerApi(executionId: string) {
   return authJson(`/executions/${executionId}/timer/start`, { method: "POST" });
 }
@@ -465,6 +599,66 @@ export async function listDeveloperBugsApi(params?: Record<string, string>) {
     ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
     : "";
   return authJson(`/developer/bugs${query}`);
+}
+
+export async function listDeveloperAssignedIssuesApi() {
+  return authJson("/developer/issues/assigned");
+}
+
+export async function getDeveloperDashboardApi() {
+  return authJson("/developer/dashboard");
+}
+
+export async function getDeveloperReportsApi() {
+  return authJson("/developer/reports");
+}
+
+export async function updateDeveloperIssueStatusApi(id: string, status: string) {
+  return authJson(`/issues/${id}/status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function updateDeveloperFixNotesApi(id: string, fixNotes: string) {
+  return authJson(`/issues/${id}/fix-notes`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fixNotes }),
+  });
+}
+
+export async function linkDeveloperIssueCommitApi(id: string, commitLink: string) {
+  return authJson(`/issues/${id}/link-commit`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ commitLink }),
+  });
+}
+
+export async function requestDeveloperIssueRetestApi(id: string) {
+  return authJson(`/issues/${id}/request-retest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+export async function createDeveloperIssueCommentApi(id: string, comment: string) {
+  return authJson(`/issues/${id}/comments`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ comment }),
+  });
+}
+
+export async function exportDeveloperReportsCsvApi() {
+  const res = await authFetch(`${TEST_API_URL}/developer/reports/export`);
+  if (!res.ok) {
+    const payload = await parseJson(res);
+    throw new Error(payload?.message || "Failed to export developer report");
+  }
+  return res.text();
 }
 
 export async function quickUpdateDeveloperBugStatusApi(id: string, status: string) {
