@@ -73,6 +73,12 @@ import DashboardLayout from "./components/layout/DashboardLayout";
 import TestRunManagementSection from "./features/test-runs/TestRunManagementSection";
 import ExecuteTestsSection from "./features/execution/ExecuteTestsSection";
 import SuiteManagementSection from "./features/suites/SuiteManagementSection";
+import BugDetailsModal from "./features/bugs/BugDetailsModal";
+import DeveloperWorkspacePanel from "./features/developer/DeveloperWorkspacePanel";
+import {
+  getDeveloperAssignedExecutionReports,
+  getDeveloperLinkedCommitBugs,
+} from "./features/developer/developerWorkspace.utils";
 import { buildNavFromPermissions, permissionCatalog } from "./config/roleNav";
 import "./App.css";
 
@@ -253,6 +259,7 @@ function App() {
   const [quickBugSeverity, setQuickBugSeverity] = useState("");
   const [bugs, setBugs] = useState<any[]>([]);
   const [selectedBugId, setSelectedBugId] = useState("");
+  const [bugModalOpen, setBugModalOpen] = useState(false);
   const [selectedBug, setSelectedBug] = useState<any>(null);
   const [bugComments, setBugComments] = useState<any[]>([]);
   const [bugCommentThreads, setBugCommentThreads] = useState<any[]>([]);
@@ -382,9 +389,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     reports: "execute_tests",
     my_assigned_bugs: "bug_management",
     all_bugs: "bug_management",
-    test_reports: "execute_tests",
-    performance_report: "developer_workspace",
-    linked_commits: "developer_workspace",
+    test_reports: "test_reports",
+    performance_report: "performance_report",
+    linked_commits: "linked_commits",
     user_management: "admin_workspace",
     role_management: "admin_workspace",
     project_management: "admin_workspace",
@@ -458,6 +465,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       ? "1 test case selected"
       : `${selectedIds.length} test cases selected`;
   const showRolePanel = normalizedFeature === "developer_workspace" || normalizedFeature === "admin_workspace";
+  const showDeveloperWorkspacePanel = isDeveloper && normalizedFeature === "developer_workspace";
+  const showDeveloperPerformancePanel = isDeveloper && normalizedFeature === "performance_report";
+  const showDeveloperLinkedCommitsPanel = isDeveloper && normalizedFeature === "linked_commits";
+  const showDeveloperTestReportsPanel = isDeveloper && normalizedFeature === "test_reports";
   const selectedExecutionRun = testRuns.find((run) => run.id === executionRunId) || null;
   const executionRunCaseIds = new Set(
     (selectedExecutionRun?.testCases || [])
@@ -498,9 +509,25 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         .join(" ");
       return searchableText.includes(query);
     });
+  const developerDashboardBugRows = bugs.filter((item) => {
+    const assigneeId = String(item?.assignedTo || item?.assignee?.id || "");
+    return !!currentUserId && assigneeId === currentUserId;
+  });
   const assignedBugCount = bugRowsForDisplay.length;
   const p1UrgentCount = bugRowsForDisplay.filter((item) => item.priority === "P1_URGENT").length;
   const criticalBugCount = bugRowsForDisplay.filter((item) => item.severity === "CRITICAL").length;
+  const developerAssignedBugCount = developerDashboardBugRows.length;
+  const developerP1UrgentCount = developerDashboardBugRows.filter((item) => item.priority === "P1_URGENT").length;
+  const developerCriticalBugCount = developerDashboardBugRows.filter((item) => item.severity === "CRITICAL").length;
+  const developerRecentBugs = [...developerDashboardBugRows]
+    .sort((a, b) => {
+      const aTime = new Date(a.updatedAt || a.createdAt || 0).getTime();
+      const bTime = new Date(b.updatedAt || b.createdAt || 0).getTime();
+      return bTime - aTime;
+    })
+    .slice(0, 6);
+  const developerAssignedExecutionReports = getDeveloperAssignedExecutionReports(executionReports, currentUserId);
+  const developerLinkedCommitBugs = getDeveloperLinkedCommitBugs(developerDashboardBugRows);
   const failedExecutions = executionReports.filter((item) => item.result === "FAILED");
   const testerPendingTests = testCases
     .filter((item) => item.status === "DRAFT" || item.status === "READY_FOR_REVIEW")
@@ -535,6 +562,23 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     return base;
   })();
   const maxTrendCount = Math.max(...trendBuckets.map((b) => b.count), 1);
+  const developerBugTrendBuckets = (() => {
+    const base = Array.from({ length: 7 }, (_, idx) => {
+      const d = new Date();
+      d.setDate(d.getDate() - (6 - idx));
+      const key = d.toISOString().slice(0, 10);
+      return { key, label: d.toLocaleDateString(undefined, { weekday: "short" }), count: 0 };
+    });
+    developerDashboardBugRows.forEach((item) => {
+      const dateValue = item.updatedAt || item.createdAt;
+      if (!dateValue) return;
+      const key = new Date(dateValue).toISOString().slice(0, 10);
+      const found = base.find((row) => row.key === key);
+      if (found) found.count += 1;
+    });
+    return base;
+  })();
+  const developerBugMaxTrendCount = Math.max(...developerBugTrendBuckets.map((b) => b.count), 1);
   const bugStatusCounts = {
     NEW: bugRowsForDisplay.filter((b) => b.workflowStatus === "NEW").length,
     OPEN: bugRowsForDisplay.filter((b) => b.workflowStatus === "OPEN").length,
@@ -551,6 +595,23 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     #16a34a ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS) / bugStatusTotal) * 360}deg ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED) / bugStatusTotal) * 360}deg,
     #0891b2 ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED) / bugStatusTotal) * 360}deg ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED + bugStatusCounts.VERIFIED) / bugStatusTotal) * 360}deg,
     #64748b ${((bugStatusCounts.NEW + bugStatusCounts.OPEN + bugStatusCounts.IN_PROGRESS + bugStatusCounts.FIXED + bugStatusCounts.VERIFIED) / bugStatusTotal) * 360}deg 360deg
+  )`;
+  const developerBugStatusCounts = {
+    NEW: developerDashboardBugRows.filter((b) => b.workflowStatus === "NEW").length,
+    OPEN: developerDashboardBugRows.filter((b) => b.workflowStatus === "OPEN").length,
+    IN_PROGRESS: developerDashboardBugRows.filter((b) => b.workflowStatus === "IN_PROGRESS").length,
+    FIXED: developerDashboardBugRows.filter((b) => b.workflowStatus === "FIXED").length,
+    VERIFIED: developerDashboardBugRows.filter((b) => b.workflowStatus === "VERIFIED").length,
+    CLOSED: developerDashboardBugRows.filter((b) => b.workflowStatus === "CLOSED").length,
+  };
+  const developerBugStatusTotal = Object.values(developerBugStatusCounts).reduce((acc, n) => acc + n, 0) || 1;
+  const developerBugStatusPie = `conic-gradient(
+    #2563eb 0deg ${(developerBugStatusCounts.NEW / developerBugStatusTotal) * 360}deg,
+    #7c3aed ${(developerBugStatusCounts.NEW / developerBugStatusTotal) * 360}deg ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN) / developerBugStatusTotal) * 360}deg,
+    #d97706 ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN) / developerBugStatusTotal) * 360}deg ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN + developerBugStatusCounts.IN_PROGRESS) / developerBugStatusTotal) * 360}deg,
+    #16a34a ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN + developerBugStatusCounts.IN_PROGRESS) / developerBugStatusTotal) * 360}deg ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN + developerBugStatusCounts.IN_PROGRESS + developerBugStatusCounts.FIXED) / developerBugStatusTotal) * 360}deg,
+    #0891b2 ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN + developerBugStatusCounts.IN_PROGRESS + developerBugStatusCounts.FIXED) / developerBugStatusTotal) * 360}deg ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN + developerBugStatusCounts.IN_PROGRESS + developerBugStatusCounts.FIXED + developerBugStatusCounts.VERIFIED) / developerBugStatusTotal) * 360}deg,
+    #64748b ${((developerBugStatusCounts.NEW + developerBugStatusCounts.OPEN + developerBugStatusCounts.IN_PROGRESS + developerBugStatusCounts.FIXED + developerBugStatusCounts.VERIFIED) / developerBugStatusTotal) * 360}deg 360deg
   )`;
 
   const parseSteps = (raw: string): unknown => {
@@ -761,6 +822,12 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         severity: bugFilterSeverity,
         sortBy: bugSortBy,
       };
+      if (!isDeveloper && bugViewMode === "mine") {
+        bugParams.mine = "1";
+      }
+      if (isDeveloper && (activeMenuKey === "all_bugs" || bugViewMode === "all")) {
+        bugParams.scope = "all";
+      }
       const [
         caseRowsResult,
         templateRowsResult,
@@ -833,6 +900,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         if (!prev?.id) return prev;
         return bugList.find((item) => item.id === prev.id) || null;
       });
+      if (selectedBugId && !bugList.some((item) => item.id === selectedBugId)) {
+        setSelectedBugId("");
+      }
     } finally {
       setIsRefreshing(false);
     }
@@ -845,10 +915,92 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       setBugCommentThreads([]);
       return;
     }
-    const [bug, commentsPayload] = await Promise.all([getBugApi(bugId), listBugCommentsApi(bugId)]);
+    const bugScope =
+      isDeveloper && (activeMenuKey === "all_bugs" || bugViewMode === "all") ? { scope: "all" } : undefined;
+    const [bug, commentsPayload] = await Promise.all([getBugApi(bugId, bugScope), listBugCommentsApi(bugId)]);
     setSelectedBug(bug || null);
     setBugComments(Array.isArray(commentsPayload?.comments) ? commentsPayload.comments : []);
     setBugCommentThreads(Array.isArray(commentsPayload?.threaded) ? commentsPayload.threaded : []);
+  };
+
+  const toggleBugDetails = async (bugId: string) => {
+    if (!bugId) return;
+    if (selectedBugId === bugId) {
+      setSelectedBugId("");
+      setBugModalOpen(false);
+      setSelectedBug(null);
+      setBugComments([]);
+      setBugCommentThreads([]);
+      return;
+    }
+    setSelectedBugId(bugId);
+    try {
+      await loadBugDetails(bugId);
+      setBugModalOpen(true);
+    } catch (error: any) {
+      setSelectedBugId("");
+      setBugModalOpen(false);
+      alert(error?.message || "Failed to open bug details");
+    }
+  };
+
+  const refreshSelectedBugDetails = async () => {
+    if (!selectedBug?.id) return;
+    await loadBugDetails(selectedBug.id);
+  };
+
+  const applyBugTransition = async () => {
+    if (!selectedBug?.id) return;
+    const current = String(selectedBug.workflowStatus || "OPEN").toUpperCase();
+    const target = String(bugTransitionToStatus || "OPEN").toUpperCase();
+    if (target === current) {
+      alert(`Bug is already in ${current} status`);
+      return;
+    }
+    if (isDeveloper) {
+      await quickUpdateDeveloperBugStatusApi(selectedBug.id, bugTransitionToStatus);
+    } else {
+      await updateBugWorkflowApi(selectedBug.id, {
+        toStatus: bugTransitionToStatus,
+        reason: bugTransitionReason || undefined,
+        duplicateOfBugCode: bugTransitionDuplicateOf || undefined,
+      });
+    }
+    setBugTransitionToStatus("");
+    setBugTransitionReason("");
+    setBugTransitionDuplicateOf("");
+    await loadTestCaseData();
+    await loadBugDetails(selectedBug.id);
+  };
+
+  const applyBugResolution = async () => {
+    if (!selectedBug?.id) return;
+    await resolveBugApi(selectedBug.id, {
+      action: bugResolveAction,
+      fixNotes: bugResolveFixNotes || undefined,
+      commitLink: bugResolveCommitLink || undefined,
+      reason: bugTransitionReason || undefined,
+    });
+    setBugResolveAction("");
+    setBugResolveFixNotes("");
+    setBugResolveCommitLink("");
+    await loadTestCaseData();
+    await loadBugDetails(selectedBug.id);
+  };
+
+  const addBugComment = async () => {
+    if (!selectedBug?.id) return;
+    if (!bugCommentText.trim()) {
+      alert("Comment text is required");
+      return;
+    }
+    await createBugCommentApi(selectedBug.id, {
+      comment: bugCommentText,
+      parentCommentId: bugCommentParentId || undefined,
+    });
+    setBugCommentText("");
+    setBugCommentParentId("");
+    await loadBugDetails(selectedBug.id);
   };
 
   const loadAdminUsers = async () => {
@@ -1046,6 +1198,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   const resetBugPanel = () => {
     setBugs([]);
     setSelectedBugId("");
+    setBugModalOpen(false);
     setSelectedBug(null);
     setBugComments([]);
     setBugCommentThreads([]);
@@ -1739,8 +1892,50 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     loadBugDetails(selectedBugId).catch(() => {
       setSelectedBug(null);
       setBugComments([]);
+      setBugCommentThreads([]);
+      setSelectedBugId("");
+      setBugModalOpen(false);
     });
   }, [selectedBugId, screen]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !isDeveloper) return;
+    if (activeMenuKey === "all_bugs") {
+      if (bugViewMode !== "all") setBugViewMode("all");
+      return;
+    }
+    if (bugViewMode !== "assigned") {
+      setBugViewMode("assigned");
+    }
+  }, [screen, isDeveloper, activeMenuKey, bugViewMode]);
+
+  useEffect(() => {
+    if (screen !== "dashboard" || !showBugs) return;
+    if (!isDeveloper) return;
+    if (activeMenuKey === "all_bugs" && bugViewMode !== "all") {
+      setBugViewMode("all");
+      return;
+    }
+    if (activeMenuKey === "my_assigned_bugs" && bugViewMode !== "assigned") {
+      setBugViewMode("assigned");
+      return;
+    }
+    if (activeMenuKey === "bug_management" && bugViewMode === "all") {
+      // Keep bug management focused for developers.
+      setBugViewMode("assigned");
+    }
+  }, [screen, showBugs, isDeveloper, bugViewMode, activeMenuKey]);
+
+  useEffect(() => {
+    if (!selectedBugId) return;
+    if (!bugRowsForDisplay.some((item) => item.id === selectedBugId)) {
+      setSelectedBugId("");
+      setSelectedBug(null);
+      setBugComments([]);
+      setBugCommentThreads([]);
+      setBugModalOpen(false);
+    }
+  }, [selectedBugId, bugRowsForDisplay]);
 
   useEffect(() => {
     if (screen !== "dashboard" || !currentRole) return;
@@ -2182,7 +2377,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         mappedFeature === "execute_tests" ||
         mappedFeature === "bug_management" ||
         mappedFeature === "test_cases" ||
-        mappedFeature === "developer_workspace"
+        mappedFeature === "developer_workspace" ||
+        mappedFeature === "test_reports" ||
+        mappedFeature === "performance_report" ||
+        mappedFeature === "linked_commits"
       ) {
         await loadTestCaseData();
       }
@@ -2441,17 +2639,17 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                       <p className="note">Monitor assigned defects, severity hotspots, and recent updates.</p>
                     </section>
                     <section className="panel dashboardWidget kpiRow">
-                      <div className="kpiItem"><strong>Assigned Bugs</strong><span>{assignedBugCount}</span></div>
-                      <div className="kpiItem"><strong>Critical / P1</strong><span>{criticalBugCount + p1UrgentCount}</span></div>
+                      <div className="kpiItem"><strong>Assigned Bugs</strong><span>{developerAssignedBugCount}</span></div>
+                      <div className="kpiItem"><strong>Critical / P1</strong><span>{developerCriticalBugCount + developerP1UrgentCount}</span></div>
                     </section>
                     <section className="panel dashboardWidget">
                       <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Bug Aging (Last 7 Days)</h4></div>
                       <div className="miniBarChart">
-                        {trendBuckets.map((bucket) => (
+                        {developerBugTrendBuckets.map((bucket) => (
                           <div key={`aging-${bucket.key}`} className="miniBarItem">
                             <div
                               className="miniBar bugAgingBar"
-                              style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrendCount) * 100))}%` }}
+                              style={{ height: `${Math.max(8, Math.round((bucket.count / developerBugMaxTrendCount) * 100))}%` }}
                             />
                             <span>{bucket.label}</span>
                           </div>
@@ -2461,26 +2659,27 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     <section className="panel dashboardWidget">
                       <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Bug Status Distribution</h4></div>
                       <div className="pieSection">
-                        <div className="pieChart" style={{ background: bugStatusPie }} />
+                        <div className="pieChart" style={{ background: developerBugStatusPie }} />
                         <div className="pieLegend">
-                          <div>New: {bugStatusCounts.NEW}</div>
-                          <div>Open: {bugStatusCounts.OPEN}</div>
-                          <div>In Progress: {bugStatusCounts.IN_PROGRESS}</div>
-                          <div>Fixed: {bugStatusCounts.FIXED}</div>
-                          <div>Verified: {bugStatusCounts.VERIFIED}</div>
-                          <div>Closed: {bugStatusCounts.CLOSED}</div>
+                          <div>New: {developerBugStatusCounts.NEW}</div>
+                          <div>Open: {developerBugStatusCounts.OPEN}</div>
+                          <div>In Progress: {developerBugStatusCounts.IN_PROGRESS}</div>
+                          <div>Fixed: {developerBugStatusCounts.FIXED}</div>
+                          <div>Verified: {developerBugStatusCounts.VERIFIED}</div>
+                          <div>Closed: {developerBugStatusCounts.CLOSED}</div>
                         </div>
                       </div>
                     </section>
                     <section className="panel dashboardWidget">
                       <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Activity</h4></div>
                       <div className="listCompact">
-                        {bugs.slice(0, 6).map((item) => (
+                        {developerRecentBugs.map((item) => (
                           <div className="row" key={item.id}>
-                            <strong>{item.title || item.bugCode || item.id}</strong>
+                            <strong>{item.title || item.bugId || item.id}</strong>
                             <div className="note">{item.workflowStatus || item.status || "OPEN"} | {new Date(item.updatedAt || item.createdAt).toLocaleString()}</div>
                           </div>
                         ))}
+                        {developerRecentBugs.length === 0 && <p className="note">No assigned bug activity yet.</p>}
                       </div>
                     </section>
                   </>
@@ -2527,14 +2726,61 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               </>
             )}
             <div className="dashboardGrid">
-              {isDeveloper && showRolePanel && activeFeature === "developer_workspace" && (
-                <section className="panel rolePanel rolePanelDeveloper">
-                  <h4>Developer Workspace</h4>
-                  <p className="note">
-                    Use this dashboard to view complete test case details and work on assigned issues, status
-                    updates, fix notes, re-test requests, and developer reports.
-                  </p>
-                </section>
+              {showDeveloperWorkspacePanel && (
+                <DeveloperWorkspacePanel
+                  mode="workspace"
+                  assignedBugCount={developerAssignedBugCount}
+                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
+                  needsVerificationCount={developerBugStatusCounts.FIXED}
+                  assignedBugs={developerDashboardBugRows}
+                  assignedExecutionReports={developerAssignedExecutionReports}
+                  linkedCommitBugs={developerLinkedCommitBugs}
+                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
+                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
+                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
+                />
+              )}
+              {showDeveloperPerformancePanel && (
+                <DeveloperWorkspacePanel
+                  mode="performance_report"
+                  assignedBugCount={developerAssignedBugCount}
+                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
+                  needsVerificationCount={developerBugStatusCounts.FIXED}
+                  assignedBugs={developerDashboardBugRows}
+                  assignedExecutionReports={developerAssignedExecutionReports}
+                  linkedCommitBugs={developerLinkedCommitBugs}
+                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
+                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
+                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
+                />
+              )}
+              {showDeveloperLinkedCommitsPanel && (
+                <DeveloperWorkspacePanel
+                  mode="linked_commits"
+                  assignedBugCount={developerAssignedBugCount}
+                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
+                  needsVerificationCount={developerBugStatusCounts.FIXED}
+                  assignedBugs={developerDashboardBugRows}
+                  assignedExecutionReports={developerAssignedExecutionReports}
+                  linkedCommitBugs={developerLinkedCommitBugs}
+                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
+                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
+                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
+                />
+              )}
+              {showDeveloperTestReportsPanel && (
+                <DeveloperWorkspacePanel
+                  mode="test_reports"
+                  assignedBugCount={developerAssignedBugCount}
+                  inProgressCount={developerBugStatusCounts.IN_PROGRESS}
+                  needsVerificationCount={developerBugStatusCounts.FIXED}
+                  assignedBugs={developerDashboardBugRows}
+                  assignedExecutionReports={developerAssignedExecutionReports}
+                  linkedCommitBugs={developerLinkedCommitBugs}
+                  onOpenAssignedBugs={() => handleDashboardNavSelect("my_assigned_bugs")}
+                  onOpenTestReports={() => handleDashboardNavSelect("test_reports")}
+                  onOpenExecuteTests={() => handleDashboardNavSelect("execute_tests")}
+                />
               )}
 
               {isAdmin && showRolePanel && activeFeature === "admin_workspace" && (
@@ -4072,21 +4318,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   </>
                 )}
 
-                <div className="panelHeader" style={{ marginTop: "12px" }}>
-                  <h4 style={{ margin: 0 }}>Bug List</h4>
-                  <button
-                    className="button small"
-                    onClick={async () => {
-                      try {
-                        await loadTestCaseData();
-                      } catch (error: any) {
-                        alert(error?.message || "Failed to refresh bugs");
-                      }
-                    }}
-                  >
-                    Refresh Bugs
-                  </button>
-                </div>
+                
                 <div className="note" style={{ marginBottom: "8px" }}>
                   Created bug reports are shown here. Quick bugs from Execute Tests appear in this list after creation.
                 </div>
@@ -4097,15 +4329,21 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     value={bugSearch}
                     onChange={(e) => setBugSearch(e.target.value)}
                   />
-                  <select
-                    className="input"
-                    value={bugViewMode}
-                    onChange={(e) => setBugViewMode(e.target.value as "all" | "mine" | "assigned")}
-                  >
-                    <option value="all">All Visible Bugs</option>
-                    <option value="mine">My Created Bugs</option>
-                    <option value="assigned">Assigned To Me</option>
-                  </select>
+                  {isDeveloper ? (
+                    <div className="note" style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
+                      Bug scope is controlled from sidebar menu.
+                    </div>
+                  ) : (
+                    <select
+                      className="input"
+                      value={bugViewMode}
+                      onChange={(e) => setBugViewMode(e.target.value as "all" | "mine" | "assigned")}
+                    >
+                      <option value="all">All Visible Bugs</option>
+                      <option value="mine">My Created Bugs</option>
+                      <option value="assigned">Assigned To Me</option>
+                    </select>
+                  )}
                 </div>
                 <div className="note" style={{ marginBottom: "8px" }}>
                   Showing {bugRowsForDisplay.length} of {bugs.length} bug reports
@@ -4161,382 +4399,148 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                 </button>
 
                 {isDeveloper && (
-                  <>
-                    <div className="testCaseDetails" style={{ marginTop: "8px" }}>
-                      <div><strong>Assigned Bugs:</strong> {assignedBugCount}</div>
-                      <div><strong>P1-Urgent:</strong> {p1UrgentCount}</div>
-                      <div><strong>Critical Severity:</strong> {criticalBugCount}</div>
-                    </div>
-                    <div className="listCompact">
-                      {bugRowsForDisplay.map((item) => (
-                        <div key={item.id}>
-                          <div className="row">
-                            <span className="title">
-                              {(item.bugId || item.id)} | {item.title}
-                              <br />
-                              Env: {item.bugMeta?.environment || "N/A"} | Version: {item.bugMeta?.affectedVersion || "N/A"} | TC:{" "}
-                              {item.testCase?.testCaseCode || item.testCaseId || "N/A"}
-                              <br />
-                              Attachments:{" "}
-                              {Array.isArray(item.attachments) && item.attachments.length > 0
-                                ? item.attachments.map((a: any) => a.fileName).join(", ")
-                                : "N/A"}
-                            </span>
-                            <span className="meta">
-                              {item.priority} | {item.severity} | {item.workflowStatus}
-                            </span>
-                            <select
-                              className="input"
-                              style={{ width: "180px", marginBottom: 0 }}
-                              value={quickStatusByBugId[item.id] || item.workflowStatus || "OPEN"}
-                              onChange={(e) =>
-                                setQuickStatusByBugId((prev) => ({ ...prev, [item.id]: e.target.value }))
-                              }
-                            >
-                              <option value="OPEN">OPEN</option>
-                              <option value="IN_PROGRESS">IN_PROGRESS</option>
-                              <option value="FIXED">FIXED</option>
-                              <option value="VERIFIED">VERIFIED</option>
-                              <option value="CLOSED">CLOSED</option>
-                              <option value="REOPENED">REOPENED</option>
-                              <option value="WONT_FIX">WONT_FIX</option>
-                              <option value="DUPLICATE">DUPLICATE</option>
-                            </select>
-                            <button
-                              className="button small"
-                              onClick={async () => {
-                                try {
-                                  const status = quickStatusByBugId[item.id] || item.workflowStatus || "OPEN";
-                                  const current = String(item.workflowStatus || "OPEN").toUpperCase();
-                                  if (String(status).toUpperCase() === current) {
-                                    alert(`Bug is already in ${current} status`);
-                                    return;
-                                  }
-                                  await quickUpdateDeveloperBugStatusApi(item.id, status);
-                                  setQuickStatusByBugId((prev) => {
-                                    const next = { ...prev };
-                                    delete next[item.id];
-                                    return next;
-                                  });
-                                  await loadTestCaseData();
-                                } catch (error: any) {
-                                  alert(error?.message || "Quick status update failed");
-                                }
-                              }}
-                            >
-                              Quick Update
-                            </button>
-                            <button
-                              className="button small"
-                              onClick={() => setSelectedBugId((prev) => (prev === item.id ? "" : item.id))}
-                            >
-                              {selectedBugId === item.id ? "Close" : "Open"}
-                            </button>
-                          </div>
-                          {selectedBugId === item.id && selectedBug?.id === item.id && (
-                            <div className="testCaseDetails">
-                              <div><strong>Bug ID:</strong> {selectedBug.bugId || selectedBug.id}</div>
-                              <div><strong>Title:</strong> {selectedBug.title}</div>
-                              <div><strong>Status:</strong> {selectedBug.workflowStatus}</div>
-                              <div><strong>Priority:</strong> {selectedBug.priority}</div>
-                              <div><strong>Severity:</strong> {selectedBug.severity}</div>
-                              <div><strong>Description:</strong> {selectedBug.description || "N/A"}</div>
-                              <div><strong>Steps to Reproduce:</strong> {selectedBug.bugMeta?.stepsToReproduce || "N/A"}</div>
-                              <div><strong>Expected Behavior:</strong> {selectedBug.bugMeta?.expectedBehavior || "N/A"}</div>
-                              <div><strong>Actual Behavior:</strong> {selectedBug.bugMeta?.actualBehavior || "N/A"}</div>
-                              <div><strong>Environment:</strong> {selectedBug.bugMeta?.environment || "N/A"}</div>
-                              <div><strong>Affected Version:</strong> {selectedBug.bugMeta?.affectedVersion || "N/A"}</div>
-                              <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reportedBy || "N/A"}</div>
-                              <div><strong>Assigned To:</strong> {selectedBug.assignee?.name || selectedBug.assignedTo || "Unassigned"}</div>
-                              <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
-                              <div>
-                                <strong>Attachments:</strong>{" "}
-                                {Array.isArray(selectedBug.attachments) && selectedBug.attachments.length > 0
-                                  ? selectedBug.attachments.map((a: any) => a.fileName).join(", ")
-                                  : "N/A"}
-                              </div>
-                              <div><strong>Fix Notes:</strong> {selectedBug.fixNotes || "N/A"}</div>
-                              <div><strong>Commit Link:</strong> {selectedBug.commitLink || "N/A"}</div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-                {!isDeveloper && (
-                  <div className="listCompact">
-                    {bugRowsForDisplay.map((item) => (
-                      <div key={item.id}>
-                        <div className="row">
-                          <span className="title">
-                            {(item.bugId || item.id)} | {item.title}
-                          </span>
-                          <span className="meta">
-                            {item.priority} | {item.severity} | {item.workflowStatus}
-                          </span>
-                          <button
-                            className="button small"
-                            onClick={() => setSelectedBugId((prev) => (prev === item.id ? "" : item.id))}
-                          >
-                            {selectedBugId === item.id ? "Close" : "Open"}
-                          </button>
-                        </div>
-                        {selectedBugId === item.id && selectedBug?.id === item.id && (
-                          <div className="testCaseDetails">
-                            <div><strong>Bug ID:</strong> {selectedBug.bugId || selectedBug.id}</div>
-                            <div><strong>Title:</strong> {selectedBug.title}</div>
-                            <div><strong>Status:</strong> {selectedBug.workflowStatus}</div>
-                            <div><strong>Priority:</strong> {selectedBug.priority}</div>
-                            <div><strong>Severity:</strong> {selectedBug.severity}</div>
-                            <div><strong>Description:</strong> {selectedBug.description || "N/A"}</div>
-                            <div><strong>Steps to Reproduce:</strong> {selectedBug.bugMeta?.stepsToReproduce || "N/A"}</div>
-                            <div><strong>Expected Behavior:</strong> {selectedBug.bugMeta?.expectedBehavior || "N/A"}</div>
-                            <div><strong>Actual Behavior:</strong> {selectedBug.bugMeta?.actualBehavior || "N/A"}</div>
-                            <div><strong>Environment:</strong> {selectedBug.bugMeta?.environment || "N/A"}</div>
-                            <div><strong>Affected Version:</strong> {selectedBug.bugMeta?.affectedVersion || "N/A"}</div>
-                            <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reportedBy || "N/A"}</div>
-                            <div><strong>Assigned To:</strong> {selectedBug.assignee?.name || selectedBug.assignedTo || "Unassigned"}</div>
-                            <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
-                            <div>
-                              <strong>Attachments:</strong>{" "}
-                              {Array.isArray(selectedBug.attachments) && selectedBug.attachments.length > 0
-                                ? selectedBug.attachments.map((a: any) => a.fileName).join(", ")
-                                : "N/A"}
-                            </div>
-                            <div><strong>Fix Notes:</strong> {selectedBug.fixNotes || "N/A"}</div>
-                            <div><strong>Commit Link:</strong> {selectedBug.commitLink || "N/A"}</div>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                  <div className="testCaseDetails" style={{ marginTop: "8px" }}>
+                    <div><strong>Assigned Bugs:</strong> {assignedBugCount}</div>
+                    <div><strong>P1-Urgent:</strong> {p1UrgentCount}</div>
+                    <div><strong>Critical Severity:</strong> {criticalBugCount}</div>
                   </div>
                 )}
+                <div className="tableWrap adminUsersTableWrap">
+                  <table className="table adminUsersTable">
+                    <thead>
+                      <tr>
+                        <th>Bug</th>
+                        <th>Status</th>
+                        <th>Priority</th>
+                        <th>Severity</th>
+                        <th>Assignee</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bugRowsForDisplay.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="note">No bug reports found.</td>
+                        </tr>
+                      ) : (
+                        bugRowsForDisplay.map((item) => {
+                          const assignedDeveloperId = String(item.assignedTo || item.assignee?.id || "");
+                          const canQuickUpdate = isDeveloper && !!currentUserId && assignedDeveloperId === currentUserId;
+                          return (
+                            <tr key={item.id}>
+                              <td className="truncateCell">{(item.bugId || item.id)} | {item.title || "Untitled Bug"}</td>
+                              <td>{item.workflowStatus || "OPEN"}</td>
+                              <td>{item.priority || "N/A"}</td>
+                              <td>{item.severity || "N/A"}</td>
+                              <td>{item.assignee?.name || item.assignee?.email || "Unassigned"}</td>
+                              <td>
+                                <div className="bugTableActions">
+                                  {canQuickUpdate ? (
+                                    <>
+                                      <select
+                                        className="input bugQuickSelect"
+                                        value={quickStatusByBugId[item.id] || item.workflowStatus || "OPEN"}
+                                        onChange={(e) =>
+                                          setQuickStatusByBugId((prev) => ({ ...prev, [item.id]: e.target.value }))
+                                        }
+                                      >
+                                        <option value="OPEN">OPEN</option>
+                                        <option value="IN_PROGRESS">IN_PROGRESS</option>
+                                        <option value="FIXED">FIXED</option>
+                                        <option value="VERIFIED">VERIFIED</option>
+                                        <option value="CLOSED">CLOSED</option>
+                                        <option value="REOPENED">REOPENED</option>
+                                        <option value="WONT_FIX">WONT_FIX</option>
+                                        <option value="DUPLICATE">DUPLICATE</option>
+                                      </select>
+                                      <button
+                                        className="button small"
+                                        onClick={async () => {
+                                          try {
+                                            const status = quickStatusByBugId[item.id] || item.workflowStatus || "OPEN";
+                                            const current = String(item.workflowStatus || "OPEN").toUpperCase();
+                                            if (String(status).toUpperCase() === current) {
+                                              alert(`Bug is already in ${current} status`);
+                                              return;
+                                            }
+                                            await quickUpdateDeveloperBugStatusApi(item.id, status);
+                                            setQuickStatusByBugId((prev) => {
+                                              const next = { ...prev };
+                                              delete next[item.id];
+                                              return next;
+                                            });
+                                            await loadTestCaseData();
+                                          } catch (error: any) {
+                                            alert(error?.message || "Quick status update failed");
+                                          }
+                                        }}
+                                      >
+                                        Quick Update
+                                      </button>
+                                    </>
+                                  ) : isDeveloper ? (
+                                    <span className="note bugReadonlyNote">Read-only</span>
+                                  ) : null}
+                                  <button
+                                    className="button small"
+                                    onClick={async () => {
+                                      await toggleBugDetails(item.id);
+                                    }}
+                                  >
+                                    {selectedBugId === item.id ? "Close" : "Open"}
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
 
-                {selectedBug && canTransitionBugs && (
-                  <>
-                    <h4 style={{ marginTop: "12px" }}>Workflow Transition</h4>
-                    <select
-                      className="input"
-                      value={bugTransitionToStatus}
-                      onChange={(e) => setBugTransitionToStatus(e.target.value)}
-                    >
-                      <option value="">Select target status</option>
-                      <option value="OPEN">OPEN</option>
-                      <option value="IN_PROGRESS">IN_PROGRESS</option>
-                      <option value="FIXED">FIXED</option>
-                      <option value="VERIFIED">VERIFIED</option>
-                      <option value="CLOSED">CLOSED</option>
-                      <option value="REOPENED">REOPENED</option>
-                      <option value="WONT_FIX">WONT_FIX</option>
-                      <option value="DUPLICATE">DUPLICATE</option>
-                    </select>
-                    <input
-                      className="input"
-                      placeholder="Reason (for Won't Fix)"
-                      value={bugTransitionReason}
-                      onChange={(e) => setBugTransitionReason(e.target.value)}
-                    />
-                    <input
-                      className="input"
-                      placeholder="Duplicate Bug Code (for Duplicate)"
-                      value={bugTransitionDuplicateOf}
-                      onChange={(e) => setBugTransitionDuplicateOf(e.target.value)}
-                    />
-                    <div className="inlineGrid">
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            const current = String(selectedBug.workflowStatus || "OPEN").toUpperCase();
-                            const target = String(bugTransitionToStatus || "OPEN").toUpperCase();
-                            if (target === current) {
-                              alert(`Bug is already in ${current} status`);
-                              return;
-                            }
-                            if (isDeveloper) {
-                              await quickUpdateDeveloperBugStatusApi(selectedBug.id, bugTransitionToStatus);
-                            } else {
-                              await updateBugWorkflowApi(selectedBug.id, {
-                                toStatus: bugTransitionToStatus,
-                                reason: bugTransitionReason || undefined,
-                                duplicateOfBugCode: bugTransitionDuplicateOf || undefined,
-                              });
-                            }
-                            setBugTransitionToStatus("");
-                            setBugTransitionReason("");
-                            setBugTransitionDuplicateOf("");
-                            await loadTestCaseData();
-                            await loadBugDetails(selectedBug.id);
-                          } catch (error: any) {
-                            alert(error?.message || "Workflow transition failed");
-                          }
-                        }}
-                      >
-                        Apply Transition
-                      </button>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            await loadBugDetails(selectedBug.id);
-                          } catch (error: any) {
-                            alert(error?.message || "Failed to refresh bug details");
-                          }
-                        }}
-                      >
-                        Refresh Details
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {selectedBug && canResolveBugs && (
-                  <>
-                    <h4 style={{ marginTop: "12px" }}>Developer Resolution</h4>
-                    <select className="input" value={bugResolveAction} onChange={(e) => setBugResolveAction(e.target.value)}>
-                      <option value="">Select action</option>
-                      <option value="START_PROGRESS">START_PROGRESS</option>
-                      <option value="MARK_FIXED">MARK_FIXED</option>
-                      <option value="REQUEST_RETEST">REQUEST_RETEST</option>
-                      <option value="WONT_FIX">WONT_FIX</option>
-                    </select>
-                    <textarea
-                      className="input"
-                      rows={2}
-                      placeholder="Fix notes / resolution notes"
-                      value={bugResolveFixNotes}
-                      onChange={(e) => setBugResolveFixNotes(e.target.value)}
-                    />
-                    <input
-                      className="input"
-                      placeholder="Commit link (optional)"
-                      value={bugResolveCommitLink}
-                      onChange={(e) => setBugResolveCommitLink(e.target.value)}
-                    />
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          await resolveBugApi(selectedBug.id, {
-                            action: bugResolveAction,
-                            fixNotes: bugResolveFixNotes || undefined,
-                            commitLink: bugResolveCommitLink || undefined,
-                            reason: bugTransitionReason || undefined,
-                          });
-                          setBugResolveAction("");
-                          setBugResolveFixNotes("");
-                          setBugResolveCommitLink("");
-                          await loadTestCaseData();
-                          await loadBugDetails(selectedBug.id);
-                        } catch (error: any) {
-                          alert(error?.message || "Resolution action failed");
-                        }
-                      }}
-                    >
-                      Apply Resolution Action
-                    </button>
-                  </>
-                )}
-
-                {selectedBug && (
-                  <>
-                    <h4 style={{ marginTop: "12px" }}>Bug Comments</h4>
-                    <div className="note">
-                      Supports mentions with @username. Edit/delete is allowed for 5 minutes (admin override).
-                    </div>
-                    <div className="toolbarActions" style={{ marginBottom: "8px" }}>
-                      <button className="button small" onClick={() => appendCommentSnippet("@username")}>
-                        @Mention
-                      </button>
-                      <button className="button small" onClick={() => appendCommentSnippet("**bold text**")}>
-                        Bold
-                      </button>
-                      <button className="button small" onClick={() => appendCommentSnippet("_italic text_")}>
-                        Italic
-                      </button>
-                      <button className="button small" onClick={() => appendCommentSnippet("`code`")}>
-                        Code
-                      </button>
-                    </div>
-                    <textarea
-                      className="input"
-                      rows={2}
-                      placeholder="Add comment"
-                      value={bugCommentText}
-                      onChange={(e) => handleCommentTextChange(e.target.value)}
-                    />
-                    {showMentionPopup && filteredMentionCandidates.length > 0 && (
-                      <div className="mentionPopup">
-                        {filteredMentionCandidates.slice(0, 8).map((item) => (
-                          <button
-                            key={item.key}
-                            className="mentionItem"
-                            onClick={() => applyMention(item.key)}
-                          >
-                            @{item.key} - {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <input
-                      className="input"
-                      placeholder="Reply to Comment ID (optional)"
-                      value={bugCommentParentId}
-                      onChange={(e) => setBugCommentParentId(e.target.value)}
-                    />
-                    <button
-                      className="button"
-                      onClick={async () => {
-                        try {
-                          if (!bugCommentText.trim()) {
-                            alert("Comment text is required");
-                            return;
-                          }
-                          await createBugCommentApi(selectedBug.id, {
-                            comment: bugCommentText,
-                            parentCommentId: bugCommentParentId || undefined,
-                          });
-                          setBugCommentText("");
-                          setBugCommentParentId("");
-                          await loadBugDetails(selectedBug.id);
-                        } catch (error: any) {
-                          alert(error?.message || "Add comment failed");
-                        }
-                      }}
-                    >
-                      Add Comment
-                    </button>
-                    {bugCommentThreads.length > 0 && (
-                      <div className="listCompact">
-                        {renderCommentThreads(bugCommentThreads)}
-                      </div>
-                    )}
-                    {bugComments.length > 0 && bugCommentThreads.length === 0 && (
-                      <div className="listCompact">
-                        {bugComments.map((item) => (
-                          <div className="row" key={item.id}>
-                            <span className="title">
-                              <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
-                              {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-                                <>
-                                  <br />
-                                  <strong>Mentions:</strong> {item.mentions.map((m: string) => `@${m}`).join(", ")}
-                                </>
-                              ) : null}
-                            </span>
-                            <span className="meta">
-                              <strong>By:</strong> {item.author?.name || item.authorId}
-                              <br />
-                              <strong>At:</strong> {new Date(item.createdAt).toLocaleString()}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
+                <BugDetailsModal
+                  isOpen={bugModalOpen && !!selectedBug}
+                  onClose={() => {
+                    setBugModalOpen(false);
+                    setSelectedBugId("");
+                    setSelectedBug(null);
+                    setBugComments([]);
+                    setBugCommentThreads([]);
+                  }}
+                  selectedBug={selectedBug}
+                  isDeveloper={isDeveloper}
+                  canTransitionBugs={canTransitionBugs}
+                  canResolveBugs={canResolveBugs}
+                  bugTransitionToStatus={bugTransitionToStatus}
+                  setBugTransitionToStatus={setBugTransitionToStatus}
+                  bugTransitionReason={bugTransitionReason}
+                  setBugTransitionReason={setBugTransitionReason}
+                  bugTransitionDuplicateOf={bugTransitionDuplicateOf}
+                  setBugTransitionDuplicateOf={setBugTransitionDuplicateOf}
+                  onApplyTransition={applyBugTransition}
+                  onRefreshDetails={refreshSelectedBugDetails}
+                  bugResolveAction={bugResolveAction}
+                  setBugResolveAction={setBugResolveAction}
+                  bugResolveFixNotes={bugResolveFixNotes}
+                  setBugResolveFixNotes={setBugResolveFixNotes}
+                  bugResolveCommitLink={bugResolveCommitLink}
+                  setBugResolveCommitLink={setBugResolveCommitLink}
+                  onApplyResolution={applyBugResolution}
+                  bugCommentText={bugCommentText}
+                  onCommentTextChange={handleCommentTextChange}
+                  bugCommentParentId={bugCommentParentId}
+                  setBugCommentParentId={setBugCommentParentId}
+                  onAddComment={addBugComment}
+                  showMentionPopup={showMentionPopup}
+                  filteredMentionCandidates={filteredMentionCandidates}
+                  onApplyMention={applyMention}
+                  appendCommentSnippet={appendCommentSnippet}
+                  bugCommentThreads={bugCommentThreads}
+                  bugComments={bugComments}
+                  renderCommentThreads={renderCommentThreads}
+                  isDeletedComment={isDeletedComment}
+                />
               </section>
               )}
             </div>

@@ -437,8 +437,11 @@ export async function listBugsApi(params?: Record<string, string>) {
   return authJson(`/bugs${query}`);
 }
 
-export async function getBugApi(id: string) {
-  return authJson(`/bugs/${id}`);
+export async function getBugApi(id: string, params?: Record<string, string>) {
+  const query = params
+    ? `?${new URLSearchParams(Object.entries(params).filter(([, v]) => String(v || "").length > 0)).toString()}`
+    : "";
+  return authJson(`/bugs/${id}${query}`);
 }
 
 export async function updateBugWorkflowApi(id: string, payload: Record<string, unknown>) {
