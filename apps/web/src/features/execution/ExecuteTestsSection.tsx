@@ -350,6 +350,7 @@ const ExecuteTestsSection = ({
                   setExecutionDurationSeconds(
                     typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
                   );
+                  setManualDurationMinutes("");
                   alert("Manual duration saved");
                 } catch (error: any) {
                   alert(error?.message || "Failed to set manual duration");
@@ -559,6 +560,7 @@ const ExecuteTestsSection = ({
                     notes: evidenceNotes,
                   });
                   setExecutionEvidence((prev: any[]) => [created, ...prev]);
+                  setEvidenceType("");
                   setEvidenceUrl("");
                   setEvidenceName("");
                   setEvidenceNotes("");

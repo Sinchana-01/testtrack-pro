@@ -97,7 +97,10 @@ const DeveloperPerformanceReportSection: React.FC<Props> = ({ roleName }) => {
     });
   }, [trend]);
 
-  const handleApplyFilters = () => setAppliedFilters(filters);
+  const handleApplyFilters = () => {
+    setAppliedFilters(filters);
+    setFilters(defaultFilters);
+  };
   const handleResetFilters = () => {
     setFilters(defaultFilters);
     setAppliedFilters(defaultFilters);

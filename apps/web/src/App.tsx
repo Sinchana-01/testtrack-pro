@@ -26,6 +26,8 @@ import {
   listExecutionReportsApi,
   listDeveloperUsersApi,
   listAdminProjectsApi,
+  listAdminBackupsApi,
+  listAdminSystemConfigsApi,
   listAdminUsersApi,
   listAdminAuditLogsApi,
   listSuiteExecutionsApi,
@@ -322,11 +324,18 @@ function App() {
   const [adminProjectDescription, setAdminProjectDescription] = useState("");
   const [adminProjectSavingId, setAdminProjectSavingId] = useState("");
   const [adminAuditLogs, setAdminAuditLogs] = useState<any[]>([]);
+  const [adminBackups, setAdminBackups] = useState<any[]>([]);
+  const [adminSystemConfigs, setAdminSystemConfigs] = useState<any[]>([]);
   const [notificationItems, setNotificationItems] = useState<AppNotificationItem[]>([]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [auditEntityType, setAuditEntityType] = useState("");
   const [backupNotes, setBackupNotes] = useState("");
   const [backupTriggering, setBackupTriggering] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
+  const [systemConfigKey, setSystemConfigKey] = useState("");
+  const [systemConfigValue, setSystemConfigValue] = useState("");
+  const [systemConfigSaving, setSystemConfigSaving] = useState(false);
+  const [systemConfigLoading, setSystemConfigLoading] = useState(false);
   const [rolePermissionSaving, setRolePermissionSaving] = useState(false);
   const [editPermissionRole, setEditPermissionRole] = useState<"ADMIN" | "TESTER" | "DEVELOPER">("ADMIN");
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({
@@ -1040,6 +1049,26 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   const loadAdminAuditLogs = async (entityType?: string) => {
     const rows = await listAdminAuditLogsApi(entityType || undefined);
     setAdminAuditLogs(Array.isArray(rows) ? rows : []);
+  };
+
+  const loadAdminSystemConfigs = async () => {
+    setSystemConfigLoading(true);
+    try {
+      const rows = await listAdminSystemConfigsApi();
+      setAdminSystemConfigs(Array.isArray(rows) ? rows : []);
+    } finally {
+      setSystemConfigLoading(false);
+    }
+  };
+
+  const loadAdminBackups = async () => {
+    setBackupLoading(true);
+    try {
+      const rows = await listAdminBackupsApi();
+      setAdminBackups(Array.isArray(rows) ? rows : []);
+    } finally {
+      setBackupLoading(false);
+    }
   };
 
   const loadRolePermissions = async () => {
@@ -2083,6 +2112,16 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
           }
         );
       }
+      if (activeMenuKey === "backup_management" && hasPermission("Backup Management")) {
+        loadAdminBackups().catch(() => {
+          setAdminBackups([]);
+        });
+      }
+    }
+    if (activeMenuKey === "system_configuration") {
+      loadAdminSystemConfigs().catch(() => {
+        setAdminSystemConfigs([]);
+      });
     }
   }, [
     screen,
@@ -2405,6 +2444,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
           await loadAdminAuditLogs(auditEntityType || undefined);
         } else if (menuKey === "backup_management") {
           await loadAdminAuditLogs("BackupJob");
+          await loadAdminBackups();
+        } else if (menuKey === "system_configuration") {
+          await loadAdminSystemConfigs();
         } else if (menuKey === "project_management") {
           await loadTestCaseData();
         }
@@ -2534,16 +2576,6 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
             }}
             pageTitle={currentPageMeta.title}
             pageSubtitle={currentPageMeta.subtitle}
-            primaryActionLabel={isRefreshing ? "Refreshing..." : "Refresh Data"}
-            onPrimaryAction={async () => {
-              try {
-                resetEntryFields();
-                await loadTestCaseData();
-              } catch (error: any) {
-                setIsRefreshing(false);
-                alert(error?.message || "Refresh failed");
-              }
-            }}
           >
             {activeFeature === "none" && (
               <>
@@ -3294,6 +3326,99 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     </>
                   )}
 
+                  {activeMenuKey === "system_configuration" && (
+                    <>
+                      <h4>System Configuration</h4>
+                      <p className="note">Configure system-wide key/value settings used by platform workflows.</p>
+                      <div className="inlineGrid">
+                        <input
+                          className="input"
+                          placeholder="Configuration Key (e.g., ROLE_PERMISSIONS)"
+                          value={systemConfigKey}
+                          onChange={(e) => setSystemConfigKey(e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Configuration Value"
+                          value={systemConfigValue}
+                          onChange={(e) => setSystemConfigValue(e.target.value)}
+                        />
+                      </div>
+                      <div className="inlineGrid" style={{ marginTop: "8px" }}>
+                        <button
+                          className="button"
+                          disabled={systemConfigSaving}
+                          onClick={async () => {
+                            try {
+                              if (!systemConfigKey.trim()) {
+                                alert("Configuration key is required");
+                                return;
+                              }
+                              if (!systemConfigValue.trim()) {
+                                alert("Configuration value is required");
+                                return;
+                              }
+                              setSystemConfigSaving(true);
+                              await upsertAdminSystemConfigApi({
+                                key: systemConfigKey.trim(),
+                                value: systemConfigValue.trim(),
+                              });
+                              setSystemConfigKey("");
+                              setSystemConfigValue("");
+                              await loadAdminSystemConfigs();
+                              alert("System configuration saved");
+                            } catch (error: any) {
+                              alert(error?.message || "Failed to save system configuration");
+                            } finally {
+                              setSystemConfigSaving(false);
+                            }
+                          }}
+                        >
+                          {systemConfigSaving ? "Saving..." : "Save Configuration"}
+                        </button>
+                        <button
+                          className="button"
+                          onClick={() => {
+                            loadAdminSystemConfigs().catch(() => {
+                              setAdminSystemConfigs([]);
+                            });
+                          }}
+                        >
+                          Refresh Configs
+                        </button>
+                      </div>
+                      <div className="listCompact" style={{ marginTop: "12px" }}>
+                        {systemConfigLoading ? (
+                          <p className="note">Loading system configurations...</p>
+                        ) : adminSystemConfigs.length === 0 ? (
+                          <p className="note">No system configurations found.</p>
+                        ) : (
+                          adminSystemConfigs.map((config: any) => (
+                            <button
+                              key={config.id}
+                              type="button"
+                              className="row"
+                              style={{ textAlign: "left", width: "100%", background: "#fff" }}
+                              onClick={() => {
+                                setSystemConfigKey(String(config.key || ""));
+                                setSystemConfigValue(String(config.value || ""));
+                              }}
+                            >
+                              <strong>{config.key}</strong>
+                              <div className="note">{config.value}</div>
+                              <div className="note">
+                                Updated: {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "N/A"}
+                              </div>
+                              <div className="note">
+                                By: {config.updater?.name || config.updater?.email || config.updatedBy || "Unknown"}
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </>
+                  )}
+
                   {activeMenuKey === "audit_logs" && (
                     <>
                       <h4>Audit Logs</h4>
@@ -3359,6 +3484,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                               await triggerAdminBackupApi(backupNotes || undefined);
                               setBackupNotes("");
                               await loadAdminAuditLogs("BackupJob");
+                              await loadAdminBackups();
                               alert("Backup triggered");
                             } catch (error: any) {
                               alert(error?.message || "Backup trigger failed");
@@ -3371,20 +3497,24 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                         </button>
                       </div>
                       <div className="listCompact">
-                        {adminAuditLogs.length === 0 ? (
-                          <p className="note">No backup activity found.</p>
+                        {backupLoading ? (
+                          <p className="note">Loading backup jobs...</p>
+                        ) : adminBackups.length === 0 ? (
+                          <p className="note">No backup jobs found.</p>
                         ) : (
-                          adminAuditLogs
-                            .filter((log: any) =>
-                              (log.entityType || "").toLowerCase().includes("backup") ||
-                              (log.action || "").toUpperCase().includes("BACKUP")
-                            )
-                            .map((log: any) => (
-                              <div className="row" key={log.id}>
-                                <strong>{log.action || "BACKUP_EVENT"}</strong>
+                          adminBackups.map((job: any) => (
+                              <div className="row" key={job.id}>
+                                <strong>{job.status || "PENDING"}</strong>
                                 <div className="note">
-                                  {log.createdAt ? new Date(log.createdAt).toLocaleString() : "N/A"}
+                                  Started: {job.startedAt ? new Date(job.startedAt).toLocaleString() : "N/A"}
                                 </div>
+                                <div className="note">
+                                  Completed: {job.completedAt ? new Date(job.completedAt).toLocaleString() : "N/A"}
+                                </div>
+                                <div className="note">
+                                  By: {job.triggerUser?.name || job.triggerUser?.email || job.triggeredBy || "Unknown"}
+                                </div>
+                                <div className="note">Notes: {job.notes || "-"}</div>
                               </div>
                             ))
                         )}

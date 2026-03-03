@@ -5665,37 +5665,6 @@ router.post("/admin/roles/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequ
   return res.json(user);
 });
 
-router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
-  const name = asString(req.body.name);
-  if (!name) {
-    return res.status(400).json({ message: "Project name is required" });
-  }
-
-  const project = await prisma.project.create({
-    data: {
-      name,
-      description: asString(req.body.description) || null,
-      createdBy: req.user!.userId,
-    },
-  });
-
-  await writeAuditLog(req.user!.userId, "ADMIN_CREATE_PROJECT", "Project", project.id, { name: project.name });
-  return res.status(201).json(project);
-});
-
-router.patch("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
-  const project = await prisma.project.update({
-    where: { id: req.params.id },
-    data: {
-      name: asString(req.body.name) || undefined,
-      description: asString(req.body.description) || undefined,
-      isActive: typeof req.body.isActive === "boolean" ? req.body.isActive : undefined,
-    },
-  });
-  await writeAuditLog(req.user!.userId, "ADMIN_UPDATE_PROJECT", "Project", project.id);
-  return res.json(project);
-});
-
 router.get("/admin/audit-logs", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const logs = await prisma.auditLog.findMany({
     where: req.query.entityType ? { entityType: String(req.query.entityType) } : undefined,
@@ -5732,6 +5701,18 @@ router.post("/admin/system-config", authorizeRoles(Role.ADMIN), async (req: Auth
   return res.json(config);
 });
 
+router.get("/admin/system-config", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const configs = await prisma.systemConfig.findMany({
+    include: {
+      updater: {
+        select: { id: true, name: true, email: true, role: true },
+      },
+    },
+    orderBy: { updatedAt: "desc" },
+  });
+  return res.json(configs);
+});
+
 router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const backup = await prisma.backupJob.create({
     data: {
@@ -5751,6 +5732,19 @@ router.post("/admin/backups", authorizeRoles(Role.ADMIN), async (req: AuthReques
 
   await writeAuditLog(req.user!.userId, "ADMIN_TRIGGER_BACKUP", "BackupJob", completed.id);
   return res.status(201).json(completed);
+});
+
+router.get("/admin/backups", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+  const jobs = await prisma.backupJob.findMany({
+    include: {
+      triggerUser: {
+        select: { id: true, name: true, email: true },
+      },
+    },
+    orderBy: { startedAt: "desc" },
+    take: 200,
+  });
+  return res.json(jobs);
 });
 
 let reportSchedulerBusy = false;
