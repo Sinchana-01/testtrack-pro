@@ -46,6 +46,10 @@ model User {
   createdSuites          TestSuite[]          @relation("CreatedSuites")
   addedSuiteCaseLinks    TestSuiteCase[]      @relation("SuiteCaseAddedBy")
   startedSuiteExecutions TestSuiteExecution[] @relation("StartedSuiteExecutions")
+  projectMemberships     ProjectMember[]
+  ownedProjects          Project[]            @relation("ProjectOwner")
+  updatedProjectConfigs  ProjectConfig[]
+  createdMilestones      ProjectMilestone[]   @relation("MilestoneCreator")
 }
 
 model TestCase {
@@ -119,16 +123,22 @@ model TestRun {
   targetStartDate DateTime?
   targetEndDate   DateTime?
   status          TestRunStatus        @default(PLANNED)
+  projectId       String?
+  milestoneId     String?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   executions      TestExecution[]
   creator         User                 @relation("CreatedTestRuns", fields: [createdBy], references: [id], onDelete: Cascade)
+  project         Project?             @relation(fields: [projectId], references: [id])
+  milestone       ProjectMilestone?    @relation(fields: [milestoneId], references: [id])
   assignments     TestRunAssignment[]
   testCases       TestRunCase[]
   suiteExecutions TestSuiteExecution[]
 
   @@index([createdBy])
   @@index([status])
+  @@index([projectId])
+  @@index([milestoneId])
 }
 
 model TestRunAssignment {
@@ -345,14 +355,70 @@ model IssueComment {
 model Project {
   id          String      @id @default(uuid())
   name        String
+  code        String?     @unique
   description String?
   isActive    Boolean     @default(true)
   createdBy   String
+  ownerId     String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   creator     User        @relation("CreatedProjects", fields: [createdBy], references: [id])
+  owner       User?       @relation("ProjectOwner", fields: [ownerId], references: [id])
   testCases   TestCase[]
   testSuites  TestSuite[]
+  testRuns    TestRun[]
+  members     ProjectMember[]
+  config      ProjectConfig?
+  milestones  ProjectMilestone[]
+
+  @@index([ownerId])
+}
+
+model ProjectMember {
+  id            String      @id @default(uuid())
+  projectId     String
+  userId        String
+  roleInProject ProjectRole
+  createdAt     DateTime    @default(now())
+  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model ProjectConfig {
+  id             String   @id @default(uuid())
+  projectId      String   @unique
+  customFields   Json?
+  modules        Json?
+  workflowConfig Json?
+  environments   Json?
+  updatedBy      String
+  updatedAt      DateTime @updatedAt
+  project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  updater        User     @relation(fields: [updatedBy], references: [id], onDelete: Cascade)
+}
+
+model ProjectMilestone {
+  id                String                 @id @default(uuid())
+  projectId         String
+  name              String
+  description       String?
+  targetDate        DateTime
+  status            ProjectMilestoneStatus @default(PLANNED)
+  targetPassRate    Float?
+  targetBugClosure  Float?
+  createdBy         String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+  project           Project                @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  creator           User?                  @relation("MilestoneCreator", fields: [createdBy], references: [id])
+  testRuns          TestRun[]
+
+  @@index([projectId])
+  @@index([targetDate])
+  @@index([status])
 }
 
 model TestCaseTemplate {
@@ -599,4 +665,17 @@ enum AutomationStatus {
 enum SuiteType {
   STATIC
   DYNAMIC
+}
+
+enum ProjectRole {
+  ADMIN
+  TESTER
+  DEVELOPER
+}
+
+enum ProjectMilestoneStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  MISSED
 }

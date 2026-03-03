@@ -25,7 +25,15 @@ const DEFAULT_ROLE_PERMISSIONS: RolePermissionMap = {
 };
 
 const MANDATORY_ROLE_PERMISSIONS: RolePermissionMap = {
-  ADMIN: ["Reports", "All Bugs"],
+  ADMIN: [
+    "Manage Users",
+    "Manage Projects",
+    "Manage Roles",
+    "View Audit Logs",
+    "Backup Management",
+    "Reports",
+    "All Bugs",
+  ],
   TESTER: ["Reports"],
   DEVELOPER: ["Reports"],
 };
@@ -137,6 +145,10 @@ export const authorizeRoles = (...allowedRoles: string[]) => {
     try {
       if (!req.user) {
         return res.status(403).json({ message: "Forbidden: Access denied" });
+      }
+
+      if (req.user.role === "ADMIN") {
+        return next();
       }
 
       const requiredPermission = resolveRequiredPermission(req);
