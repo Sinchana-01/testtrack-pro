@@ -834,6 +834,18 @@ export async function listAdminProjectsApi() {
   return authJson("/admin/projects");
 }
 
+export async function listProjectsApi(params?: { includeArchived?: boolean }) {
+  const query =
+    params?.includeArchived !== undefined
+      ? `?includeArchived=${params.includeArchived ? "true" : "false"}`
+      : "";
+  return authJson(`/projects${query}`);
+}
+
+export async function getProjectApi(id: string) {
+  return authJson(`/projects/${id}`);
+}
+
 export async function createAdminProjectApi(payload: { name: string; description?: string }) {
   return authJson("/admin/projects", {
     method: "POST",

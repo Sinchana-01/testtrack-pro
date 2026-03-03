@@ -1,33 +1,34 @@
 import { DashboardNavItem } from "../components/layout/DashboardLayout";
 
 export const testerNavItems: DashboardNavItem[] = [
-  { key: "dashboard_home", label: "Dashboard", icon: "D" },
-  { key: "create_test_case", label: "Create Test Case", icon: "+" },
-  { key: "test_cases", label: "Test Cases", icon: "T" },
-  { key: "templates", label: "Templates", icon: "M" },
-  { key: "bulk_operations", label: "Bulk Operations", icon: "B" },
-  { key: "import_test_cases", label: "Import Test Cases", icon: "I" },
-  { key: "suite_management", label: "Test Suites", icon: "S" },
-  { key: "test_runs", label: "Test Run Management", icon: "R" },
-  { key: "execute_tests", label: "Execute Tests", icon: "E" },
-  { key: "bug_management", label: "Bug Management", icon: "!" },
-  { key: "reports", label: "Reports", icon: "P" },
+  { key: "dashboard_home", label: "Dashboard", icon: "DB" },
+  { key: "create_test_case", label: "Create Test Case", icon: "CT" },
+  { key: "test_cases", label: "Test Cases", icon: "TC" },
+  { key: "templates", label: "Templates", icon: "TP" },
+  { key: "bulk_operations", label: "Bulk Operations", icon: "BO" },
+  { key: "import_test_cases", label: "Import Test Cases", icon: "IM" },
+  { key: "suite_management", label: "Test Suites", icon: "TS" },
+  { key: "test_runs", label: "Test Run Management", icon: "TR" },
+  { key: "execute_tests", label: "Execute Tests", icon: "EX" },
+  { key: "bug_management", label: "Bug Management", icon: "BG" },
+  { key: "reports", label: "Reports", icon: "RP" },
 ];
 
 export const developerNavItems: DashboardNavItem[] = [
-  { key: "dashboard_home", label: "Dashboard", icon: "D" },
-  { key: "my_assigned_bugs", label: "My Assigned Bugs", icon: "!" },
-  { key: "reports", label: "Reports", icon: "P" },
+  { key: "dashboard_home", label: "Dashboard", icon: "DB" },
+  { key: "my_assigned_bugs", label: "My Assigned Bugs", icon: "AB" },
+  { key: "reports", label: "Reports", icon: "RP" },
 ];
 
 export const adminNavItems: DashboardNavItem[] = [
-  { key: "dashboard_home", label: "Dashboard", icon: "D" },
-  { key: "reports", label: "Reports", icon: "P" },
-  { key: "user_management", label: "User Management", icon: "U" },
-  { key: "role_management", label: "Role Management", icon: "L" },
-  { key: "project_management", label: "Project Management", icon: "J" },
-  { key: "audit_logs", label: "Audit Logs", icon: "A" },
-  { key: "backup_management", label: "Backup Management", icon: "K" },
+  { key: "dashboard_home", label: "Dashboard", icon: "DB" },
+  { key: "reports", label: "Reports", icon: "RP" },
+  { key: "user_management", label: "User Management", icon: "UM" },
+  { key: "role_management", label: "Role Management", icon: "RM" },
+  { key: "project_management", label: "Project Management", icon: "PM" },
+  { key: "system_configuration", label: "System Configuration", icon: "SC" },
+  { key: "audit_logs", label: "Audit Logs", icon: "AL" },
+  { key: "backup_management", label: "Backup Management", icon: "BK" },
 ];
 
 const allNavItemsCatalog: DashboardNavItem[] = [

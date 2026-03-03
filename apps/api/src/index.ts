@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import path from "path";
 import authRoutes from "./routes/auth.routes";
 import testcaseRoutes from "./routes/testcase.routes";
+import projectRoutes from "./routes/project.routes";
 
 
 
@@ -30,7 +31,7 @@ app.use(
       callback(new Error("CORS blocked for this origin"));
     },
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-project-id"],
   })
 );
 
@@ -40,6 +41,7 @@ app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 
 app.use("/api/auth", authRoutes);
 app.use("/api", testcaseRoutes);
+app.use("/api", projectRoutes);
 
 
 app.get("/", (req, res) => {

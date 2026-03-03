@@ -93,6 +93,9 @@ const TesterPerformanceReportSection: React.FC<Props> = ({ roleName }) => {
       from: fromDate || undefined,
       to: toDate || undefined,
     });
+    setTesterId("");
+    setFromDate("");
+    setToDate("");
   };
 
   const handleExport = async (format: "csv" | "excel" | "pdf") => {
@@ -130,7 +133,15 @@ const TesterPerformanceReportSection: React.FC<Props> = ({ roleName }) => {
         minute: Number(scheduleDraft.minute),
         active: true,
       });
-      setScheduleDraft((prev) => ({ ...prev, recipients: "" }));
+      setScheduleDraft({
+        reportType: "TEST_EXECUTION_SUMMARY",
+        format: "PDF",
+        recipients: "",
+        frequency: "WEEKLY",
+        weekday: "1",
+        hour: "9",
+        minute: "0",
+      });
       await schedulesQuery.refetch();
     } catch (error: any) {
       window.alert(error?.message || "Failed to create schedule");
