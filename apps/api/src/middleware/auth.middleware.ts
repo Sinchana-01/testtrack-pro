@@ -39,16 +39,17 @@ export const authenticate = (
 
       const user = await prisma.user.findUnique({
         where: { id: decoded.userId },
-        select: { id: true, tokenVersion: true },
+        select: { id: true, role: true, tokenVersion: true, isActive: true },
       });
 
-      if (!user || user.tokenVersion !== decoded.tokenVersion) {
+      if (!user || !user.isActive || user.tokenVersion !== decoded.tokenVersion) {
         return res.status(401).json({ message: "Session expired" });
       }
 
       req.user = {
         userId: decoded.userId,
-        role: decoded.role,
+        // Always trust latest role from DB instead of stale token payload role.
+        role: user.role,
         tokenVersion: decoded.tokenVersion,
       };
       next();

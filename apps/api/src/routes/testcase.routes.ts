@@ -46,6 +46,13 @@ const asDate = (value: unknown): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
+const getProjectIdFromRequest = (req: AuthRequest): string => {
+  const queryProjectId = asString((req.query as Record<string, unknown>)?.projectId);
+  const bodyProjectId = asString((req.body as Record<string, unknown>)?.projectId);
+  const headerProjectId = asString(req.headers["x-project-id"]);
+  return queryProjectId || bodyProjectId || headerProjectId;
+};
+
 const csvEscape = (value: unknown): string => `"${String(value ?? "").replace(/\"/g, "\"\"")}"`;
 
 const buildSimplePdf = (lines: string[]): Buffer => {
@@ -767,9 +774,13 @@ router.use(authenticate);
 router.get(
   "/testcases",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
-  async (_req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
+    const projectId = getProjectIdFromRequest(req);
     const testCases = await prisma.testCase.findMany({
-      where: { isDeleted: false },
+      where: {
+        isDeleted: false,
+        ...(projectId ? { projectId } : {}),
+      },
       include: {
         creator: { select: { id: true, name: true, email: true } },
         assignee: { select: { id: true, name: true, email: true } },
@@ -786,6 +797,7 @@ router.get(
   "/testcases/:id",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
+    const projectId = getProjectIdFromRequest(req);
     const testCase = await prisma.testCase.findUnique({
       where: { id: req.params.id },
       include: {
@@ -801,6 +813,9 @@ router.get(
 
     if (!testCase || testCase.isDeleted) {
       return res.status(404).json({ message: "Test case not found" });
+    }
+    if (projectId && testCase.projectId !== projectId) {
+      return res.status(404).json({ message: "Test case not found in selected project" });
     }
     return res.json(testCase);
   }
@@ -854,6 +869,18 @@ router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, 
   }
 
   const nextCode = requestedCode || (await generateTestCaseCode());
+  if (projectId) {
+    const project = await prisma.project.findUnique({
+      where: { id: projectId },
+      select: { id: true, isActive: true },
+    });
+    if (!project?.id) {
+      return res.status(400).json({ message: "Invalid projectId" });
+    }
+    if (!project.isActive) {
+      return res.status(400).json({ message: "Cannot create test case in archived project" });
+    }
+  }
   const created = await prisma.testCase.create({
     data: {
       testCaseCode: nextCode,
@@ -2658,6 +2685,8 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     const name = asString(req.body.name);
     const description = asString(req.body.description) || null;
+    const projectIdInput = asString(req.body.projectId) || null;
+    const milestoneIdInput = asString(req.body.milestoneId) || null;
     const targetStartDate = req.body.targetStartDate ? new Date(req.body.targetStartDate) : null;
     const targetEndDate = req.body.targetEndDate ? new Date(req.body.targetEndDate) : null;
     const testerIds = Array.isArray(req.body.testerIds) ? asStringArray(req.body.testerIds) : [];
@@ -2683,11 +2712,19 @@ router.post(
     const distinctTesterIds = [...new Set(testerIds)];
     const foundCases = await prisma.testCase.findMany({
       where: { id: { in: distinctCaseIds }, isDeleted: false },
-      select: { id: true },
+      select: { id: true, projectId: true },
     });
     if (foundCases.length !== distinctCaseIds.length) {
       return res.status(400).json({ message: "One or more testCaseIds are invalid or deleted" });
     }
+    const inferredProjectIds = [...new Set(foundCases.map((item) => item.projectId).filter(Boolean))];
+    if (inferredProjectIds.length > 1) {
+      return res.status(400).json({ message: "All selected test cases must belong to the same project" });
+    }
+    if (projectIdInput && inferredProjectIds.length > 0 && inferredProjectIds[0] !== projectIdInput) {
+      return res.status(400).json({ message: "Provided projectId does not match selected test cases" });
+    }
+    const finalProjectId = projectIdInput || (inferredProjectIds[0] as string | undefined) || null;
 
     if (distinctTesterIds.length > 0) {
       const testers = await prisma.user.findMany({
@@ -2700,7 +2737,7 @@ router.post(
     }
 
     const created = await prisma.$transaction(async (tx) => {
-      const run = await tx.testRun.create({
+      const run = await (tx as any).testRun.create({
         data: {
           name,
           description,
@@ -2708,6 +2745,8 @@ router.post(
           targetStartDate,
           targetEndDate,
           status: TestRunStatus.PLANNED,
+          projectId: finalProjectId,
+          milestoneId: milestoneIdInput || null,
         },
       });
       if (distinctCaseIds.length > 0) {
@@ -2743,6 +2782,7 @@ router.get(
   "/test-runs",
   authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
+    const projectId = asString(req.query.projectId);
     const where: Prisma.TestRunWhereInput =
       req.user!.role === Role.ADMIN
         ? {}
@@ -2752,6 +2792,25 @@ router.get(
               { assignments: { some: { testerId: req.user!.userId } } },
             ],
           };
+    if (projectId) {
+      (where as any).AND = [
+        req.user!.role === Role.ADMIN
+          ? {}
+          : {
+              OR: [
+                { createdBy: req.user!.userId },
+                { assignments: { some: { testerId: req.user!.userId } } },
+              ],
+            },
+        {
+          OR: [
+            { projectId },
+            { testCases: { some: { testCase: { projectId } } } },
+          ],
+        },
+      ];
+      delete (where as any).OR;
+    }
 
     const runs = await prisma.testRun.findMany({
       where,
@@ -3595,8 +3654,18 @@ router.get(
   "/reports/test-executions",
   authorizeRoles(Role.TESTER, Role.DEVELOPER),
   async (req: AuthRequest, res: Response) => {
+    const projectId = getProjectIdFromRequest(req);
     const executions = await prisma.testExecution.findMany({
-      where: { isDraft: false },
+      where: {
+        isDraft: false,
+        ...(projectId
+          ? {
+              testCase: {
+                is: { projectId },
+              },
+            }
+          : {}),
+      },
       include: {
         testCase: { select: { id: true, title: true } },
         executor: { select: { id: true, name: true, email: true } },
@@ -3657,6 +3726,7 @@ router.get(
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const testRunId = asString(req.query.testRunId);
+    const projectId = getProjectIdFromRequest(req);
     const from = asString(req.query.from);
     const to = asString(req.query.to);
     const fromDate = from ? new Date(from) : null;
@@ -3667,6 +3737,13 @@ router.get(
     const where: Prisma.TestExecutionWhereInput = {
       isDraft: false,
       ...(testRunId ? { testRunId } : {}),
+      ...(projectId
+        ? {
+            testCase: {
+              is: { projectId },
+            },
+          }
+        : {}),
       ...(validFrom || validTo
         ? {
             executedAt: {
@@ -3808,6 +3885,7 @@ router.get(
 
     const payload = {
       runName,
+      projectId: projectId || null,
       period: { from: reportStart, to: reportEnd },
       totalExecuted,
       breakdown: { passed, failed, blocked, skipped },
@@ -3882,12 +3960,20 @@ router.get(
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const testerId = asString(req.query.testerId);
+    const projectId = getProjectIdFromRequest(req);
     const fromDate = asDate(req.query.from);
     const toDate = asDate(req.query.to);
 
     const executionWhere: Prisma.TestExecutionWhereInput = {
       isDraft: false,
       ...(testerId ? { executedBy: testerId } : {}),
+      ...(projectId
+        ? {
+            testCase: {
+              is: { projectId },
+            },
+          }
+        : {}),
       ...(fromDate || toDate
         ? {
             executedAt: {
@@ -3925,7 +4011,12 @@ router.get(
         })
       : [];
 
-    const totalRepositoryCases = await prisma.testCase.count({ where: { isDeleted: false } });
+    const totalRepositoryCases = await prisma.testCase.count({
+      where: {
+        isDeleted: false,
+        ...(projectId ? { projectId } : {}),
+      },
+    });
 
     const byTester = new Map<
       string,
@@ -4276,11 +4367,20 @@ router.delete("/reports/schedules/:id", authorizeRoles(Role.TESTER, Role.ADMIN),
 router.get(
   "/reports/bugs/summary",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
-  async (_req: AuthRequest, res: Response) => {
+  async (req: AuthRequest, res: Response) => {
+    const projectId = getProjectIdFromRequest(req);
     const now = Date.now();
     const bugs = await prismaAny.issue.findMany({
+      where: projectId
+        ? {
+            testCase: {
+              is: { projectId },
+            },
+          }
+        : undefined,
       include: {
         assignee: { select: { id: true, name: true, email: true } },
+        testCase: { select: { projectId: true } },
       },
       orderBy: { createdAt: "asc" },
     });
@@ -4289,6 +4389,7 @@ router.get(
     const bySeverity = new Map<string, number>();
     const byPriority = new Map<string, number>();
     const byDeveloper = new Map<string, { developerId: string; developerName: string; total: number }>();
+    const byProject = new Map<string, { projectId: string; projectName: string; total: number }>();
     const trendByDay = new Map<string, { date: string; created: number; resolved: number }>();
     const agingBuckets = {
       "0-3": 0,
@@ -4328,6 +4429,15 @@ router.get(
       };
       developerRow.total += 1;
       byDeveloper.set(developerKey, developerRow);
+
+      const bugProjectId = String(bug.testCase?.projectId || "unscoped");
+      const projectRow = byProject.get(bugProjectId) || {
+        projectId: bugProjectId,
+        projectName: bugProjectId === "unscoped" ? "Unscoped" : bugProjectId,
+        total: 0,
+      };
+      projectRow.total += 1;
+      byProject.set(bugProjectId, projectRow);
 
       if (!closedLikeStatuses.has(status)) {
         const ageDays = Math.max(0, Math.floor((now - new Date(bug.createdAt).getTime()) / 86_400_000));
@@ -4380,6 +4490,7 @@ router.get(
         .map(([priority, total]) => ({ priority, total }))
         .sort((a, b) => b.total - a.total),
       byDeveloper: Array.from(byDeveloper.values()).sort((a, b) => b.total - a.total),
+      byProject: Array.from(byProject.values()).sort((a, b) => b.total - a.total),
       trendsOverTime: Array.from(trendByDay.values()).sort((a, b) => a.date.localeCompare(b.date)),
       resolutionTime: {
         resolvedCount: resolutionDays.length,
@@ -4393,10 +4504,66 @@ router.get(
 );
 
 router.get(
+  "/reports/cross-project-summary",
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  async (_req: AuthRequest, res: Response) => {
+    const projects = await prisma.project.findMany({
+      select: { id: true, name: true, isActive: true },
+      orderBy: { name: "asc" },
+    });
+
+    const byProject = await Promise.all(
+      projects.map(async (project) => {
+        const [testCaseCount, executionCount, failedExecutionCount, bugCount] = await Promise.all([
+          prisma.testCase.count({ where: { projectId: project.id, isDeleted: false } }),
+          prisma.testExecution.count({
+            where: {
+              isDraft: false,
+              testCase: { is: { projectId: project.id } },
+            },
+          }),
+          prisma.testExecution.count({
+            where: {
+              isDraft: false,
+              result: ExecutionStatus.FAILED,
+              testCase: { is: { projectId: project.id } },
+            },
+          }),
+          prisma.issue.count({
+            where: {
+              testCase: { is: { projectId: project.id } },
+            },
+          }),
+        ]);
+
+        const passCount = executionCount - failedExecutionCount;
+        const passRate = executionCount > 0 ? Number(((passCount / executionCount) * 100).toFixed(1)) : 0;
+        return {
+          projectId: project.id,
+          projectName: project.name,
+          status: project.isActive ? "ACTIVE" : "ARCHIVED",
+          testCaseCount,
+          executionCount,
+          failedExecutionCount,
+          bugCount,
+          passRate,
+        };
+      })
+    );
+
+    return res.json({
+      totalProjects: projects.length,
+      projects: byProject,
+    });
+  }
+);
+
+router.get(
   "/reports/developer-performance",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const developerIdFilter = asString(req.query.developerId);
+    const projectId = getProjectIdFromRequest(req);
     const from = asString(req.query.from);
     const to = asString(req.query.to);
     const fromDate = from ? new Date(from) : null;
@@ -4440,6 +4607,13 @@ router.get(
 
     const where: Prisma.IssueWhereInput = {
       assignedTo: { in: scopedDeveloperIds },
+      ...(projectId
+        ? {
+            testCase: {
+              is: { projectId },
+            },
+          }
+        : {}),
       ...(validFrom || validTo
         ? {
             createdAt: {
@@ -4741,6 +4915,7 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
   const dueDate = asString(req.body.dueDate) || null;
   const severity = parseEnum(Severity, req.body.severity) || Severity.MEDIUM;
   const attachments = parseBugAttachments(req.body.attachments);
+  const projectId = getProjectIdFromRequest(req);
 
   if (!title || !details || !stepsToReproduce || !expectedBehavior || !actualBehavior) {
     return res.status(400).json({
@@ -4755,6 +4930,9 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
   if (linkedTestCaseId) {
     const tc = await prisma.testCase.findUnique({ where: { id: linkedTestCaseId } });
     if (!tc || tc.isDeleted) return res.status(400).json({ message: "Invalid linked testCaseId" });
+    if (projectId && tc.projectId !== projectId) {
+      return res.status(400).json({ message: "linked testCaseId does not belong to selected project" });
+    }
   }
   if (executionId) {
     const execution = await prisma.testExecution.findUnique({ where: { id: executionId } });
@@ -4811,6 +4989,8 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
   const statusFilter = parseBugWorkflowStatus(req.query.status);
   const priorityFilter = asString(req.query.priority).toUpperCase();
   const severityFilter = asString(req.query.severity).toUpperCase();
+  const projectId = getProjectIdFromRequest(req);
+  const projectWhere = projectId ? { testCase: { is: { projectId } } } : {};
   const rows = await prismaAny.issue.findMany({
     where:
       req.user!.role === Role.DEVELOPER && !developerAllScope
@@ -4819,6 +4999,7 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
             ...(statusFilter ? { workflowStatus: statusFilter } : {}),
             ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
             ...(severityFilter ? { severity: severityFilter as Severity } : {}),
+            ...projectWhere,
           }
         : mineOnly
         ? {
@@ -4826,16 +5007,18 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
             ...(statusFilter ? { workflowStatus: statusFilter } : {}),
             ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
             ...(severityFilter ? { severity: severityFilter as Severity } : {}),
+            ...projectWhere,
           }
         : {
             ...(statusFilter ? { workflowStatus: statusFilter } : {}),
             ...(priorityFilter ? { bugPriority: priorityFilter as BugPriority } : {}),
             ...(severityFilter ? { severity: severityFilter as Severity } : {}),
+            ...projectWhere,
           },
     include: {
       reporter: { select: { id: true, name: true, email: true } },
       assignee: { select: { id: true, name: true, email: true } },
-      testCase: { select: { id: true, title: true, testCaseCode: true } },
+      testCase: { select: { id: true, title: true, testCaseCode: true, projectId: true } },
       execution: { select: { id: true, result: true, executedAt: true } },
       comments: true,
       attachments: true,
@@ -4862,6 +5045,7 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), asy
 router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const scope = asString(req.query.scope).toLowerCase();
   const developerAllScope = req.user!.role === Role.DEVELOPER && scope === "all";
+  const projectId = getProjectIdFromRequest(req);
   const issue = await prismaAny.issue.findUnique({
     where: { id: req.params.id },
     include: {
@@ -4874,6 +5058,9 @@ router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
     },
   });
   if (!issue) return res.status(404).json({ message: "Bug not found" });
+  if (projectId && issue.testCase?.projectId !== projectId) {
+    return res.status(404).json({ message: "Bug not found in selected project" });
+  }
   if (req.user!.role === Role.DEVELOPER && !developerAllScope && issue.assignedTo !== req.user!.userId) {
     return res.status(403).json({ message: "You can view only assigned bugs" });
   }

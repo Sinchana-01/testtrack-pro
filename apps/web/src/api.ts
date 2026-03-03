@@ -364,6 +364,7 @@ export async function getTestExecutionReportSummaryApi(params?: {
   testRunId?: string;
   from?: string;
   to?: string;
+  projectId?: string;
   export?: "csv" | "excel" | "pdf";
 }) {
   const query = params
@@ -374,8 +375,13 @@ export async function getTestExecutionReportSummaryApi(params?: {
   return authJson(`/reports/test-executions/summary${query}`);
 }
 
-export async function getBugReportSummaryApi() {
-  return authJson("/reports/bugs/summary");
+export async function getBugReportSummaryApi(params?: { projectId?: string }) {
+  const query = params?.projectId ? `?projectId=${encodeURIComponent(params.projectId)}` : "";
+  return authJson(`/reports/bugs/summary${query}`);
+}
+
+export async function getCrossProjectSummaryApi() {
+  return authJson("/reports/cross-project-summary");
 }
 
 export async function getTesterPerformanceReportApi(params?: {
@@ -409,7 +415,7 @@ export async function exportTesterPerformanceReportApi(
 
 export async function exportTestExecutionReportApi(
   format: "csv" | "excel" | "pdf",
-  params?: { testRunId?: string; from?: string; to?: string }
+  params?: { testRunId?: string; from?: string; to?: string; projectId?: string }
 ) {
   const query = new URLSearchParams(
     Object.entries({ ...(params || {}), export: format }).filter(([, v]) => String(v || "").trim().length > 0)
@@ -856,12 +862,136 @@ export async function createAdminProjectApi(payload: { name: string; description
 
 export async function updateAdminProjectApi(
   id: string,
-  payload: { name?: string; description?: string; isActive?: boolean }
+  payload: { name?: string; code?: string; description?: string; isActive?: boolean; ownerId?: string }
 ) {
   return authJson(`/admin/projects/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
+  });
+}
+
+export async function listProjectMembersApi(projectId: string) {
+  return authJson(`/projects/${projectId}/members`);
+}
+
+export async function upsertProjectMemberApi(
+  projectId: string,
+  payload: { userId: string; roleInProject: "ADMIN" | "TESTER" | "DEVELOPER" }
+) {
+  return authJson(`/projects/${projectId}/members`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProjectMemberRoleApi(
+  projectId: string,
+  memberId: string,
+  roleInProject: "ADMIN" | "TESTER" | "DEVELOPER"
+) {
+  return authJson(`/projects/${projectId}/members/${memberId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roleInProject }),
+  });
+}
+
+export async function removeProjectMemberApi(projectId: string, memberId: string) {
+  return authJson(`/projects/${projectId}/members/${memberId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getProjectConfigurationApi(projectId: string) {
+  return authJson(`/projects/${projectId}/configuration`);
+}
+
+export async function updateProjectConfigurationApi(
+  projectId: string,
+  payload: {
+    customFields?: unknown;
+    modules?: unknown;
+    workflowConfig?: unknown;
+    environments?: unknown;
+  }
+) {
+  return authJson(`/projects/${projectId}/configuration`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listProjectMilestonesApi(projectId: string) {
+  return authJson(`/projects/${projectId}/milestones`);
+}
+
+export async function createProjectMilestoneApi(
+  projectId: string,
+  payload: {
+    name: string;
+    description?: string;
+    targetDate: string;
+    status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "MISSED";
+    targetPassRate?: number;
+    targetBugClosure?: number;
+  }
+) {
+  return authJson(`/projects/${projectId}/milestones`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProjectMilestoneApi(
+  projectId: string,
+  milestoneId: string,
+  payload: {
+    name?: string;
+    description?: string;
+    targetDate?: string;
+    status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "MISSED";
+    targetPassRate?: number;
+    targetBugClosure?: number;
+  }
+) {
+  return authJson(`/projects/${projectId}/milestones/${milestoneId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteProjectMilestoneApi(projectId: string, milestoneId: string) {
+  return authJson(`/projects/${projectId}/milestones/${milestoneId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function linkMilestoneTestRunApi(projectId: string, milestoneId: string, testRunId: string) {
+  return authJson(`/projects/${projectId}/milestones/${milestoneId}/link-test-run`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ testRunId }),
+  });
+}
+
+export async function getMilestoneProgressApi(projectId: string, milestoneId: string) {
+  return authJson(`/projects/${projectId}/milestones/${milestoneId}/progress`);
+}
+
+export async function archiveAdminProjectApi(id: string) {
+  return authJson(`/admin/projects/${id}/archive`, {
+    method: "POST",
+  });
+}
+
+export async function restoreAdminProjectApi(id: string) {
+  return authJson(`/admin/projects/${id}/restore`, {
+    method: "POST",
   });
 }
 

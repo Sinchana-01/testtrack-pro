@@ -1,12 +1,13 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { exportTestExecutionReportApi, getTestExecutionReportSummaryApi } from "../../api";
+import { exportTestExecutionReportApi, getTestExecutionReportSummaryApi, listProjectsApi } from "../../api";
 
 type Props = {
   testRuns: any[];
 };
 
 type ReportFilters = {
+  projectId?: string;
   testRunId?: string;
   from?: string;
   to?: string;
@@ -107,6 +108,7 @@ type ExecutionByModuleRow = NonNullable<ReportSummary["executionByModule"]>[numb
 
 const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
   const [selectedRunId, setSelectedRunId] = useState<string>("");
+  const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [appliedFilters, setAppliedFilters] = useState<ReportFilters>({});
@@ -115,6 +117,11 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
   const reportQuery = useQuery<ReportSummary, Error>({
     queryKey: ["test-execution-summary", appliedFilters],
     queryFn: () => getTestExecutionReportSummaryApi(appliedFilters),
+    keepPreviousData: true,
+  });
+  const projectsQuery = useQuery<any[], Error>({
+    queryKey: ["projects-for-reports"],
+    queryFn: () => listProjectsApi(),
     keepPreviousData: true,
   });
 
@@ -212,6 +219,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
 
   const applyFilters = () => {
     const nextFilters = {
+      projectId: selectedProjectId || undefined,
       testRunId: selectedRunId || undefined,
       from: fromDate || undefined,
       to: toDate || undefined,
@@ -219,12 +227,14 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
     setAppliedFilters(nextFilters);
     // Clear filter controls after generating report as requested.
     setSelectedRunId("");
+    setSelectedProjectId("");
     setFromDate("");
     setToDate("");
   };
 
   const resetAndRefresh = async () => {
     setSelectedRunId("");
+    setSelectedProjectId("");
     setFromDate("");
     setToDate("");
     setAppliedFilters({});
@@ -269,6 +279,14 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
         </div>
       </div>
       <div className="inlineGrid">
+        <select className="input" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
+          <option value="">All Projects</option>
+          {(projectsQuery.data || []).map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name}
+            </option>
+          ))}
+        </select>
         <select className="input" value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)}>
           <option value="">All Test Runs</option>
           {testRuns.map((run) => (
