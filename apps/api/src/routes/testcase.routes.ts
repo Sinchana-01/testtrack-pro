@@ -20,6 +20,12 @@ import { Router, Response } from "express";
 import prisma from "../prisma";
 import { authenticate, AuthRequest } from "../middleware/auth.middleware";
 import { authorizeRoles } from "../middleware/role.middleware";
+import {
+  applyProjectScopeMiddleware,
+  ensureWritableProject,
+  getProjectIdFromRequest,
+  projectGuards,
+} from "./testcase.project-scope";
 import { sendGenericEmail } from "../utils/email";
 
 const router = Router();
@@ -39,6 +45,26 @@ const parseEnum = <T extends Record<string, string>>(enumType: T, value: unknown
   return (Object.values(enumType) as string[]).includes(value) ? (value as T[keyof T]) : null;
 };
 
+const CROSS_PROJECT_REFERENCE_MESSAGE = "Cross-project reference is not allowed.";
+
+const TEST_CASE_STATUS_TRANSITIONS: Record<TestCaseStatus, TestCaseStatus[]> = {
+  [TestCaseStatus.DRAFT]: [TestCaseStatus.READY_FOR_REVIEW],
+  [TestCaseStatus.READY_FOR_REVIEW]: [TestCaseStatus.APPROVED, TestCaseStatus.DRAFT],
+  [TestCaseStatus.APPROVED]: [TestCaseStatus.DEPRECATED],
+  [TestCaseStatus.DEPRECATED]: [TestCaseStatus.ARCHIVED],
+  [TestCaseStatus.ARCHIVED]: [],
+  // Legacy statuses are treated as terminal under strict lifecycle rules.
+  [TestCaseStatus.READY]: [],
+  [TestCaseStatus.IN_PROGRESS]: [],
+  [TestCaseStatus.PASSED]: [],
+  [TestCaseStatus.FAILED]: [],
+};
+
+const isValidTestCaseStatusTransition = (current: TestCaseStatus, next: TestCaseStatus): boolean => {
+  if (current === next) return true;
+  return (TEST_CASE_STATUS_TRANSITIONS[current] || []).includes(next);
+};
+
 const asDate = (value: unknown): Date | null => {
   const input = asString(value);
   if (!input) return null;
@@ -46,12 +72,6 @@ const asDate = (value: unknown): Date | null => {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 };
 
-const getProjectIdFromRequest = (req: AuthRequest): string => {
-  const queryProjectId = asString((req.query as Record<string, unknown>)?.projectId);
-  const bodyProjectId = asString((req.body as Record<string, unknown>)?.projectId);
-  const headerProjectId = asString(req.headers["x-project-id"]);
-  return queryProjectId || bodyProjectId || headerProjectId;
-};
 
 const csvEscape = (value: unknown): string => `"${String(value ?? "").replace(/\"/g, "\"\"")}"`;
 
@@ -767,6 +787,13 @@ const resolveTestCaseRefs = async (
 };
 
 router.use(authenticate);
+const {
+  requireProjectFromRequest,
+  requireProjectFromTestCaseId,
+  requireProjectFromSuiteId,
+  requireProjectFromExecutionId,
+} = projectGuards;
+applyProjectScopeMiddleware(router);
 
 /* =========================
    TESTER/SHARED TEST CASE FLOWS
@@ -774,12 +801,13 @@ router.use(authenticate);
 router.get(
   "/testcases",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
-    const projectId = getProjectIdFromRequest(req);
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const testCases = await prisma.testCase.findMany({
       where: {
         isDeleted: false,
-        ...(projectId ? { projectId } : {}),
+        projectId,
       },
       include: {
         creator: { select: { id: true, name: true, email: true } },
@@ -796,8 +824,8 @@ router.get(
 router.get(
   "/testcases/:id",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromTestCaseId,
   async (req: AuthRequest, res: Response) => {
-    const projectId = getProjectIdFromRequest(req);
     const testCase = await prisma.testCase.findUnique({
       where: { id: req.params.id },
       include: {
@@ -814,14 +842,14 @@ router.get(
     if (!testCase || testCase.isDeleted) {
       return res.status(404).json({ message: "Test case not found" });
     }
-    if (projectId && testCase.projectId !== projectId) {
+    if (req.projectContext?.projectId && testCase.projectId !== req.projectContext.projectId) {
       return res.status(404).json({ message: "Test case not found in selected project" });
     }
     return res.json(testCase);
   }
 );
 
-router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/testcases", authorizeRoles(Role.TESTER), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const title = asString(req.body.title);
   const description = asString(req.body.description);
   const preConditions = parseJsonValue(req.body.preConditions, []);
@@ -842,7 +870,7 @@ router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, 
     parseEnum(AutomationStatus, req.body.automationStatus) || AutomationStatus.NOT_AUTOMATED;
   const automationScriptLink = asString(req.body.automationScriptLink) || null;
   const assignedTo = asString(req.body.assignedTo) || null;
-  const projectId = asString(req.body.projectId) || null;
+  const projectId = asString(req.body.projectId);
   const requestedCode = asString(req.body.testCaseCode);
 
   if (
@@ -869,18 +897,8 @@ router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, 
   }
 
   const nextCode = requestedCode || (await generateTestCaseCode());
-  if (projectId) {
-    const project = await prisma.project.findUnique({
-      where: { id: projectId },
-      select: { id: true, isActive: true },
-    });
-    if (!project?.id) {
-      return res.status(400).json({ message: "Invalid projectId" });
-    }
-    if (!project.isActive) {
-      return res.status(400).json({ message: "Cannot create test case in archived project" });
-    }
-  }
+  const writableProject = await ensureWritableProject(req, res, projectId);
+  if (!writableProject) return;
   const created = await prisma.testCase.create({
     data: {
       testCaseCode: nextCode,
@@ -905,7 +923,7 @@ router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, 
       lastModifiedBy: req.user!.userId,
       lastModifiedAt: new Date(),
       assignedTo,
-      projectId,
+      projectId: writableProject.id,
     },
   });
 
@@ -917,17 +935,33 @@ router.post("/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, 
   return res.status(201).json(created);
 });
 
-router.put("/testcases/:id", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.put(
+  "/testcases/:id",
+  authorizeRoles(Role.TESTER),
+  requireProjectFromTestCaseId,
+  async (req: AuthRequest, res: Response) => {
   const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
   if (!existing || existing.isDeleted) {
     return res.status(404).json({ message: "Test case not found" });
   }
+  if (req.projectContext?.projectId && existing.projectId !== req.projectContext.projectId) {
+    return res.status(404).json({ message: "Test case not found in selected project" });
+  }
   if (!isOwnerOrAssignee(req, existing.createdBy, existing.assignedTo)) {
     return res.status(403).json({ message: "You can edit only owned/assigned test cases" });
+  }
+  if (existing.status === TestCaseStatus.ARCHIVED) {
+    return res.status(403).json({ message: "Archived test cases cannot be modified or executed." });
   }
   const changeSummary = asString(req.body.changeSummary);
   if (!changeSummary) {
     return res.status(400).json({ message: "changeSummary is required for edit" });
+  }
+  const requestedStatus = parseEnum(TestCaseStatus, req.body.status);
+  if (requestedStatus && !isValidTestCaseStatusTransition(existing.status, requestedStatus)) {
+    return res.status(400).json({
+      message: `Invalid status transition from ${existing.status} to ${requestedStatus}`,
+    });
   }
   if (req.body.steps !== undefined) {
     const stepsValidationError = validateStepItems(parseJsonValue(req.body.steps, []));
@@ -956,7 +990,7 @@ router.put("/testcases/:id", authorizeRoles(Role.TESTER), async (req: AuthReques
       metadata: req.body.metadata !== undefined ? parseJsonValue(req.body.metadata, {}) : undefined,
       module: asString(req.body.module) || undefined,
       steps: req.body.steps !== undefined ? parseJsonValue(req.body.steps, []) : undefined,
-      status: parseEnum(TestCaseStatus, req.body.status) ?? undefined,
+      status: requestedStatus ?? undefined,
       priority: parseEnum(Priority, req.body.priority) ?? undefined,
       severity: parseEnum(TestSeverity, req.body.severity) ?? undefined,
       type: parseEnum(TestCaseType, req.body.type) ?? undefined,
@@ -986,7 +1020,8 @@ router.put("/testcases/:id", authorizeRoles(Role.TESTER), async (req: AuthReques
 
   await writeAuditLog(req.user!.userId, "EDIT_TEST_CASE", "TestCase", updated.id);
   return res.json(updated);
-});
+}
+);
 
 router.delete(
   "/testcases/:id",
@@ -995,6 +1030,9 @@ router.delete(
     const existing = await prisma.testCase.findUnique({ where: { id: req.params.id } });
     if (!existing || existing.isDeleted) {
       return res.status(404).json({ message: "Test case not found" });
+    }
+    if (existing.status === TestCaseStatus.ARCHIVED) {
+      return res.status(403).json({ message: "Archived test cases cannot be modified or executed." });
     }
     if (!isOwnerOrAssignee(req, existing.createdBy, existing.assignedTo)) {
       return res.status(403).json({ message: "You can delete only owned/assigned test cases" });
@@ -1370,6 +1408,7 @@ router.delete(
 router.post(
   "/testcases/from-template/:templateId",
   authorizeRoles(Role.TESTER),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.templateId } });
     if (!template) {
@@ -1391,7 +1430,9 @@ router.post(
     const metadata = parseJsonValue(req.body.metadata, template.metadata ?? {});
     const moduleName = asString(req.body.module) || template.module || "General";
     const assignedTo = asString(req.body.assignedTo) || null;
-    const projectId = asString(req.body.projectId) || null;
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
+    const writableProject = await ensureWritableProject(req, res, projectId);
+    if (!writableProject) return;
     const nextCode = await generateTestCaseCode();
 
     const created = await prisma.testCase.create({
@@ -1418,7 +1459,7 @@ router.post(
         lastModifiedBy: req.user!.userId,
         lastModifiedAt: new Date(),
         assignedTo,
-        projectId,
+        projectId: writableProject.id,
       },
     });
     await writeAuditLog(req.user!.userId, "CREATE_TEST_CASE_FROM_TEMPLATE", "TestCase", created.id, {
@@ -1431,6 +1472,7 @@ router.post(
 router.post(
   "/testcases/bulk",
   authorizeRoles(Role.TESTER),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const operation = asString(req.body.operation).toUpperCase();
     const idsRaw = Array.isArray(req.body.ids) ? req.body.ids : [];
@@ -1451,10 +1493,18 @@ router.post(
             OR: [{ createdBy: req.user!.userId }, { assignedTo: req.user!.userId }],
           };
 
-    const found = await prisma.testCase.findMany({ where: ownedOrAssignedFilter, select: { id: true } });
+    const found = await prisma.testCase.findMany({
+      where: ownedOrAssignedFilter,
+      select: { id: true, status: true },
+    });
     const allowedIds = found.map((item) => item.id);
     if (allowedIds.length === 0) {
       return res.status(403).json({ message: "No authorized test cases for bulk operation" });
+    }
+    const hasArchived = found.some((item) => item.status === TestCaseStatus.ARCHIVED);
+    const readOnlyOps = new Set(["EXPORT_CSV", "EXPORT_EXCEL"]);
+    if (hasArchived && !readOnlyOps.has(operation)) {
+      return res.status(403).json({ message: "Archived test cases cannot be modified or executed." });
     }
 
     let resultCount = 0;
@@ -1472,6 +1522,12 @@ router.post(
       const status = parseEnum(TestCaseStatus, req.body.status);
       if (!status) {
         return res.status(400).json({ message: "Valid status is required for STATUS" });
+      }
+      const invalid = found.find((item) => !isValidTestCaseStatusTransition(item.status, status));
+      if (invalid) {
+        return res.status(400).json({
+          message: `Invalid status transition from ${invalid.status} to ${status}`,
+        });
       }
       const result = await prisma.testCase.updateMany({
         where: { id: { in: allowedIds } },
@@ -1512,6 +1568,21 @@ router.post(
       const suiteId = asString(req.body.suiteId);
       if (!suiteId) {
         return res.status(400).json({ message: "suiteId is required for MOVE_SUITE" });
+      }
+      const suite = await prismaAny.testSuite.findUnique({
+        where: { id: suiteId },
+        select: { id: true, isArchived: true, projectId: true },
+      });
+      if (!suite || suite.isArchived) {
+        return res.status(404).json({ message: "Suite not found" });
+      }
+      const cases = await prisma.testCase.findMany({
+        where: { id: { in: allowedIds }, isDeleted: false },
+        select: { id: true, projectId: true },
+      });
+      const invalid = cases.find((row) => row.projectId !== suite.projectId);
+      if (invalid) {
+        return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
       }
       for (const testCaseId of allowedIds) {
         await prisma.testSuiteCase.upsert({
@@ -1581,6 +1652,7 @@ router.post(
 router.post(
   "/testcases/import",
   authorizeRoles(Role.TESTER),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const sourceType = parseEnum(ImportSourceType, asString(req.body.sourceType).toUpperCase());
     if (!sourceType) {
@@ -1597,7 +1669,9 @@ router.post(
         : {};
     const mapKey = (key: string): string => (fieldMapping[key] || key).toLowerCase();
 
-    const projectId = asString(req.body.projectId) || null;
+    const projectId = asString(req.body.projectId);
+    const writableProject = await ensureWritableProject(req, res, projectId);
+    if (!writableProject) return;
     const assignedTo = asString(req.body.assignedTo) || null;
     const errors: string[] = [];
     const createdIds: string[] = [];
@@ -1845,7 +1919,7 @@ router.post(
             lastModifiedBy: req.user!.userId,
             lastModifiedAt: new Date(),
             assignedTo,
-            projectId,
+            projectId: writableProject.id,
           },
         });
         createdIds.push(created.id);
@@ -1911,6 +1985,9 @@ router.get(
       if (!included) {
         return res.status(403).json({ message: "Selected test case is not part of this test run" });
       }
+      if (run.projectId !== existing.projectId) {
+        return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+      }
       try {
         await enforceSuiteExecutionModeConstraints({
           testRunId,
@@ -1925,6 +2002,7 @@ router.get(
     const latestDraft = await prisma.testExecution.findFirst({
       where: {
         testCaseId: existing.id,
+        projectId: existing.projectId,
         executedBy: req.user!.userId,
         testRunId: testRunId || null,
         isDraft: true,
@@ -1996,6 +2074,12 @@ router.post(
     if (!existing || existing.isDeleted) {
       return res.status(404).json({ message: "Test case not found" });
     }
+    if (existing.status === TestCaseStatus.ARCHIVED) {
+      return res.status(403).json({ message: "Archived test cases cannot be modified or executed." });
+    }
+    if (existing.status !== TestCaseStatus.APPROVED) {
+      return res.status(403).json({ message: "Only approved test cases can be executed." });
+    }
 
     const testRunId = asString(req.body.testRunId) || null;
     if (testRunId) {
@@ -2043,6 +2127,7 @@ router.post(
     const execution = await prisma.testExecution.create({
       data: {
         testCaseId: existing.id,
+        projectId: existing.projectId,
         executedBy: req.user!.userId,
         testRunId,
         result: ExecutionStatus.SKIPPED,
@@ -2489,10 +2574,17 @@ router.post(
     if (!canManageExecution(req, original.executedBy)) {
       return res.status(403).json({ message: "You can re-execute only your own execution" });
     }
+    if (original.testCase.status === TestCaseStatus.ARCHIVED) {
+      return res.status(403).json({ message: "Archived test cases cannot be modified or executed." });
+    }
+    if (original.testCase.status !== TestCaseStatus.APPROVED) {
+      return res.status(403).json({ message: "Only approved test cases can be executed." });
+    }
 
     const restarted = await prisma.testExecution.create({
       data: {
         testCaseId: original.testCaseId,
+        projectId: original.testCase.projectId,
         executedBy: req.user!.userId,
         testRunId: original.testRunId,
         result: ExecutionStatus.SKIPPED,
@@ -2603,6 +2695,12 @@ router.post(
     if (!existing || existing.isDeleted) {
       return res.status(404).json({ message: "Test case not found" });
     }
+    if (existing.status === TestCaseStatus.ARCHIVED) {
+      return res.status(403).json({ message: "Archived test cases cannot be modified or executed." });
+    }
+    if (existing.status !== TestCaseStatus.APPROVED) {
+      return res.status(403).json({ message: "Only approved test cases can be executed." });
+    }
 
     const result = parseEnum(ExecutionStatus, req.body.result);
     if (!result) {
@@ -2627,6 +2725,9 @@ router.post(
       if (!included) {
         return res.status(403).json({ message: "Selected test case is not part of this test run" });
       }
+      if (run.projectId !== existing.projectId) {
+        return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+      }
       try {
         await enforceSuiteExecutionModeConstraints({
           testRunId,
@@ -2641,6 +2742,7 @@ router.post(
     const execution = await prisma.testExecution.create({
       data: {
         testCaseId: existing.id,
+        projectId: existing.projectId,
         executedBy: req.user!.userId,
         testRunId,
         result,
@@ -2682,6 +2784,7 @@ router.post(
 router.post(
   "/test-runs",
   authorizeRoles(Role.TESTER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const name = asString(req.body.name);
     const description = asString(req.body.description) || null;
@@ -2712,19 +2815,37 @@ router.post(
     const distinctTesterIds = [...new Set(testerIds)];
     const foundCases = await prisma.testCase.findMany({
       where: { id: { in: distinctCaseIds }, isDeleted: false },
-      select: { id: true, projectId: true },
+      select: { id: true, projectId: true, status: true },
     });
     if (foundCases.length !== distinctCaseIds.length) {
       return res.status(400).json({ message: "One or more testCaseIds are invalid or deleted" });
     }
     const inferredProjectIds = [...new Set(foundCases.map((item) => item.projectId).filter(Boolean))];
+    const archivedInRun = foundCases.find((item) => item.status === TestCaseStatus.ARCHIVED);
+    if (archivedInRun) {
+      return res.status(403).json({ message: "Archived test cases cannot be added to test runs." });
+    }
     if (inferredProjectIds.length > 1) {
-      return res.status(400).json({ message: "All selected test cases must belong to the same project" });
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
     }
     if (projectIdInput && inferredProjectIds.length > 0 && inferredProjectIds[0] !== projectIdInput) {
-      return res.status(400).json({ message: "Provided projectId does not match selected test cases" });
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
     }
-    const finalProjectId = projectIdInput || (inferredProjectIds[0] as string | undefined) || null;
+    const finalProjectId = projectIdInput || (inferredProjectIds[0] as string | undefined) || "";
+    const writableProject = await ensureWritableProject(req, res, finalProjectId);
+    if (!writableProject) return;
+    if (milestoneIdInput) {
+      const milestone = await prismaAny.projectMilestone.findUnique({
+        where: { id: milestoneIdInput },
+        select: { id: true, projectId: true },
+      });
+      if (!milestone?.id) {
+        return res.status(404).json({ message: "Milestone not found" });
+      }
+      if (milestone.projectId !== writableProject.id) {
+        return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+      }
+    }
 
     if (distinctTesterIds.length > 0) {
       const testers = await prisma.user.findMany({
@@ -2745,7 +2866,7 @@ router.post(
           targetStartDate,
           targetEndDate,
           status: TestRunStatus.PLANNED,
-          projectId: finalProjectId,
+          projectId: writableProject.id,
           milestoneId: milestoneIdInput || null,
         },
       });
@@ -2781,36 +2902,19 @@ router.post(
 router.get(
   "/test-runs",
   authorizeRoles(Role.TESTER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
-    const projectId = asString(req.query.projectId);
+    const projectId = req.projectContext?.projectId || asString(req.query.projectId);
     const where: Prisma.TestRunWhereInput =
       req.user!.role === Role.ADMIN
-        ? {}
+        ? { projectId }
         : {
+            projectId,
             OR: [
               { createdBy: req.user!.userId },
               { assignments: { some: { testerId: req.user!.userId } } },
             ],
           };
-    if (projectId) {
-      (where as any).AND = [
-        req.user!.role === Role.ADMIN
-          ? {}
-          : {
-              OR: [
-                { createdBy: req.user!.userId },
-                { assignments: { some: { testerId: req.user!.userId } } },
-              ],
-            },
-        {
-          OR: [
-            { projectId },
-            { testCases: { some: { testCase: { projectId } } } },
-          ],
-        },
-      ];
-      delete (where as any).OR;
-    }
 
     const runs = await prisma.testRun.findMany({
       where,
@@ -2960,6 +3064,12 @@ router.post(
     if (!testCase || testCase.isDeleted) {
       return res.status(404).json({ message: "Test case not found" });
     }
+    if (testCase.status === TestCaseStatus.ARCHIVED) {
+      return res.status(403).json({ message: "Archived test cases cannot be added to test runs." });
+    }
+    if (testCase.projectId !== run.projectId) {
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+    }
 
     const linked = await prisma.testRunCase.upsert({
       where: { testRunId_testCaseId: { testRunId: run.id, testCaseId } },
@@ -3010,14 +3120,16 @@ router.post(
   }
 );
 
-router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites", authorizeRoles(Role.TESTER), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   try {
     const name = asString(req.body.name);
     if (!name) {
       return res.status(400).json({ message: "Suite name is required" });
     }
     const parentSuiteId = asString(req.body.parentSuiteId) || null;
-    const projectId = asString(req.body.projectId) || null;
+    const projectId = asString(req.body.projectId);
+    const writableProject = await ensureWritableProject(req, res, projectId);
+    if (!writableProject) return;
     const moduleName = asString(req.body.module) || null;
     const suiteType =
       (parseEnum(SUITE_TYPE, asString(req.body.type).toUpperCase()) || SUITE_TYPE.STATIC) as SuiteTypeValue;
@@ -3028,11 +3140,13 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
         : {};
     const filterModules = Array.isArray(rawFilter.modules) ? asStringArray(rawFilter.modules) : [];
     const dynamicModules = [...new Set([...filterModules, ...(moduleName ? [moduleName] : [])])].filter(Boolean);
-
     if (parentSuiteId) {
       const parentSuite = await prismaAny.testSuite.findUnique({ where: { id: parentSuiteId } });
       if (!parentSuite || parentSuite.isArchived) {
         return res.status(404).json({ message: "Parent suite not found" });
+      }
+      if (String(parentSuite.projectId || "") !== writableProject.id) {
+        return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
       }
     }
 
@@ -3047,6 +3161,7 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
       const matchedCases = await prisma.testCase.findMany({
         where: {
           isDeleted: false,
+          projectId: writableProject.id,
           module: { not: null },
         },
         select: { id: true, module: true },
@@ -3071,6 +3186,19 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
         });
       }
       resolvedCaseIds = resolvedRefs.resolvedIds;
+      if (resolvedCaseIds.length > 0) {
+        const cases = await prisma.testCase.findMany({
+          where: { id: { in: resolvedCaseIds }, isDeleted: false },
+          select: { id: true, projectId: true },
+        });
+        const caseProjectIds = [...new Set(cases.map((item) => item.projectId).filter(Boolean))];
+        if (caseProjectIds.length > 1) {
+          return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+        }
+        if (caseProjectIds.length > 0 && caseProjectIds[0] !== writableProject.id) {
+          return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+        }
+      }
     }
 
     const created = await prisma.$transaction(async (tx) => {
@@ -3079,7 +3207,7 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
         description: asString(req.body.description) || null,
         module: moduleName,
         createdBy: req.user!.userId,
-        projectId,
+        projectId: writableProject.id,
         parentSuiteId,
       };
 
@@ -3128,15 +3256,15 @@ router.post("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res
   }
 });
 
-router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites", authorizeRoles(Role.TESTER), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const includeArchived = String(req.query.includeArchived || "").toLowerCase() === "true";
   const parentSuiteId = asString(req.query.parentSuiteId);
-  const projectId = asString(req.query.projectId);
+  const projectId = req.projectContext?.projectId || asString(req.query.projectId);
   const moduleName = asString(req.query.module);
   const where: any = {
     ...(includeArchived ? {} : { isArchived: false }),
     ...(parentSuiteId ? { parentSuiteId } : {}),
-    ...(projectId ? { projectId } : {}),
+    projectId,
     ...(moduleName ? { module: moduleName } : {}),
   };
 
@@ -3152,7 +3280,7 @@ router.get("/suites", authorizeRoles(Role.TESTER), async (req: AuthRequest, res:
   return res.json(suites);
 });
 
-router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suite = await (prisma as any).testSuite.findUnique({
     where: { id: req.params.suiteId },
     include: {
@@ -3172,7 +3300,7 @@ router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequ
   return res.json(suite);
 });
 
-router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
 
@@ -3198,13 +3326,33 @@ router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRe
     }
   }
 
+  let nextProjectId: string | undefined;
+  if (req.body.projectId !== undefined) {
+    const candidateProjectId = asString(req.body.projectId);
+    const writableProject = await ensureWritableProject(req, res, candidateProjectId);
+    if (!writableProject) return;
+    const linkedCases = await prismaAny.testSuiteCase.findMany({
+      where: { suiteId: suite.id },
+      select: { testCase: { select: { id: true, projectId: true } } },
+    });
+    const invalidLink = linkedCases.find(
+      (row: any) => String(row.testCase?.projectId || "") !== writableProject.id
+    );
+    if (invalidLink) {
+      return res.status(400).json({
+        message: CROSS_PROJECT_REFERENCE_MESSAGE,
+      });
+    }
+    nextProjectId = writableProject.id;
+  }
+
   const updated = await prismaAny.testSuite.update({
     where: { id: suite.id },
     data: {
       name: asString(req.body.name) || undefined,
       description: req.body.description !== undefined ? asString(req.body.description) || null : undefined,
       module: req.body.module !== undefined ? asString(req.body.module) || null : undefined,
-      projectId: req.body.projectId !== undefined ? asString(req.body.projectId) || null : undefined,
+      projectId: nextProjectId,
       parentSuiteId,
     },
   });
@@ -3213,7 +3361,7 @@ router.patch("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRe
   return res.json(updated);
 });
 
-router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suiteId = req.params.suiteId;
   const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
   if (!suite || suite.isArchived) return res.status(404).json({ message: "Suite not found" });
@@ -3231,6 +3379,16 @@ router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), async (re
     return res.status(400).json({
       message: `One or more testCaseIds are invalid/deleted: ${resolvedRefs.unresolved.join(", ")}`,
     });
+  }
+  if (suite.projectId) {
+    const linkedCases = await prisma.testCase.findMany({
+      where: { id: { in: resolvedRefs.resolvedIds }, isDeleted: false },
+      select: { id: true, projectId: true },
+    });
+    const invalidCase = linkedCases.find((item) => item.projectId !== suite.projectId);
+    if (invalidCase) {
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+    }
   }
 
   const maxPosRow = await (prisma as any).testSuiteCase.findFirst({
@@ -3261,6 +3419,7 @@ router.post("/suites/:suiteId/testcases", authorizeRoles(Role.TESTER), async (re
 router.delete(
   "/suites/:suiteId/testcases/:testCaseId",
   authorizeRoles(Role.TESTER),
+  requireProjectFromSuiteId,
   async (req: AuthRequest, res: Response) => {
     const suiteId = req.params.suiteId;
     const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
@@ -3284,6 +3443,7 @@ router.delete(
 router.patch(
   "/suites/:suiteId/testcases/reorder",
   authorizeRoles(Role.TESTER),
+  requireProjectFromSuiteId,
   async (req: AuthRequest, res: Response) => {
     const suiteId = req.params.suiteId;
     const suite = await prismaAny.testSuite.findUnique({ where: { id: suiteId } });
@@ -3323,7 +3483,7 @@ router.patch(
   }
 );
 
-router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const source = await (prisma as any).testSuite.findUnique({
     where: { id: req.params.suiteId },
     include: { suiteCases: { orderBy: { position: "asc" } } },
@@ -3360,7 +3520,7 @@ router.post("/suites/:suiteId/clone", authorizeRoles(Role.TESTER), async (req: A
   return res.status(201).json(clone);
 });
 
-router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
   if (suite.isArchived) return res.status(400).json({ message: "Suite is already archived" });
@@ -3378,7 +3538,7 @@ router.post("/suites/:suiteId/archive", authorizeRoles(Role.TESTER), async (req:
   return res.json(updated);
 });
 
-router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({ where: { id: req.params.suiteId } });
   if (!suite) return res.status(404).json({ message: "Suite not found" });
   if (!suite.isArchived) return res.status(400).json({ message: "Suite is already active" });
@@ -3400,7 +3560,7 @@ router.post("/suites/:suiteId/restore", authorizeRoles(Role.TESTER), async (req:
   return res.json(updated);
 });
 
-router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suite = await prismaAny.testSuite.findUnique({
     where: { id: req.params.suiteId },
     select: {
@@ -3438,7 +3598,7 @@ router.delete("/suites/:suiteId", authorizeRoles(Role.TESTER), async (req: AuthR
   return res.json({ message: "Suite deleted permanently", id: suite.id });
 });
 
-router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.post("/suite-executions", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suiteId = asString(req.body.suiteId);
   const mode = parseEnum(SUITE_EXECUTION_MODE, req.body.mode) || SUITE_EXECUTION_MODE.SEQUENTIAL;
   const linkedTestRunId = asString(req.body.linkedTestRunId);
@@ -3500,10 +3660,34 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
   if (linkedTestRunId) {
     const linkedRun = await prisma.testRun.findUnique({
       where: { id: linkedTestRunId },
-      select: { id: true },
+      select: { id: true, projectId: true },
     });
     if (!linkedRun) {
       return res.status(404).json({ message: "Linked test run not found" });
+    }
+    if (linkedRun.projectId !== suite.projectId) {
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+    }
+  }
+
+  const candidateCaseIds = [...new Set(suiteCasesForExecution.map((item: any) => String(item.testCaseId)))];
+  if (candidateCaseIds.length > 0) {
+    const suiteCases = await prisma.testCase.findMany({
+      where: { id: { in: candidateCaseIds }, isDeleted: false },
+      select: { id: true, status: true },
+    });
+    const byId = new Map(suiteCases.map((row) => [row.id, row]));
+    const archived = suiteCases.find((row) => row.status === TestCaseStatus.ARCHIVED);
+    if (archived) {
+      return res.status(403).json({ message: "Archived test cases cannot be added to test runs." });
+    }
+    const nonApproved = suiteCases.find((row) => row.status !== TestCaseStatus.APPROVED);
+    if (nonApproved) {
+      return res.status(403).json({ message: "Only approved test cases can be executed." });
+    }
+    const missingId = candidateCaseIds.find((id) => !byId.has(id));
+    if (missingId) {
+      return res.status(400).json({ message: "Suite execution contains invalid or deleted test cases" });
     }
   }
 
@@ -3552,6 +3736,7 @@ router.post("/suite-executions", authorizeRoles(Role.TESTER), async (req: AuthRe
           targetStartDate: req.body.targetStartDate ? new Date(req.body.targetStartDate) : null,
           targetEndDate: req.body.targetEndDate ? new Date(req.body.targetEndDate) : null,
           status: TestRunStatus.PLANNED,
+          projectId: suite.projectId,
         },
       });
       await tx.testRunCase.createMany({
@@ -3637,7 +3822,7 @@ router.get("/suite-executions/:id", authorizeRoles(Role.TESTER), async (req: Aut
   return res.json(suiteExecution);
 });
 
-router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), async (req: AuthRequest, res: Response) => {
+router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), requireProjectFromSuiteId, async (req: AuthRequest, res: Response) => {
   const suiteId = req.params.suiteId;
   const executions = await (prisma as any).testSuiteExecution.findMany({
     where: { suiteId },
@@ -3653,8 +3838,9 @@ router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), async (re
 router.get(
   "/reports/test-executions",
   authorizeRoles(Role.TESTER, Role.DEVELOPER),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
-    const projectId = getProjectIdFromRequest(req);
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const executions = await prisma.testExecution.findMany({
       where: {
         isDraft: false,
@@ -3724,9 +3910,10 @@ router.get(
 router.get(
   "/reports/test-executions/summary",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const testRunId = asString(req.query.testRunId);
-    const projectId = getProjectIdFromRequest(req);
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const from = asString(req.query.from);
     const to = asString(req.query.to);
     const fromDate = from ? new Date(from) : null;
@@ -3958,9 +4145,10 @@ router.get(
 router.get(
   "/reports/tester-performance",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const testerId = asString(req.query.testerId);
-    const projectId = getProjectIdFromRequest(req);
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const fromDate = asDate(req.query.from);
     const toDate = asDate(req.query.to);
 
@@ -4283,12 +4471,12 @@ const runScheduledReport = async (schedule: ReportSchedule) => {
   await sendGenericEmail(schedule.recipients, `Scheduled Report: ${schedule.reportType}`, html);
 };
 
-router.get("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), async (_req: AuthRequest, res: Response) => {
+router.get("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), requireProjectFromRequest, async (_req: AuthRequest, res: Response) => {
   const schedules = await loadReportSchedules();
   return res.json(schedules.sort((a, b) => (a.nextRunAt || "").localeCompare(b.nextRunAt || "")));
 });
 
-router.post("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const reportType = asString(req.body.reportType).toUpperCase() as ReportScheduleType;
   const format = asString(req.body.format).toUpperCase() as ReportSchedule["format"];
   const frequency = asString(req.body.frequency).toUpperCase() as ReportScheduleFrequency;
@@ -4342,6 +4530,7 @@ router.post("/reports/schedules", authorizeRoles(Role.TESTER, Role.ADMIN), async
 router.post(
   "/reports/schedules/:id/send-now",
   authorizeRoles(Role.TESTER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const schedules = await loadReportSchedules();
     const idx = schedules.findIndex((item) => item.id === req.params.id);
@@ -4354,7 +4543,7 @@ router.post(
   }
 );
 
-router.delete("/reports/schedules/:id", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.delete("/reports/schedules/:id", authorizeRoles(Role.TESTER, Role.ADMIN), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const schedules = await loadReportSchedules();
   const filtered = schedules.filter((item) => item.id !== req.params.id);
   if (filtered.length === schedules.length) {
@@ -4367,17 +4556,12 @@ router.delete("/reports/schedules/:id", authorizeRoles(Role.TESTER, Role.ADMIN),
 router.get(
   "/reports/bugs/summary",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
-    const projectId = getProjectIdFromRequest(req);
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const now = Date.now();
     const bugs = await prismaAny.issue.findMany({
-      where: projectId
-        ? {
-            testCase: {
-              is: { projectId },
-            },
-          }
-        : undefined,
+      where: { projectId },
       include: {
         assignee: { select: { id: true, name: true, email: true } },
         testCase: { select: { projectId: true } },
@@ -4505,7 +4689,7 @@ router.get(
 
 router.get(
   "/reports/cross-project-summary",
-  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  authorizeRoles(Role.ADMIN),
   async (_req: AuthRequest, res: Response) => {
     const projects = await prisma.project.findMany({
       select: { id: true, name: true, isActive: true },
@@ -4561,9 +4745,10 @@ router.get(
 router.get(
   "/reports/developer-performance",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const developerIdFilter = asString(req.query.developerId);
-    const projectId = getProjectIdFromRequest(req);
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const from = asString(req.query.from);
     const to = asString(req.query.to);
     const fromDate = from ? new Date(from) : null;
@@ -4852,6 +5037,7 @@ router.get(
 router.post(
   "/issues/from-executions/:executionId",
   authorizeRoles(Role.TESTER),
+  requireProjectFromExecutionId,
   async (req: AuthRequest, res: Response) => {
     const execution = await prisma.testExecution.findUnique({
       where: { id: req.params.executionId },
@@ -4864,7 +5050,6 @@ router.post(
     if (execution.result !== ExecutionStatus.FAILED) {
       return res.status(400).json({ message: "Only FAILED execution can be converted to a bug report" });
     }
-
     const assignedDeveloperId = await resolveActiveDeveloperId(req.body.assignedTo);
     if (asString(req.body.assignedTo) && !assignedDeveloperId) {
       return res.status(400).json({ message: "assignedTo must be an active developer (id or email)" });
@@ -4886,6 +5071,7 @@ router.post(
         status: IssueStatus.OPEN,
         environment: asString(req.body.environment) || null,
         affectedVersion: asString(req.body.affectedVersion) || null,
+        projectId: execution.projectId,
         testCaseId: execution.testCaseId,
         executionId: execution.id,
         reportedBy: req.user!.userId,
@@ -4898,7 +5084,7 @@ router.post(
   }
 );
 
-router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const title = asString(req.body.title);
   const details = asString(req.body.description);
   const stepsToReproduce = asString(req.body.stepsToReproduce);
@@ -4915,7 +5101,7 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
   const dueDate = asString(req.body.dueDate) || null;
   const severity = parseEnum(Severity, req.body.severity) || Severity.MEDIUM;
   const attachments = parseBugAttachments(req.body.attachments);
-  const projectId = getProjectIdFromRequest(req);
+  const projectIdInput = getProjectIdFromRequest(req);
 
   if (!title || !details || !stepsToReproduce || !expectedBehavior || !actualBehavior) {
     return res.status(400).json({
@@ -4927,17 +5113,37 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
     return res.status(400).json({ message: "Title cannot exceed 200 characters" });
   }
 
+  let resolvedProjectId = "";
   if (linkedTestCaseId) {
     const tc = await prisma.testCase.findUnique({ where: { id: linkedTestCaseId } });
     if (!tc || tc.isDeleted) return res.status(400).json({ message: "Invalid linked testCaseId" });
-    if (projectId && tc.projectId !== projectId) {
-      return res.status(400).json({ message: "linked testCaseId does not belong to selected project" });
+    if (projectIdInput && tc.projectId !== projectIdInput) {
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
     }
+    resolvedProjectId = tc.projectId;
   }
   if (executionId) {
-    const execution = await prisma.testExecution.findUnique({ where: { id: executionId } });
+    const execution = await prisma.testExecution.findUnique({
+      where: { id: executionId },
+      select: { id: true, testCaseId: true, projectId: true },
+    });
     if (!execution) return res.status(400).json({ message: "Invalid executionId" });
+    if (projectIdInput && execution.projectId !== projectIdInput) {
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+    }
+    if (linkedTestCaseId && execution.testCaseId !== linkedTestCaseId) {
+      return res.status(400).json({ message: "executionId does not match linked testCaseId" });
+    }
+    if (resolvedProjectId && execution.projectId !== resolvedProjectId) {
+      return res.status(403).json({ message: CROSS_PROJECT_REFERENCE_MESSAGE });
+    }
+    resolvedProjectId = execution.projectId;
   }
+  if (!resolvedProjectId) {
+    resolvedProjectId = projectIdInput;
+  }
+  const writableProject = await ensureWritableProject(req, res, resolvedProjectId);
+  if (!writableProject) return;
   const assignedTo = await resolveActiveDeveloperId(assignedToInput);
   if (assignedToInput && !assignedTo) {
     return res.status(400).json({ message: "assignedTo must be an active developer (id or email)" });
@@ -4956,6 +5162,7 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
       workflowStatus,
       severity,
       status: issueStatusFromWorkflow(workflowStatus),
+      projectId: writableProject.id,
       environment: environment || null,
       affectedVersion: affectedVersion || null,
       dueDate: dueDate ? new Date(dueDate) : null,
@@ -4982,7 +5189,7 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), async (req: AuthRe
   return res.status(201).json(enrichIssue(issue));
 });
 
-router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), async (req: AuthRequest, res: Response) => {
+router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const mineOnly = String(req.query.mine || "") === "1";
   const scope = asString(req.query.scope).toLowerCase();
   const developerAllScope = req.user!.role === Role.DEVELOPER && scope === "all";
@@ -5183,7 +5390,7 @@ router.patch("/bugs/:id/workflow", authorizeRoles(Role.TESTER, Role.DEVELOPER, R
   }
 });
 
-router.get("/developer/bugs", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
+router.get("/developer/bugs", authorizeRoles(Role.DEVELOPER), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
   const query: Record<string, string> = {};
   if (req.query.priority) query.priority = String(req.query.priority);
   if (req.query.severity) query.severity = String(req.query.severity);
@@ -5428,11 +5635,12 @@ router.post(
 /* =========================
    DEVELOPER FLOWS
 ========================= */
-router.get("/developer/reports", authorizeRoles(Role.DEVELOPER), async (_req: AuthRequest, res: Response) => {
+router.get("/developer/reports", authorizeRoles(Role.DEVELOPER), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
+  const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
   const [totalExecutions, failedExecutions, openIssues] = await Promise.all([
-    prisma.testExecution.count({ where: { isDraft: false } }),
-    prisma.testExecution.count({ where: { isDraft: false, result: ExecutionStatus.FAILED } }),
-    prisma.issue.count({ where: { status: { in: [IssueStatus.OPEN, IssueStatus.IN_PROGRESS] } } }),
+    prisma.testExecution.count({ where: { isDraft: false, projectId } }),
+    prisma.testExecution.count({ where: { isDraft: false, result: ExecutionStatus.FAILED, projectId } }),
+    prisma.issue.count({ where: { status: { in: [IssueStatus.OPEN, IssueStatus.IN_PROGRESS] }, projectId } }),
   ]);
   return res.json({ totalExecutions, failedExecutions, openIssues });
 });
@@ -5440,9 +5648,11 @@ router.get("/developer/reports", authorizeRoles(Role.DEVELOPER), async (_req: Au
 router.get(
   "/developer/issues/assigned",
   authorizeRoles(Role.DEVELOPER),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const issues = await prisma.issue.findMany({
-      where: req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId },
+      where: req.user!.role === Role.ADMIN ? { projectId } : { assignedTo: req.user!.userId, projectId },
       include: { testCase: true, execution: true, comments: true },
       orderBy: { updatedAt: "desc" },
     });
@@ -5666,8 +5876,9 @@ router.put(
   }
 );
 
-router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER), async (req: AuthRequest, res: Response) => {
-  const where = req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId };
+router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER), requireProjectFromRequest, async (req: AuthRequest, res: Response) => {
+  const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
+  const where = req.user!.role === Role.ADMIN ? { projectId } : { assignedTo: req.user!.userId, projectId };
   const [assignedCount, fixedCount, openCount] = await Promise.all([
     prisma.issue.count({ where }),
     prisma.issue.count({ where: { ...where, status: IssueStatus.FIXED } }),
@@ -5680,9 +5891,11 @@ router.get("/developer/dashboard", authorizeRoles(Role.DEVELOPER), async (req: A
 router.get(
   "/developer/reports/export",
   authorizeRoles(Role.DEVELOPER),
+  requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
+    const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
     const issues = await prisma.issue.findMany({
-      where: req.user!.role === Role.ADMIN ? undefined : { assignedTo: req.user!.userId },
+      where: req.user!.role === Role.ADMIN ? { projectId } : { assignedTo: req.user!.userId, projectId },
       orderBy: { updatedAt: "desc" },
     });
     const header = "issueId,title,status,severity,assignedTo,updatedAt";

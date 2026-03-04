@@ -10,6 +10,8 @@ interface LoginProps {
   setPassword: (val: string) => void;
   setRememberMe: (val: boolean) => void;
   onLogin: () => void;
+  onGoogleLogin: () => void;
+  googleEnabled: boolean;
   goToRegister: () => void;
   goToForgot: () => void;
 }
@@ -24,6 +26,8 @@ const Login = ({
   setPassword,
   setRememberMe,
   onLogin,
+  onGoogleLogin,
+  googleEnabled,
   goToRegister,
   goToForgot,
 }: LoginProps) => {
@@ -110,6 +114,17 @@ const Login = ({
           {isLoading ? <span className="buttonSpinner" /> : null}
           {isLoading ? "Signing in..." : "Login"}
         </button>
+        {googleEnabled ? (
+          <button
+            className="button"
+            type="button"
+            onClick={onGoogleLogin}
+            disabled={isLoading}
+            style={{ marginTop: "8px", backgroundColor: "#0f172a" }}
+          >
+            {isLoading ? "Please wait..." : "Login with Google"}
+          </button>
+        ) : null}
 
         <div className="link" onClick={goToForgot}>
           Forgot password?

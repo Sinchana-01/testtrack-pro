@@ -17,10 +17,16 @@ type DashboardLayoutProps = {
   navItems: DashboardNavItem[];
   activeKey: string;
   onSelect: (key: string) => void;
+  onBack?: () => void;
   onLogout: () => void;
   onLogoutAll: () => void;
   pageTitle: string;
   pageSubtitle: string;
+  projectContextLabel?: string;
+  projectOptions?: Array<{ id: string; name: string }>;
+  activeProjectId?: string;
+  onProjectChange?: (projectId: string) => void;
+  allowAllProjectsOption?: boolean;
   primaryActionLabel?: string;
   onPrimaryAction?: () => void;
   children: React.ReactNode;
@@ -36,10 +42,16 @@ const DashboardLayout = ({
   navItems,
   activeKey,
   onSelect,
+  onBack,
   onLogout,
   onLogoutAll,
   pageTitle,
   pageSubtitle,
+  projectContextLabel,
+  projectOptions = [],
+  activeProjectId = "",
+  onProjectChange,
+  allowAllProjectsOption = false,
   primaryActionLabel,
   onPrimaryAction,
   children,
@@ -68,17 +80,46 @@ const DashboardLayout = ({
   return (
     <div className="dashboardLayoutRoot">
       <header className="dashboardTopbar">
-        <button
-          type="button"
-          className="topbarIconBtn"
-          onClick={() => setSidebarOpen((prev) => !prev)}
-          aria-label="Toggle navigation menu"
-        >
-          <span />
-          <span />
-          <span />
-        </button>
-        <h1 className="topbarTitle">{appTitle}</h1>
+        <div className="topbarLeft">
+          <button
+            type="button"
+            className="topbarIconBtn"
+            onClick={() => setSidebarOpen((prev) => !prev)}
+            aria-label="Toggle navigation menu"
+          >
+            <span />
+            <span />
+            <span />
+          </button>
+          {onBack ? (
+            <button
+              type="button"
+              className="topbarBackBtn"
+              onClick={onBack}
+              aria-label="Go back"
+              title="Back"
+            >
+              <span aria-hidden="true">&#8592;</span>
+            </button>
+          ) : null}
+        </div>
+        <div className="topbarCenter">
+          <h1 className="topbarTitle">{appTitle}</h1>
+          {onProjectChange ? (
+            <select
+              className="topbarProjectSelect"
+              value={activeProjectId || (allowAllProjectsOption ? "__ALL__" : "")}
+              onChange={(e) => onProjectChange(e.target.value)}
+            >
+              {allowAllProjectsOption ? <option value="__ALL__">All Projects</option> : null}
+              {projectOptions.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
         <div className="topbarRight">
           <div className="notifWrap">
             <button
@@ -175,6 +216,11 @@ const DashboardLayout = ({
 
       <main className={`dashboardMain ${sidebarOpen ? "sidebarFull" : "sidebarMini"}`}>
         <section className="dashboardPageContent">
+          <header className="dashboardPageHeader">
+            <h2>{pageTitle}</h2>
+            <p>{pageSubtitle}</p>
+            {projectContextLabel ? <div className="dashboardProjectBreadcrumb">{projectContextLabel}</div> : null}
+          </header>
           {primaryActionLabel && onPrimaryAction ? (
             <div className="dashboardContentToolbar">
               <button type="button" className="pagePrimaryAction" onClick={onPrimaryAction}>

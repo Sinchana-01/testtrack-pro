@@ -26,6 +26,7 @@ import {
   listExecutionReportsApi,
   listDeveloperUsersApi,
   listAdminProjectsApi,
+  listProjectsApi,
   listAdminBackupsApi,
   listAdminSystemConfigsApi,
   listAdminUsersApi,
@@ -33,6 +34,7 @@ import {
   listSuiteExecutionsApi,
   listSuitesApi,
   getTestCasesApi,
+  googleLoginApi,
   importTestCasesApi,
   listTemplatesApi,
   listTestRunsApi,
@@ -44,6 +46,8 @@ import {
   resolveBugApi,
   resetPasswordApi,
   setSessionTokens,
+  getActiveProjectId as getStoredActiveProjectId,
+  setActiveProjectId as setStoredActiveProjectId,
   startExecutionApi,
   startSuiteExecutionApi,
   quickUpdateDeveloperBugStatusApi,
@@ -79,6 +83,7 @@ import BugDetailsModal from "./features/bugs/BugDetailsModal";
 import DeveloperWorkspacePanel from "./features/developer/DeveloperWorkspacePanel";
 import ReportsHub from "./features/reports/ReportsHub";
 import DashboardWidgetsBoard from "./features/dashboard/DashboardWidgetsBoard";
+import ProjectManagementSection from "./features/projects/ProjectManagementSection";
 import {
   getDeveloperAssignedExecutionReports,
   getDeveloperLinkedCommitBugs,
@@ -137,6 +142,7 @@ function App() {
   const [resetToken, setResetToken] = useState("");
   const [authError, setAuthError] = useState("");
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const GOOGLE_CLIENT_ID = process.env.REACT_APP_GOOGLE_CLIENT_ID?.trim() || "";
   const [testCases, setTestCases] = useState<any[]>([]);
   const [templates, setTemplates] = useState<any[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -320,7 +326,10 @@ function App() {
   const adminUserModalRef = useRef<HTMLDivElement | null>(null);
   const bulkCasePickerRef = useRef<HTMLDivElement | null>(null);
   const [adminProjects, setAdminProjects] = useState<any[]>([]);
+  const [accessibleProjects, setAccessibleProjects] = useState<any[]>([]);
+  const [activeProjectId, setActiveProjectIdState] = useState<string>(getStoredActiveProjectId());
   const [adminProjectName, setAdminProjectName] = useState("");
+  const [adminProjectCode, setAdminProjectCode] = useState("");
   const [adminProjectDescription, setAdminProjectDescription] = useState("");
   const [adminProjectSavingId, setAdminProjectSavingId] = useState("");
   const [adminAuditLogs, setAdminAuditLogs] = useState<any[]>([]);
@@ -367,6 +376,14 @@ function App() {
   const isTester = roleName === "TESTER";
   const isDeveloper = roleName === "DEVELOPER";
   const isAdmin = roleName === "ADMIN";
+  const activeProject = accessibleProjects.find((item) => item.id === activeProjectId) || null;
+  const activeProjectName = isAdmin && activeProjectId === "__ALL__" ? "All Projects" : activeProject?.name || "";
+  const scopedProjectId = activeProjectId && activeProjectId !== "__ALL__" ? activeProjectId : "";
+  const isActiveProjectArchived = Boolean((activeProject as any)?.isArchived);
+  const isProjectScopeWritable = !(isAdmin && activeProjectId === "__ALL__") && !isActiveProjectArchived;
+  const projectWriteBlockedMessage = isActiveProjectArchived
+    ? "Current project is archived. Create or update actions are disabled."
+    : "Select a specific active project to perform create or update actions.";
   const currentRolePermissions = rolePermissions[roleName] || [];
   const hasPermission = (permission: string): boolean => currentRolePermissions.includes(permission);
   const canCreateAndManageTestCases = hasPermission("Create Test Cases");
@@ -387,7 +404,7 @@ function App() {
   const canManageProjectsPermission = hasPermission("Manage Projects");
   const canViewAuditLogsPermission = hasPermission("View Audit Logs");
   const rolePermissionsKey = JSON.stringify([...currentRolePermissions].sort());
-const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
+  const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
 
   const menuFeatureMap: Record<string, DashboardFeature | "none"> = {
     dashboard_home: "none",
@@ -450,8 +467,16 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       backup_management: { title: "Backup Management", subtitle: "Trigger and monitor backup jobs for platform resilience." },
       developer_workspace: { title: "Developer Workspace", subtitle: "Resolve assigned defects with workflow and evidence updates." },
     };
-    return byKey[activeMenuKey] || byKey[activeFeature] || byKey.bug_management;
+    const base = byKey[activeMenuKey] || byKey[activeFeature] || byKey.bug_management;
+    const projectLabel = activeProjectName ? `Current Project: ${activeProjectName}` : "";
+    return {
+      ...base,
+      subtitle: projectLabel ? `${base.subtitle} ${projectLabel}` : base.subtitle,
+    };
   })();
+  const projectContextLabel = activeProjectName
+    ? `${activeProjectName} > ${currentPageMeta.title}`
+    : currentPageMeta.title;
   const showCreateTestCase = canCreateAndManageTestCases && normalizedFeature === "create_test_case";
   const showTemplates = canUseTemplates && normalizedFeature === "templates";
   const showBulkOperations = canRunBulkOps && normalizedFeature === "bulk_operations";
@@ -729,6 +754,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
 
   const buildImportPreview = async () => {
     try {
+      if (!scopedProjectId) {
+        alert("Please select a specific project before import preview");
+        return;
+      }
       const fieldMapping = parseFieldMapping();
       const excelRows =
         importType === "EXCEL"
@@ -736,10 +765,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
           : [];
       const payload =
         importType === "JSON"
-          ? { sourceType: "JSON", items: JSON.parse(importPayload), fieldMapping, preview: true }
+          ? { sourceType: "JSON", items: JSON.parse(importPayload), fieldMapping, preview: true, projectId: scopedProjectId }
           : importType === "CSV"
-          ? { sourceType: "CSV", csvText: importPayload, fieldMapping, preview: true }
-          : { sourceType: "EXCEL", rows: excelRows, fieldMapping, preview: true };
+          ? { sourceType: "CSV", csvText: importPayload, fieldMapping, preview: true, projectId: scopedProjectId }
+          : { sourceType: "EXCEL", rows: excelRows, fieldMapping, preview: true, projectId: scopedProjectId };
       const res = await importTestCasesApi(payload);
       setImportPreview(Array.isArray(res?.preview) ? res.preview : []);
       setImportPreviewErrors(Array.isArray(res?.errors) ? res.errors : []);
@@ -833,7 +862,11 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     setIsRefreshing(true);
     try {
       const shouldFetchTestCases =
-        canCreateAndManageTestCases || canManageSuites || canManageTestRuns || canExecuteTests;
+        isAdmin ||
+        canCreateAndManageTestCases ||
+        canManageSuites ||
+        canManageTestRuns ||
+        canExecuteTests;
       const bugParams: Record<string, string> = {
         status: bugFilterStatus,
         priority: bugFilterPriority,
@@ -864,42 +897,48 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
         canViewBugs ? listBugsApi(bugParams) : Promise.resolve([]),
       ]);
 
-      const caseRows = caseRowsResult.status === "fulfilled" ? caseRowsResult.value : [];
+      const caseRows = caseRowsResult.status === "fulfilled" ? caseRowsResult.value : null;
       const templateRows = templateRowsResult.status === "fulfilled" ? templateRowsResult.value : [];
       const runRows = runRowsResult.status === "fulfilled" ? runRowsResult.value : [];
       const suiteRows = suiteRowsResult.status === "fulfilled" ? suiteRowsResult.value : [];
       const executionRows = executionRowsResult.status === "fulfilled" ? executionRowsResult.value : [];
       const bugRows = bugRowsResult.status === "fulfilled" ? bugRowsResult.value : [];
 
-      const rows = Array.isArray(caseRows) ? caseRows : [];
-      setTestCases(rows);
-      const projectsFromCases = Array.from(
-        new Map(
-          rows
-            .map((row: any) => row?.project)
-            .filter((project: any) => project?.id)
-            .map((project: any) => [
-              project.id,
-              {
-                id: project.id,
-                name: project.name || "Unnamed Project",
-                description: project.description || "",
-                isActive: project.isActive !== false,
-              },
-            ])
-        ).values()
-      );
-      if (projectsFromCases.length > 0) {
-        setAdminProjects((prev) => {
-          const byId = new Map<string, any>();
-          prev.forEach((p: any) => byId.set(p.id, p));
-          projectsFromCases.forEach((p: any) => {
-            if (!byId.has(p.id)) byId.set(p.id, p);
+      const rows = Array.isArray(caseRows) ? caseRows : null;
+      if (rows) {
+        setTestCases(rows);
+        const projectsFromCases = Array.from(
+          new Map(
+            rows
+              .map((row: any) => row?.project)
+              .filter((project: any) => project?.id)
+              .map((project: any) => [
+                project.id,
+                {
+                  id: project.id,
+                  name: project.name || "Unnamed Project",
+                  description: project.description || "",
+                  isActive: project.isActive !== false,
+                },
+              ])
+          ).values()
+        );
+        if (projectsFromCases.length > 0) {
+          setAdminProjects((prev) => {
+            const byId = new Map<string, any>();
+            prev.forEach((p: any) => byId.set(p.id, p));
+            projectsFromCases.forEach((p: any) => {
+              if (!byId.has(p.id)) byId.set(p.id, p);
+            });
+            return Array.from(byId.values());
           });
-          return Array.from(byId.values());
-        });
+        }
+        setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
+      } else if (caseRowsResult.status === "rejected") {
+        const msg =
+          caseRowsResult.reason?.message || "Failed to refresh test cases. Showing last loaded list.";
+        alert(msg);
       }
-      setSelectedIds((prev) => prev.filter((id) => rows.some((row) => row.id === id)));
       setTemplates(Array.isArray(templateRows) ? templateRows : []);
       setTestRuns(Array.isArray(runRows) ? runRows : []);
       const suiteList = Array.isArray(suiteRows) ? suiteRows : [];
@@ -1044,6 +1083,41 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   const loadAdminProjects = async () => {
     const rows = await listAdminProjectsApi();
     setAdminProjects(Array.isArray(rows) ? rows : []);
+  };
+
+  const applyProjectContext = (projectId: string, availableProjects: any[], adminMode: boolean) => {
+    const normalized = String(projectId || "").trim();
+    let nextId = normalized;
+    if (adminMode) {
+      if (!nextId) nextId = "__ALL__";
+      if (nextId !== "__ALL__" && !availableProjects.some((row: any) => row.id === nextId)) {
+        nextId = "__ALL__";
+      }
+    } else {
+      if (!availableProjects.some((row: any) => row.id === nextId)) {
+        nextId = availableProjects[0]?.id || "";
+      }
+    }
+    setActiveProjectIdState(nextId);
+    setStoredActiveProjectId(nextId);
+  };
+
+  const loadAccessibleProjects = async (adminMode = isAdmin) => {
+    const rows = await listProjectsApi({ includeArchived: false });
+    const normalized = Array.isArray(rows)
+      ? rows
+          .map((row: any) => ({
+            id: String(row?.id || ""),
+            name: String(row?.name || "").trim() || "Unnamed Project",
+            isArchived:
+              String(row?.status || "").toUpperCase() === "ARCHIVED" ||
+              Boolean(row?.isActive === false),
+          }))
+          .filter((row) => row.id)
+      : [];
+    setAccessibleProjects(normalized);
+    const stored = getStoredActiveProjectId();
+    applyProjectContext(activeProjectId || stored, normalized, adminMode);
   };
 
   const loadAdminAuditLogs = async (entityType?: string) => {
@@ -1522,6 +1596,11 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     ));
 
   const startEditCase = (tc: any) => {
+    const status = String(tc?.status || "").toUpperCase();
+    if (status === "ARCHIVED") {
+      alert("Access denied. Archived test cases cannot be modified or executed.");
+      return;
+    }
     setEditingId(tc.id);
     setEditTitle(tc.title || "");
     setEditDescription(tc.description || "");
@@ -1847,6 +1926,18 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   }, [screen]);
 
   useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return;
+    const existing = document.getElementById("google-identity-services");
+    if (existing) return;
+    const script = document.createElement("script");
+    script.id = "google-identity-services";
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    document.head.appendChild(script);
+  }, [GOOGLE_CLIENT_ID]);
+
+  useEffect(() => {
     if (screen !== "dashboard") {
       return;
     }
@@ -2091,6 +2182,23 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   }, [normalizedFeature, screen]);
 
   useEffect(() => {
+    if (screen !== "dashboard") return;
+    loadAccessibleProjects().catch(() => {
+      setAccessibleProjects([]);
+      const fallback = isAdmin ? "__ALL__" : "";
+      setActiveProjectIdState(fallback);
+      setStoredActiveProjectId(fallback);
+    });
+  }, [screen, currentUserId, currentRole]);
+
+  useEffect(() => {
+    if (screen !== "dashboard") return;
+    loadTestCaseData().catch(() => {
+      // no-op
+    });
+  }, [activeProjectId, screen]);
+
+  useEffect(() => {
     if (screen !== "dashboard" || !isAdmin || normalizedFeature !== "admin_workspace") return;
     if (activeMenuKey === "user_management" || activeMenuKey === "role_management") {
       setAdminCreateName("");
@@ -2242,6 +2350,42 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
   };
 
   /* LOGIN */
+  const applyAuthLoginSuccess = async (
+    res: {
+      accessToken: string;
+      refreshToken: string;
+      user?: { role?: string; id?: string; name?: string; email?: string };
+    },
+    persistedRememberMe: boolean
+  ) => {
+    setSessionTokens(res.accessToken, res.refreshToken, persistedRememberMe);
+    setName(res?.user?.name || "");
+    setEmail(res?.user?.email || "");
+    setCurrentRole(res?.user?.role || "");
+    setCurrentUserId(res?.user?.id || "");
+    setShowTestCaseList(false);
+    setExpandedTestCaseId("");
+    setTestCasesVisible(false);
+    setSelectedTestCaseModalId("");
+    setTestCasesLoading(false);
+    setTemplatesVisible(false);
+    setTemplatesLoading(false);
+    setSelectedTemplateModalId("");
+    setTemplateModalEditing(false);
+    setSelectedIds([]);
+    setEditingId("");
+    resetBugPanel();
+    setActiveMenuKey("dashboard_home");
+    setScreen("dashboard");
+    try {
+      await loadRolePermissions();
+      await loadAccessibleProjects(String(res?.user?.role || "").toUpperCase() === "ADMIN");
+      await loadTestCaseData();
+    } catch (error: any) {
+      alert(error?.message || "Failed to load test data");
+    }
+  };
+
   const handleLogin = async () => {
     setAuthError("");
     try {
@@ -2249,34 +2393,58 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
       const res = await loginApi(email, password, rememberMe);
 
       if (res.accessToken && res.refreshToken) {
-        setSessionTokens(res.accessToken, res.refreshToken, rememberMe);
-        setCurrentRole(res?.user?.role || "");
-        setCurrentUserId(res?.user?.id || "");
-        setShowTestCaseList(false);
-        setExpandedTestCaseId("");
-        setTestCasesVisible(false);
-        setSelectedTestCaseModalId("");
-        setTestCasesLoading(false);
-        setTemplatesVisible(false);
-        setTemplatesLoading(false);
-        setSelectedTemplateModalId("");
-        setTemplateModalEditing(false);
-        setSelectedIds([]);
-        setEditingId("");
-        resetBugPanel();
-        setActiveMenuKey("dashboard_home");
-        setScreen("dashboard");
-        try {
-          await loadRolePermissions();
-          await loadTestCaseData();
-        } catch (error: any) {
-          alert(error?.message || "Failed to load test data");
-        }
+        await applyAuthLoginSuccess(res, rememberMe);
       } else {
         setAuthError(res.message || "Invalid email or password");
       }
     } catch (error: any) {
       setAuthError(error?.message || "Login failed.");
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  const getGoogleAccessToken = async (): Promise<string> => {
+    if (!GOOGLE_CLIENT_ID) {
+      throw new Error("Google login is not configured. Set REACT_APP_GOOGLE_CLIENT_ID.");
+    }
+    const googleApi = (window as any).google;
+    if (!googleApi?.accounts?.oauth2?.initTokenClient) {
+      throw new Error("Google Identity Services is not loaded yet. Please retry.");
+    }
+
+    return new Promise<string>((resolve, reject) => {
+      const tokenClient = googleApi.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_CLIENT_ID,
+        scope: "openid email profile",
+        callback: (response: any) => {
+          if (response?.access_token) {
+            resolve(String(response.access_token));
+          } else {
+            reject(new Error("Google login failed to return access token."));
+          }
+        },
+        error_callback: () => {
+          reject(new Error("Google popup failed or was closed."));
+        },
+      });
+      tokenClient.requestAccessToken({ prompt: "select_account" });
+    });
+  };
+
+  const handleGoogleLogin = async () => {
+    setAuthError("");
+    try {
+      setAuthSubmitting(true);
+      const accessToken = await getGoogleAccessToken();
+      const res = await googleLoginApi(accessToken, rememberMe);
+      if (res?.accessToken && res?.refreshToken) {
+        await applyAuthLoginSuccess(res, rememberMe);
+      } else {
+        setAuthError(res?.message || "Google login failed.");
+      }
+    } catch (error: any) {
+      setAuthError(error?.message || "Google login failed.");
     } finally {
       setAuthSubmitting(false);
     }
@@ -2352,6 +2520,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     clearSessionTokens();
     setCurrentRole("");
     setCurrentUserId("");
+    setAccessibleProjects([]);
+    setActiveProjectIdState("");
+    setStoredActiveProjectId("");
     setDeveloperDirectory([]);
     setNotificationItems([]);
     setNotificationUnreadCount(0);
@@ -2470,6 +2641,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
     }
   };
 
+  const handleProjectSwitch = (projectId: string) => {
+    applyProjectContext(projectId, accessibleProjects, isAdmin);
+  };
+
   const toggleRolePermission = (roleKey: "ADMIN" | "TESTER" | "DEVELOPER", permission: string) => {
     setRolePermissions((prev) => {
       const current = prev[roleKey] || [];
@@ -2500,6 +2675,8 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
             setPassword={setPassword}
             setRememberMe={setRememberMe}
             onLogin={handleLogin}
+            onGoogleLogin={handleGoogleLogin}
+            googleEnabled={Boolean(GOOGLE_CLIENT_ID)}
             goToForgot={goToForgotScreen}
             goToRegister={goToRegisterScreen}
           />
@@ -2567,6 +2744,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
             onSelect={(feature) => {
               handleDashboardNavSelect(feature);
             }}
+            onBack={
+              activeMenuKey !== "dashboard_home"
+                ? () => {
+                    handleDashboardNavSelect("dashboard_home");
+                  }
+                : undefined
+            }
             onLogout={handleLogout}
             onLogoutAll={async () => {
               const res = await logoutAllApi();
@@ -2576,6 +2760,11 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
             }}
             pageTitle={currentPageMeta.title}
             pageSubtitle={currentPageMeta.subtitle}
+            projectContextLabel={projectContextLabel}
+            projectOptions={accessibleProjects}
+            activeProjectId={activeProjectId}
+            onProjectChange={handleProjectSwitch}
+            allowAllProjectsOption={isAdmin}
           >
             {activeFeature === "none" && (
               <>
@@ -2590,192 +2779,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   currentUserId={currentUserId}
                   onNavigate={handleDashboardNavSelect}
                 />
-                {isTester && (
-                  <>
-                    <section className="panel">
-                      <h4>Tester Dashboard</h4>
-                      <p className="note">Track pending tests, failures, and execution quality at a glance.</p>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader">
-                        <h4 style={{ marginBottom: 0 }}>My Pending Tests</h4>
-                      </div>
-                      <div className="tableWrap">
-                        <table className="table">
-                          <thead>
-                            <tr>
-                              <th>Test Case</th>
-                              <th>Module</th>
-                              <th>Status</th>
-                              <th>Priority</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {testerPendingTests.length === 0 ? (
-                              <tr>
-                                <td colSpan={4} className="note">No pending tests.</td>
-                              </tr>
-                            ) : (
-                              testerPendingTests.map((item) => (
-                                <tr key={item.id}>
-                                  <td>{item.title}</td>
-                                  <td>{item.module || "General"}</td>
-                                  <td>
-                                    <span className={`statusBadge status-${String(item.status || "").toLowerCase()}`}>
-                                      {item.status}
-                                    </span>
-                                  </td>
-                                  <td>{item.priority || "MEDIUM"}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Failures</h4></div>
-                      <div className="listCompact">
-                        {recentFailures.length === 0 ? (
-                          <p className="note">No recent failures.</p>
-                        ) : (
-                          recentFailures.map((row) => (
-                            <div className="row" key={row.id}>
-                              <strong>{row.testCase?.title || row.testCaseId}</strong>
-                              <div className="note">{new Date(row.executedAt).toLocaleString()}</div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Execution Trend (7 Days)</h4></div>
-                      <div className="miniBarChart">
-                        {trendBuckets.map((bucket) => (
-                          <div key={bucket.key} className="miniBarItem">
-                            <div
-                              className="miniBar"
-                              style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrendCount) * 100))}%` }}
-                            />
-                            <span>{bucket.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Test Status Breakdown</h4></div>
-                      <div className="pieSection">
-                        <div className="pieChart" style={{ background: statusPie }} />
-                        <div className="pieLegend">
-                          <div>Passed: {statusCounts.passed}</div>
-                          <div>Failed: {statusCounts.failed}</div>
-                          <div>Blocked: {statusCounts.blocked}</div>
-                          <div>Skipped: {statusCounts.skipped}</div>
-                        </div>
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Quick Actions</h4></div>
-                      <div className="toolbarActions">
-                        <button className="button small" onClick={() => handleDashboardNavSelect("create_test_case")}>Create Test Case</button>
-                        <button className="button small" onClick={() => handleDashboardNavSelect("execute_tests")}>Execute Tests</button>
-                        <button className="button small" onClick={() => handleDashboardNavSelect("bug_management")}>Report Bug</button>
-                      </div>
-                    </section>
-                  </>
-                )}
 
-                {isDeveloper && (
-                  <>
-                    <section className="panel">
-                      <h4>Developer Dashboard</h4>
-                      <p className="note">Monitor assigned defects, severity hotspots, and recent updates.</p>
-                    </section>
-                    <section className="panel dashboardWidget kpiRow">
-                      <div className="kpiItem"><strong>Assigned Bugs</strong><span>{developerAssignedBugCount}</span></div>
-                      <div className="kpiItem"><strong>Critical / P1</strong><span>{developerCriticalBugCount + developerP1UrgentCount}</span></div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Bug Aging (Last 7 Days)</h4></div>
-                      <div className="miniBarChart">
-                        {developerBugTrendBuckets.map((bucket) => (
-                          <div key={`aging-${bucket.key}`} className="miniBarItem">
-                            <div
-                              className="miniBar bugAgingBar"
-                              style={{ height: `${Math.max(8, Math.round((bucket.count / developerBugMaxTrendCount) * 100))}%` }}
-                            />
-                            <span>{bucket.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Bug Status Distribution</h4></div>
-                      <div className="pieSection">
-                        <div className="pieChart" style={{ background: developerBugStatusPie }} />
-                        <div className="pieLegend">
-                          <div>New: {developerBugStatusCounts.NEW}</div>
-                          <div>Open: {developerBugStatusCounts.OPEN}</div>
-                          <div>In Progress: {developerBugStatusCounts.IN_PROGRESS}</div>
-                          <div>Fixed: {developerBugStatusCounts.FIXED}</div>
-                          <div>Verified: {developerBugStatusCounts.VERIFIED}</div>
-                          <div>Closed: {developerBugStatusCounts.CLOSED}</div>
-                        </div>
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Activity</h4></div>
-                      <div className="listCompact">
-                        {developerRecentBugs.map((item) => (
-                          <div className="row" key={item.id}>
-                            <strong>{item.title || item.bugId || item.id}</strong>
-                            <div className="note">{item.workflowStatus || item.status || "OPEN"} | {new Date(item.updatedAt || item.createdAt).toLocaleString()}</div>
-                          </div>
-                        ))}
-                        {developerRecentBugs.length === 0 && <p className="note">No assigned bug activity yet.</p>}
-                      </div>
-                    </section>
-                  </>
-                )}
-
-                {isAdmin && (
-                  <>
-                    <section className="panel">
-                      <h4>Admin Dashboard</h4>
-                      <p className="note">View user/project/case health and system-wide activity trends.</p>
-                    </section>
-                    <section className="panel dashboardWidget kpiRow">
-                      <div className="kpiItem"><strong>Total Users</strong><span>{adminUsers.length}</span></div>
-                      <div className="kpiItem"><strong>Active Projects</strong><span>{adminProjects.filter((p) => p.isActive !== false).length}</span></div>
-                      <div className="kpiItem"><strong>Total Test Cases</strong><span>{testCases.length}</span></div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>System Activity (7 Days)</h4></div>
-                      <div className="miniBarChart">
-                        {trendBuckets.map((bucket) => (
-                          <div key={`system-${bucket.key}`} className="miniBarItem">
-                            <div
-                              className="miniBar systemBar"
-                              style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrendCount) * 100))}%` }}
-                            />
-                            <span>{bucket.label}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                    <section className="panel dashboardWidget">
-                      <div className="panelHeader"><h4 style={{ marginBottom: 0 }}>Recent Audit Logs</h4></div>
-                      <div className="listCompact">
-                        {adminAuditLogs.slice(0, 8).map((log: any) => (
-                          <div className="row" key={log.id}>
-                            <strong>{log.action || "ACTION"}</strong>
-                            <div className="note">{log.actor?.name || log.actor?.email || "Unknown"} | {new Date(log.createdAt).toLocaleString()}</div>
-                          </div>
-                        ))}
-                      </div>
-                    </section>
-                  </>
-                )}
               </>
             )}
             <div className="dashboardGrid">
@@ -3235,93 +3239,9 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
 
                   {activeMenuKey === "project_management" && (
                     <>
-                      <h4>Project Management</h4>
-                      <p className="note">Create and configure projects.</p>
-                      <div className="inlineGrid">
-                        <input
-                          className="input"
-                          placeholder="Project Name"
-                          value={adminProjectName}
-                          onChange={(e) => setAdminProjectName(e.target.value)}
-                        />
-                        <input
-                          className="input"
-                          placeholder="Project Description"
-                          value={adminProjectDescription}
-                          onChange={(e) => setAdminProjectDescription(e.target.value)}
-                        />
-                      </div>
-                      <button
-                        className="button"
-                        onClick={async () => {
-                          try {
-                            if (!adminProjectName.trim()) {
-                              alert("Project name is required");
-                              return;
-                            }
-                            const created = await createAdminProjectApi({
-                              name: adminProjectName.trim(),
-                              description: adminProjectDescription.trim() || undefined,
-                            });
-                            setAdminProjects((prev) => [created, ...prev.filter((p) => p.id !== created.id)]);
-                            setAdminProjectName("");
-                            setAdminProjectDescription("");
-                            alert("Project created");
-                          } catch (error: any) {
-                            alert(error?.message || "Create project failed");
-                          }
-                        }}
-                      >
-                        Create Project
-                      </button>
-                      <div className="panelHeader" style={{ marginTop: "12px" }}>
-                        <h4 style={{ marginBottom: 0 }}>Project List</h4>
-                        <button className="button small" onClick={() => loadTestCaseData()}>
-                          Refresh Projects
-                        </button>
-                      </div>
-                      <div className="listCompact">
-                        {adminProjects.length === 0 ? (
-                          <p className="note">
-                            No projects found. Create one. Existing projects from linked test cases appear here.
-                          </p>
-                        ) : (
-                          adminProjects.map((project) => (
-                            <div className="row adminUserRow" key={project.id}>
-                              <span className="title">
-                                <strong>{project.name || "Unnamed project"}</strong>
-                                <br />
-                                {project.description || "No description"}
-                              </span>
-                              <span className="meta">{project.isActive === false ? "Inactive" : "Active"}</span>
-                              <button
-                                className="button small"
-                                disabled={adminProjectSavingId === project.id}
-                                onClick={async () => {
-                                  try {
-                                    setAdminProjectSavingId(project.id);
-                                    await updateAdminProjectApi(project.id, {
-                                      isActive: project.isActive === false ? true : false,
-                                    });
-                                    setAdminProjects((prev) =>
-                                      prev.map((item) =>
-                                        item.id === project.id
-                                          ? { ...item, isActive: !(project.isActive === false) }
-                                          : item
-                                      )
-                                    );
-                                  } catch (error: any) {
-                                    alert(error?.message || "Project update failed");
-                                  } finally {
-                                    setAdminProjectSavingId("");
-                                  }
-                                }}
-                              >
-                                {project.isActive === false ? "Activate" : "Deactivate"}
-                              </button>
-                            </div>
-                          ))
-                        )}
+                    
+                      <div style={{ marginTop: 16 }}>
+                        <ProjectManagementSection isAdmin={isAdmin} onRefreshData={loadTestCaseData} />
                       </div>
                     </>
                   )}
@@ -3527,18 +3447,26 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               {showCreateTestCase && (
               <section className="panel createCasePanel">
                 <h4>Create Test Case</h4>
+                {!isProjectScopeWritable ? <div className="note">{projectWriteBlockedMessage}</div> : null}
+                <label className="fieldLabel">Project Context (auto-filled)</label>
+                <input
+                  className="input"
+                  value={scopedProjectId ? `${activeProjectName || "Selected Project"} (${scopedProjectId})` : "No active project selected"}
+                  readOnly
+                  disabled
+                />
                 <label className="fieldLabel">Title</label>
-                <input className="input" placeholder="Title" value={tcTitle} onChange={(e) => setTcTitle(e.target.value)} />
+                <input className="input" placeholder="Title" value={tcTitle} onChange={(e) => setTcTitle(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Description</label>
-                <input className="input" placeholder="Description" value={tcDescription} onChange={(e) => setTcDescription(e.target.value)} />
+                <input className="input" placeholder="Description" value={tcDescription} onChange={(e) => setTcDescription(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Pre-conditions</label>
-                <textarea className="input" placeholder='JSON array or one pre-condition per line' rows={3} value={tcPreConditionsText} onChange={(e) => setTcPreConditionsText(e.target.value)} />
+                <textarea className="input" placeholder='JSON array or one pre-condition per line' rows={3} value={tcPreConditionsText} onChange={(e) => setTcPreConditionsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Test Data Requirements</label>
-                <textarea className="input" placeholder='JSON array or one item per line' rows={3} value={tcTestDataRequirementsText} onChange={(e) => setTcTestDataRequirementsText(e.target.value)} />
+                <textarea className="input" placeholder='JSON array or one item per line' rows={3} value={tcTestDataRequirementsText} onChange={(e) => setTcTestDataRequirementsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Environment Requirements</label>
-                <textarea className="input" placeholder='JSON array or one item per line' rows={3} value={tcEnvironmentRequirementsText} onChange={(e) => setTcEnvironmentRequirementsText(e.target.value)} />
+                <textarea className="input" placeholder='JSON array or one item per line' rows={3} value={tcEnvironmentRequirementsText} onChange={(e) => setTcEnvironmentRequirementsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Module/Feature</label>
-                <select className="input" value={tcModule} onChange={(e) => setTcModule(e.target.value)}>
+                <select className="input" value={tcModule} onChange={(e) => setTcModule(e.target.value)} disabled={!isProjectScopeWritable}>
                   <option value="">Select module</option>
                   <option value="Authentication">Authentication</option>
                   <option value="User Management">User Management</option>
@@ -3546,17 +3474,17 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   <option value="General">General</option>
                 </select>
                 <label className="fieldLabel">Test Steps</label>
-                <textarea className="input" placeholder="Steps JSON or one step per line" rows={4} value={tcStepsText} onChange={(e) => setTcStepsText(e.target.value)} />
+                <textarea className="input" placeholder="Steps JSON or one step per line" rows={4} value={tcStepsText} onChange={(e) => setTcStepsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Post-conditions</label>
-                <textarea className="input" placeholder='JSON array or one post-condition per line' rows={3} value={tcPostConditionsText} onChange={(e) => setTcPostConditionsText(e.target.value)} />
+                <textarea className="input" placeholder='JSON array or one post-condition per line' rows={3} value={tcPostConditionsText} onChange={(e) => setTcPostConditionsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Metadata (JSON or key:value lines)</label>
-                <textarea className="input" placeholder='{"owner":"QA Team","environment":"staging"}' rows={3} value={tcMetadataText} onChange={(e) => setTcMetadataText(e.target.value)} />
+                <textarea className="input" placeholder='{"owner":"QA Team","environment":"staging"}' rows={3} value={tcMetadataText} onChange={(e) => setTcMetadataText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Tags (comma-separated)</label>
-                <input className="input" placeholder="login, authentication, smoke-test" value={tcTagsText} onChange={(e) => setTcTagsText(e.target.value)} />
+                <input className="input" placeholder="login, authentication, smoke-test" value={tcTagsText} onChange={(e) => setTcTagsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Estimated Duration (minutes)</label>
-                <input className="input" placeholder="5" value={tcEstimatedDurationMinutes} onChange={(e) => setTcEstimatedDurationMinutes(e.target.value)} />
+                <input className="input" placeholder="5" value={tcEstimatedDurationMinutes} onChange={(e) => setTcEstimatedDurationMinutes(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Automation Status</label>
-                <select className="input" value={tcAutomationStatus} onChange={(e) => setTcAutomationStatus(e.target.value)}>
+                <select className="input" value={tcAutomationStatus} onChange={(e) => setTcAutomationStatus(e.target.value)} disabled={!isProjectScopeWritable}>
                   <option value="">Select automation status</option>
                   <option value="NOT_AUTOMATED">Not Automated</option>
                   <option value="IN_PROGRESS">In Progress</option>
@@ -3564,17 +3492,17 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   <option value="CANNOT_AUTOMATE">Cannot Automate</option>
                 </select>
                 <label className="fieldLabel">Automation Script Link</label>
-                <input className="input" placeholder="https://github.com/repo/tests/login.spec.ts" value={tcAutomationScriptLink} onChange={(e) => setTcAutomationScriptLink(e.target.value)} />
+                <input className="input" placeholder="https://github.com/repo/tests/login.spec.ts" value={tcAutomationScriptLink} onChange={(e) => setTcAutomationScriptLink(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Metadata Section</label>
                 <div className="inlineGrid">
-                  <select className="input" value={tcPriority} onChange={(e) => setTcPriority(e.target.value)}>
+                  <select className="input" value={tcPriority} onChange={(e) => setTcPriority(e.target.value)} disabled={!isProjectScopeWritable}>
                     <option value="">Select priority</option>
                     <option value="CRITICAL">CRITICAL</option>
                     <option value="HIGH">HIGH</option>
                     <option value="MEDIUM">MEDIUM</option>
                     <option value="LOW">LOW</option>
                   </select>
-                  <select className="input" value={tcSeverity} onChange={(e) => setTcSeverity(e.target.value)}>
+                  <select className="input" value={tcSeverity} onChange={(e) => setTcSeverity(e.target.value)} disabled={!isProjectScopeWritable}>
                     <option value="">Select severity</option>
                     <option value="BLOCKER">BLOCKER</option>
                     <option value="CRITICAL">CRITICAL</option>
@@ -3584,7 +3512,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   </select>
                 </div>
                 <div className="inlineGrid">
-                  <select className="input" value={tcType} onChange={(e) => setTcType(e.target.value)}>
+                  <select className="input" value={tcType} onChange={(e) => setTcType(e.target.value)} disabled={!isProjectScopeWritable}>
                     <option value="">Select type</option>
                     <option value="FUNCTIONAL">FUNCTIONAL</option>
                     <option value="REGRESSION">REGRESSION</option>
@@ -3595,7 +3523,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                     <option value="SECURITY">SECURITY</option>
                     <option value="USABILITY">USABILITY</option>
                   </select>
-                  <select className="input" value={tcStatus} onChange={(e) => setTcStatus(e.target.value)}>
+                  <select className="input" value={tcStatus} onChange={(e) => setTcStatus(e.target.value)} disabled={!isProjectScopeWritable}>
                     <option value="">Select status</option>
                     <option value="DRAFT">DRAFT</option>
                     <option value="READY_FOR_REVIEW">READY_FOR_REVIEW</option>
@@ -3606,8 +3534,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                 </div>
                 <button
                   className="button"
+                  disabled={!isProjectScopeWritable}
                   onClick={async () => {
                     try {
+                      if (!scopedProjectId) {
+                        alert("Please select a specific project before creating a test case");
+                        return;
+                      }
                       if (tcTitle.length > 200) {
                         alert("Title must be 200 characters or less");
                         return;
@@ -3636,6 +3569,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                         severity: tcSeverity,
                         type: tcType,
                         status: tcStatus,
+                        projectId: scopedProjectId,
                       });
                       resetCreateTestCaseFields();
                       await loadTestCaseData();
@@ -3653,11 +3587,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               {showTemplates && (
               <section className="panel formWidePanel">
                 <h4>Templates</h4>
-                <input className="input" placeholder="Template Name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} />
-                <input className="input" placeholder="Template Category (e.g., Login Tests)" value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)} />
-                <textarea className="input" placeholder="Template steps JSON or lines" rows={3} value={templateSteps} onChange={(e) => setTemplateSteps(e.target.value)} />
+                {!isProjectScopeWritable ? <div className="note">{projectWriteBlockedMessage}</div> : null}
+                <input className="input" placeholder="Template Name" value={templateName} onChange={(e) => setTemplateName(e.target.value)} disabled={!isProjectScopeWritable} />
+                <input className="input" placeholder="Template Category (e.g., Login Tests)" value={templateCategory} onChange={(e) => setTemplateCategory(e.target.value)} disabled={!isProjectScopeWritable} />
+                <textarea className="input" placeholder="Template steps JSON or lines" rows={3} value={templateSteps} onChange={(e) => setTemplateSteps(e.target.value)} disabled={!isProjectScopeWritable} />
                 <button
                   className="button sectionCta"
+                  disabled={!isProjectScopeWritable}
                   onClick={async () => {
                     try {
                       await createTemplateApi({
@@ -4076,6 +4012,13 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
               {showImport && (
               <section className="panel">
                 <h4>Import</h4>
+                <label className="fieldLabel">Project Context (auto-filled)</label>
+                <input
+                  className="input"
+                  value={scopedProjectId ? `${activeProjectName || "Selected Project"} (${scopedProjectId})` : "No active project selected"}
+                  readOnly
+                  disabled
+                />
                 <select className="input" value={importType} onChange={(e) => setImportType(e.target.value)}>
                   <option value="">Select import source</option>
                   <option value="JSON">JSON</option>
@@ -4110,6 +4053,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                   className="button"
                   onClick={async () => {
                     try {
+                      if (!scopedProjectId) {
+                        alert("Please select a specific project before import");
+                        return;
+                      }
                       if (!previewReady) {
                         alert("Please run Preview Import before final import");
                         return;
@@ -4125,10 +4072,10 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                           : [];
                       const payload =
                         importType === "JSON"
-                          ? { sourceType: "JSON", items: JSON.parse(importPayload), fieldMapping, confirm: true }
+                          ? { sourceType: "JSON", items: JSON.parse(importPayload), fieldMapping, confirm: true, projectId: scopedProjectId }
                           : importType === "CSV"
-                          ? { sourceType: "CSV", csvText: importPayload, fieldMapping, confirm: true }
-                          : { sourceType: "EXCEL", rows: excelRows, fieldMapping, confirm: true };
+                          ? { sourceType: "CSV", csvText: importPayload, fieldMapping, confirm: true, projectId: scopedProjectId }
+                          : { sourceType: "EXCEL", rows: excelRows, fieldMapping, confirm: true, projectId: scopedProjectId };
                       const res = await importTestCasesApi(payload);
                       resetImportFields();
                       await loadTestCaseData();
@@ -4808,6 +4755,7 @@ const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
                       <div className="adminUserModalActions">
                         <button
                           className="button small adminActionEdit"
+                          disabled={String(selectedTestCaseModal.status || "").toUpperCase() === "ARCHIVED"}
                           onClick={() => {
                             startEditCase(selectedTestCaseModal);
                             setSelectedTestCaseModalId("");

@@ -444,6 +444,7 @@ export const suiteExecutionService = {
         const execution = await tx.testExecution.create({
           data: {
             testCaseId: runCase.testCaseId,
+            projectId: runCase.testRun.projectId,
             executedBy: params.actorId,
             testRunId: runCase.testRunId,
             result: toExecutionStatus(concreteStatus),
@@ -553,6 +554,7 @@ export const suiteExecutionService = {
         const execution = await tx.testExecution.create({
           data: {
             testCaseId: row.testCaseId,
+            projectId: run.projectId,
             executedBy: params.actorId,
             testRunId: runId,
             result: toExecutionStatus(concreteStatus),

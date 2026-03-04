@@ -3,6 +3,7 @@ import { Response, Router } from "express";
 import prisma from "../prisma";
 import { authenticate, AuthRequest } from "../middleware/auth.middleware";
 import { authorizeRoles } from "../middleware/role.middleware";
+import { projectIdFromRequest, requireProjectAccess } from "../middleware/project-access.middleware";
 
 const router = Router();
 const prismaAny = prisma as any;
@@ -23,6 +24,16 @@ const PROJECT_ROLES = ["ADMIN", "TESTER", "DEVELOPER"] as const;
 type ProjectRoleValue = (typeof PROJECT_ROLES)[number];
 const MILESTONE_STATUSES = ["PLANNED", "IN_PROGRESS", "COMPLETED", "MISSED"] as const;
 type MilestoneStatusValue = (typeof MILESTONE_STATUSES)[number];
+const PROJECT_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
+type ProjectStatusValue = (typeof PROJECT_STATUSES)[number];
+
+const normalizeProjectCode = (value: string): string =>
+  String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "");
 
 const writeAuditLog = async (
   actorId: string,
@@ -42,15 +53,6 @@ const writeAuditLog = async (
   });
 };
 
-const hasProjectAccess = async (userId: string, role: Role, projectId: string) => {
-  if (role === Role.ADMIN) return true;
-  const membership = await prismaAny.projectMember.findFirst({
-    where: { projectId, userId },
-    select: { id: true },
-  });
-  return Boolean(membership?.id);
-};
-
 const isProjectOwnerOrAdmin = async (req: AuthRequest, projectId: string) => {
   if (req.user?.role === Role.ADMIN) return true;
   const project = await prismaAny.project.findUnique({
@@ -61,31 +63,19 @@ const isProjectOwnerOrAdmin = async (req: AuthRequest, projectId: string) => {
   return project.ownerId === req.user?.userId || project.createdBy === req.user?.userId;
 };
 
-const ensureReadableProject = async (req: AuthRequest, res: Response, projectId: string) => {
-  const project = await prismaAny.project.findUnique({
-    where: { id: projectId },
-    select: { id: true, isActive: true },
-  });
-  if (!project?.id) {
-    res.status(404).json({ message: "Project not found" });
-    return null;
-  }
-  const allowed = await hasProjectAccess(req.user!.userId, req.user!.role as Role, projectId);
-  if (!allowed) {
-    res.status(403).json({ message: "Forbidden: you do not have access to this project" });
-    return null;
-  }
-  return project;
-};
-
 router.use(authenticate);
+
+const requireProjectFromId = requireProjectAccess((req) => projectIdFromRequest(req, { param: "id" }));
 
 router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
   const name = asString(req.body.name);
-  const code = asString(req.body.code) || null;
+  const code = normalizeProjectCode(asString(req.body.code));
   const ownerId = asString(req.body.ownerId) || req.user!.userId;
   if (!name) {
     return res.status(400).json({ message: "Project name is required" });
+  }
+  if (!code) {
+    return res.status(400).json({ message: "Project code is required" });
   }
 
   const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { id: true, isActive: true } });
@@ -98,6 +88,7 @@ router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthReque
       name,
       code,
       description: asString(req.body.description) || null,
+      isActive: true,
       createdBy: req.user!.userId,
       ownerId,
       members: {
@@ -109,62 +100,153 @@ router.post("/admin/projects", authorizeRoles(Role.ADMIN), async (req: AuthReque
         ],
       },
     },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      description: true,
+      isActive: true,
+      createdBy: true,
+      ownerId: true,
+      createdAt: true,
+      updatedAt: true,
+      creator: { select: { id: true, name: true, email: true, role: true } },
+      owner: { select: { id: true, name: true, email: true } },
+      _count: { select: { testCases: true, testSuites: true, members: true, milestones: true } },
+    },
   });
 
   await writeAuditLog(req.user!.userId, "ADMIN_CREATE_PROJECT", "Project", project.id, { name: project.name });
-  return res.status(201).json(project);
+  return res.status(201).json({
+    ...project,
+    status: project.isActive ? "ACTIVE" : "ARCHIVED",
+  });
 });
 
 router.get("/admin/projects", authorizeRoles(Role.ADMIN), async (_req: AuthRequest, res: Response) => {
   const projects = await prismaAny.project.findMany({
-    include: {
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      description: true,
+      isActive: true,
+      createdBy: true,
+      ownerId: true,
+      createdAt: true,
+      updatedAt: true,
       creator: { select: { id: true, name: true, email: true, role: true } },
       owner: { select: { id: true, name: true, email: true } },
       _count: { select: { testCases: true, testSuites: true, members: true, milestones: true } },
     },
     orderBy: { updatedAt: "desc" },
   });
-  return res.json(projects);
+  return res.json(
+    projects.map((item: any) => ({
+      ...item,
+      status: item.isActive ? "ACTIVE" : "ARCHIVED",
+    }))
+  );
 });
 
 router.patch("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
-  const ownerId = req.body.ownerId !== undefined ? asString(req.body.ownerId) || null : undefined;
+  const ownerId = req.body.ownerId !== undefined ? asString(req.body.ownerId) || undefined : undefined;
   if (ownerId) {
     const owner = await prisma.user.findUnique({ where: { id: ownerId }, select: { id: true, isActive: true } });
     if (!owner?.id || !owner.isActive) {
       return res.status(400).json({ message: "ownerId must be an active user" });
     }
   }
+  const nextStatus =
+    req.body.status !== undefined
+      ? (asString(req.body.status).toUpperCase() as ProjectStatusValue)
+      : undefined;
+  if (nextStatus && !PROJECT_STATUSES.includes(nextStatus)) {
+    return res.status(400).json({ message: "status must be ACTIVE or ARCHIVED" });
+  }
+  const nextIsActive =
+    typeof req.body.isActive === "boolean" ? req.body.isActive : nextStatus ? nextStatus === "ACTIVE" : undefined;
   const project = await prismaAny.project.update({
     where: { id: req.params.id },
     data: {
       name: asString(req.body.name) || undefined,
-      code: req.body.code !== undefined ? asString(req.body.code) || null : undefined,
+      code: req.body.code !== undefined ? normalizeProjectCode(asString(req.body.code)) || undefined : undefined,
       description: asString(req.body.description) || undefined,
-      isActive: typeof req.body.isActive === "boolean" ? req.body.isActive : undefined,
+      isActive: nextIsActive,
       ownerId,
+    },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      description: true,
+      isActive: true,
+      createdBy: true,
+      ownerId: true,
+      createdAt: true,
+      updatedAt: true,
+      creator: { select: { id: true, name: true, email: true, role: true } },
+      owner: { select: { id: true, name: true, email: true } },
+      _count: { select: { testCases: true, testSuites: true, members: true, milestones: true } },
     },
   });
   await writeAuditLog(req.user!.userId, "ADMIN_UPDATE_PROJECT", "Project", project.id);
-  return res.json(project);
+  return res.json({
+    ...project,
+    status: project.isActive ? "ACTIVE" : "ARCHIVED",
+  });
 });
 
 router.post("/admin/projects/:id/archive", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
-  const project = await prisma.project.update({
+  const project = await prismaAny.project.update({
     where: { id: req.params.id },
     data: { isActive: false },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      description: true,
+      isActive: true,
+      createdBy: true,
+      ownerId: true,
+      createdAt: true,
+      updatedAt: true,
+      creator: { select: { id: true, name: true, email: true, role: true } },
+      owner: { select: { id: true, name: true, email: true } },
+      _count: { select: { testCases: true, testSuites: true, members: true, milestones: true } },
+    },
   });
   await writeAuditLog(req.user!.userId, "ADMIN_ARCHIVE_PROJECT", "Project", project.id);
-  return res.json(project);
+  return res.json({
+    ...project,
+    status: "ARCHIVED",
+  });
 });
 
 router.post("/admin/projects/:id/restore", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
-  const project = await prisma.project.update({
+  const project = await prismaAny.project.update({
     where: { id: req.params.id },
     data: { isActive: true },
+    select: {
+      id: true,
+      name: true,
+      code: true,
+      description: true,
+      isActive: true,
+      createdBy: true,
+      ownerId: true,
+      createdAt: true,
+      updatedAt: true,
+      creator: { select: { id: true, name: true, email: true, role: true } },
+      owner: { select: { id: true, name: true, email: true } },
+      _count: { select: { testCases: true, testSuites: true, members: true, milestones: true } },
+    },
   });
   await writeAuditLog(req.user!.userId, "ADMIN_RESTORE_PROJECT", "Project", project.id);
-  return res.json(project);
+  return res.json({
+    ...project,
+    status: "ACTIVE",
+  });
 });
 
 router.delete("/admin/projects/:id", authorizeRoles(Role.ADMIN), async (req: AuthRequest, res: Response) => {
@@ -206,14 +288,19 @@ router.get(
       },
       orderBy: [{ isActive: "desc" }, { name: "asc" }],
     });
-
-    return res.json(projects);
+    return res.json(
+      projects.map((item: any) => ({
+        ...item,
+        status: item.isActive ? "ACTIVE" : "ARCHIVED",
+      }))
+    );
   }
 );
 
 router.get(
   "/projects/:id",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const project = await prismaAny.project.findUnique({
       where: { id: req.params.id },
@@ -233,24 +320,18 @@ router.get(
     if (!project) {
       return res.status(404).json({ message: "Project not found" });
     }
-    const allowed = await hasProjectAccess(req.user!.userId, req.user!.role as Role, project.id);
-    if (!allowed) {
-      return res.status(403).json({ message: "Forbidden: you do not have access to this project" });
-    }
-    if (req.user?.role !== Role.ADMIN && !project.isActive) {
-      return res.status(403).json({ message: "Forbidden: project is archived" });
-    }
-    return res.json(project);
+    return res.json({
+      ...project,
+      status: project.isActive ? "ACTIVE" : "ARCHIVED",
+    });
   }
 );
 
 router.get(
   "/projects/:id/members",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
-    const project = await ensureReadableProject(req, res, req.params.id);
-    if (!project) return;
-
     const members = await prismaAny.projectMember.findMany({
       where: { projectId: req.params.id },
       include: {
@@ -265,6 +346,7 @@ router.get(
 router.post(
   "/projects/:id/members",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -308,6 +390,7 @@ router.post(
 router.patch(
   "/projects/:id/members/:memberId",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -337,6 +420,7 @@ router.patch(
 router.delete(
   "/projects/:id/members/:memberId",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -358,10 +442,8 @@ router.delete(
 router.get(
   "/projects/:id/configuration",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
-    const project = await ensureReadableProject(req, res, req.params.id);
-    if (!project) return;
-
     const config = await prismaAny.projectConfig.findUnique({
       where: { projectId: req.params.id },
     });
@@ -380,6 +462,7 @@ router.get(
 router.put(
   "/projects/:id/configuration",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -418,10 +501,8 @@ router.put(
 router.get(
   "/projects/:id/milestones",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
-    const project = await ensureReadableProject(req, res, req.params.id);
-    if (!project) return;
-
     const milestones = await prismaAny.projectMilestone.findMany({
       where: { projectId: req.params.id },
       include: {
@@ -437,6 +518,7 @@ router.get(
 router.post(
   "/projects/:id/milestones",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -476,6 +558,7 @@ router.post(
 router.patch(
   "/projects/:id/milestones/:milestoneId",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -521,6 +604,7 @@ router.patch(
 router.delete(
   "/projects/:id/milestones/:milestoneId",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -542,6 +626,7 @@ router.delete(
 router.post(
   "/projects/:id/milestones/:milestoneId/link-test-run",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
     const canManage = await isProjectOwnerOrAdmin(req, req.params.id);
     if (!canManage) {
@@ -566,7 +651,7 @@ router.post(
       return res.status(404).json({ message: "Test run not found" });
     }
     if (run.projectId && run.projectId !== req.params.id) {
-      return res.status(400).json({ message: "Test run belongs to a different project" });
+      return res.status(403).json({ message: "Cross-project reference is not allowed." });
     }
 
     const updatedRun = await prismaAny.testRun.update({
@@ -583,9 +668,8 @@ router.post(
 router.get(
   "/projects/:id/milestones/:milestoneId/progress",
   authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
+  requireProjectFromId,
   async (req: AuthRequest, res: Response) => {
-    const project = await ensureReadableProject(req, res, req.params.id);
-    if (!project) return;
     const milestone = await prismaAny.projectMilestone.findUnique({
       where: { id: req.params.milestoneId },
       select: { id: true, projectId: true, targetPassRate: true, targetBugClosure: true, name: true, targetDate: true, status: true },

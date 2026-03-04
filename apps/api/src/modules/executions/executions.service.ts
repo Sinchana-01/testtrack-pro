@@ -454,6 +454,7 @@ export const executionsService = {
       const execution = await tx.testExecution.create({
         data: {
           testCaseId,
+          projectId: testCase.projectId,
           executedBy: actorId,
           testRunId,
           result: ExecutionStatus.SKIPPED,
@@ -666,6 +667,7 @@ export const executionsService = {
       const restarted = await tx.testExecution.create({
         data: {
           testCaseId: original.testCaseId,
+          projectId: original.projectId,
           executedBy: input.actorId,
           testRunId: original.testRunId,
           result: ExecutionStatus.SKIPPED,

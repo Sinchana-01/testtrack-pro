@@ -1,258 +1,335 @@
-import React, { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  archiveAdminProjectApi,
+  createAdminProjectApi,
+  getTestCasesApi,
   getMilestoneProgressApi,
-  getProjectConfigurationApi,
+  getProjectApi,
+  listAdminProjectsApi,
+  listAdminUsersApi,
   listProjectMembersApi,
   listProjectMilestonesApi,
+  listProjectsApi,
   removeProjectMemberApi,
-  updateProjectConfigurationApi,
+  restoreAdminProjectApi,
+  setActiveProjectId,
+  updateAdminProjectApi,
+  updateProjectMemberRoleApi,
   upsertProjectMemberApi,
-  createProjectMilestoneApi,
-  linkMilestoneTestRunApi,
 } from "../../api";
-
-type ProjectItem = {
-  id: string;
-  name: string;
-};
+import ProjectFormModal from "../../components/projects/ProjectFormModal";
+import ProjectList from "../../pages/projects/ProjectList";
+import ProjectDetails from "../../pages/projects/ProjectDetails";
+import type { ProjectCardData } from "../../components/projects/ProjectCard";
 
 type Props = {
-  projects: ProjectItem[];
-  testRuns?: Array<{ id: string; name: string }>;
+  isAdmin: boolean;
+  onRefreshData?: () => Promise<void> | void;
 };
 
-const ProjectManagementSection: React.FC<Props> = ({ projects, testRuns = [] }) => {
-  const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || "");
-  const [newMemberUserId, setNewMemberUserId] = useState("");
-  const [newMemberRole, setNewMemberRole] = useState<"ADMIN" | "TESTER" | "DEVELOPER">("TESTER");
-  const [milestoneName, setMilestoneName] = useState("");
-  const [milestoneDate, setMilestoneDate] = useState("");
-  const [selectedMilestoneId, setSelectedMilestoneId] = useState("");
-  const [linkTestRunId, setLinkTestRunId] = useState("");
-  const [modulesText, setModulesText] = useState("[]");
-  const [environmentsText, setEnvironmentsText] = useState("[]");
-  const [customFieldsText, setCustomFieldsText] = useState("[]");
-  const [workflowConfigText, setWorkflowConfigText] = useState("{}");
+type ProjectRoute =
+  | { mode: "list" }
+  | { mode: "details"; projectId: string };
+
+const parseProjectRoute = (): ProjectRoute => {
+  const path = window.location.pathname;
+  if (path.startsWith("/projects/")) {
+    const projectId = path.slice("/projects/".length).trim();
+    if (projectId) return { mode: "details", projectId };
+  }
+  return { mode: "list" };
+};
+
+const normalizeProject = (row: any): ProjectCardData => ({
+  id: String(row?.id || ""),
+  name: String(row?.name || "Unnamed Project"),
+  code: String(row?.code || "NO_CODE"),
+  description: String(row?.description || ""),
+  ownerId: row?.ownerId ? String(row.ownerId) : undefined,
+  ownerName: String(row?.owner?.name || row?.creator?.name || "N/A"),
+  status:
+    String(row?.status || "").toUpperCase() === "ARCHIVED" || row?.isActive === false
+      ? "ARCHIVED"
+      : "ACTIVE",
+  memberCount: Number(row?._count?.members || 0),
+  createdAt: String(row?.createdAt || ""),
+});
+
+const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) => {
+  const queryClient = useQueryClient();
+  const [route, setRoute] = useState<ProjectRoute>(() => parseProjectRoute());
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"ALL" | "ACTIVE" | "ARCHIVED">("ALL");
+  const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState<"create" | "edit">("create");
+  const [editingProject, setEditingProject] = useState<ProjectCardData | null>(null);
+  const [busyProjectId, setBusyProjectId] = useState("");
+  const [showProjectTestCases, setShowProjectTestCases] = useState(false);
+
+  const projectsQuery = useQuery<any[], Error>({
+    queryKey: ["projects", isAdmin ? "admin" : "member"],
+    queryFn: () => (isAdmin ? listAdminProjectsApi() : listProjectsApi({ includeArchived: true })),
+    keepPreviousData: true,
+  });
+
+  const usersQuery = useQuery<any[], Error>({
+    queryKey: ["admin-users-for-projects"],
+    queryFn: () => listAdminUsersApi(),
+    enabled: isAdmin && (formOpen || route.mode === "details"),
+    keepPreviousData: true,
+  });
+
+  const detailsQuery = useQuery<any, Error>({
+    queryKey: ["project", route.mode === "details" ? route.projectId : ""],
+    queryFn: () => getProjectApi((route as any).projectId),
+    enabled: route.mode === "details",
+    keepPreviousData: true,
+  });
 
   const membersQuery = useQuery<any[], Error>({
-    queryKey: ["project-members", selectedProjectId],
-    queryFn: () => listProjectMembersApi(selectedProjectId),
-    enabled: Boolean(selectedProjectId),
-    keepPreviousData: true,
-  });
-  const configQuery = useQuery<any, Error>({
-    queryKey: ["project-config", selectedProjectId],
-    queryFn: () => getProjectConfigurationApi(selectedProjectId),
-    enabled: Boolean(selectedProjectId),
-    keepPreviousData: true,
-    onSuccess: (data) => {
-      setModulesText(JSON.stringify(data?.modules || [], null, 2));
-      setEnvironmentsText(JSON.stringify(data?.environments || [], null, 2));
-      setCustomFieldsText(JSON.stringify(data?.customFields || [], null, 2));
-      setWorkflowConfigText(JSON.stringify(data?.workflowConfig || {}, null, 2));
-    },
-  });
-  const milestonesQuery = useQuery<any[], Error>({
-    queryKey: ["project-milestones", selectedProjectId],
-    queryFn: () => listProjectMilestonesApi(selectedProjectId),
-    enabled: Boolean(selectedProjectId),
-    keepPreviousData: true,
-  });
-  const progressQuery = useQuery<any, Error>({
-    queryKey: ["milestone-progress", selectedProjectId, selectedMilestoneId],
-    queryFn: () => getMilestoneProgressApi(selectedProjectId, selectedMilestoneId),
-    enabled: Boolean(selectedProjectId && selectedMilestoneId),
+    queryKey: ["project-members", route.mode === "details" ? route.projectId : ""],
+    queryFn: () => listProjectMembersApi((route as any).projectId),
+    enabled: route.mode === "details",
     keepPreviousData: true,
   });
 
-  const selectedProject = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId) || null,
-    [projects, selectedProjectId]
+  const milestonesQuery = useQuery<any[], Error>({
+    queryKey: ["project-milestones", route.mode === "details" ? route.projectId : ""],
+    queryFn: () => listProjectMilestonesApi((route as any).projectId),
+    enabled: route.mode === "details",
+    keepPreviousData: true,
+  });
+
+  const milestoneProgressQuery = useQuery<any, Error>({
+    queryKey: ["project-milestone-progress", route.mode === "details" ? route.projectId : ""],
+    queryFn: async () => {
+      const milestones = await listProjectMilestonesApi((route as any).projectId);
+      const first = Array.isArray(milestones) && milestones.length > 0 ? milestones[0] : null;
+      if (!first?.id) return null;
+      return getMilestoneProgressApi((route as any).projectId, first.id);
+    },
+    enabled: route.mode === "details",
+    keepPreviousData: true,
+  });
+
+  const projectTestCasesQuery = useQuery<any[], Error>({
+    queryKey: ["project-testcases", route.mode === "details" ? route.projectId : ""],
+    queryFn: async () => {
+      if (route.mode !== "details") return [];
+      setActiveProjectId(route.projectId);
+      const rows = await getTestCasesApi();
+      return Array.isArray(rows) ? rows : [];
+    },
+    enabled: route.mode === "details" && showProjectTestCases,
+    keepPreviousData: true,
+  });
+
+  const projectRows = useMemo(
+    () => (Array.isArray(projectsQuery.data) ? projectsQuery.data.map(normalizeProject) : []),
+    [projectsQuery.data]
   );
 
-  const addMember = async () => {
-    if (!selectedProjectId || !newMemberUserId.trim()) return;
-    await upsertProjectMemberApi(selectedProjectId, {
-      userId: newMemberUserId.trim(),
-      roleInProject: newMemberRole,
+  const filteredProjects = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return projectRows.filter((project) => {
+      if (statusFilter !== "ALL" && project.status !== statusFilter) return false;
+      if (!query) return true;
+      return project.name.toLowerCase().includes(query) || project.code.toLowerCase().includes(query);
     });
-    setNewMemberUserId("");
-    await membersQuery.refetch();
+  }, [projectRows, search, statusFilter]);
+
+  const selectedProjectFromList =
+    route.mode === "details" ? projectRows.find((item) => item.id === route.projectId) || null : null;
+  const selectedProject: ProjectCardData | null = useMemo(() => {
+    if (route.mode !== "details") return null;
+    if (detailsQuery.data?.id) return normalizeProject(detailsQuery.data);
+    return selectedProjectFromList;
+  }, [route, detailsQuery.data, selectedProjectFromList]);
+
+  const memberUserOptions = useMemo(
+    () =>
+      (Array.isArray(usersQuery.data) ? usersQuery.data : [])
+        .filter((user: any) => Boolean(user?.isActive))
+        .map((user: any) => ({
+          id: String(user.id),
+          label: `${String(user.name || "User")} (${String(user.email || "no-email")})`,
+          role: String(user.role || "TESTER").toUpperCase() as "ADMIN" | "TESTER" | "DEVELOPER",
+        })),
+    [usersQuery.data]
+  );
+
+  const refreshAll = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["projects"] }),
+      queryClient.invalidateQueries({ queryKey: ["project"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-members"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-milestones"] }),
+    ]);
+    if (onRefreshData) await onRefreshData();
   };
 
-  const removeMember = async (memberId: string) => {
-    if (!selectedProjectId) return;
-    await removeProjectMemberApi(selectedProjectId, memberId);
-    await membersQuery.refetch();
+  useEffect(() => {
+    const parsed = parseProjectRoute();
+    if (!window.location.pathname.startsWith("/projects")) {
+      window.history.replaceState({}, "", "/projects");
+      setRoute({ mode: "list" });
+      return;
+    }
+    setRoute(parsed);
+    const onPopState = () => setRoute(parseProjectRoute());
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+
+  const goToList = () => {
+    window.history.pushState({}, "", "/projects");
+    setRoute({ mode: "list" });
+    setShowProjectTestCases(false);
   };
 
-  const saveConfiguration = async () => {
-    if (!selectedProjectId) return;
-    await updateProjectConfigurationApi(selectedProjectId, {
-      modules: JSON.parse(modulesText || "[]"),
-      environments: JSON.parse(environmentsText || "[]"),
-      customFields: JSON.parse(customFieldsText || "[]"),
-      workflowConfig: JSON.parse(workflowConfigText || "{}"),
-    });
-    await configQuery.refetch();
+  const goToDetails = (projectId: string) => {
+    window.history.pushState({}, "", `/projects/${projectId}`);
+    setRoute({ mode: "details", projectId });
+    setShowProjectTestCases(false);
   };
 
-  const createMilestone = async () => {
-    if (!selectedProjectId || !milestoneName.trim() || !milestoneDate) return;
-    await createProjectMilestoneApi(selectedProjectId, {
-      name: milestoneName.trim(),
-      targetDate: new Date(milestoneDate).toISOString(),
-    });
-    setMilestoneName("");
-    setMilestoneDate("");
-    await milestonesQuery.refetch();
+  const createMutation = useMutation({
+    mutationFn: createAdminProjectApi,
+    onSuccess: async () => {
+      await refreshAll();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: any }) => updateAdminProjectApi(id, payload),
+    onSuccess: async () => {
+      await refreshAll();
+    },
+  });
+
+  const handleCreate = () => {
+    setFormMode("create");
+    setEditingProject(null);
+    setFormOpen(true);
   };
 
-  const linkRun = async () => {
-    if (!selectedProjectId || !selectedMilestoneId || !linkTestRunId) return;
-    await linkMilestoneTestRunApi(selectedProjectId, selectedMilestoneId, linkTestRunId);
-    await Promise.all([milestonesQuery.refetch(), progressQuery.refetch()]);
+  const handleEdit = (project: ProjectCardData) => {
+    setFormMode("edit");
+    setEditingProject(project);
+    setFormOpen(true);
   };
+
+  const handleArchiveRestore = async (project: ProjectCardData) => {
+    if (!isAdmin) return;
+    const isArchived = project.status === "ARCHIVED";
+    const ok = window.confirm(
+      isArchived
+        ? "Are you sure you want to restore this project?"
+        : "Are you sure you want to archive this project?"
+    );
+    if (!ok) return;
+    setBusyProjectId(project.id);
+    try {
+      if (isArchived) {
+        await restoreAdminProjectApi(project.id);
+      } else {
+        await archiveAdminProjectApi(project.id);
+      }
+      await refreshAll();
+    } finally {
+      setBusyProjectId("");
+    }
+  };
+
+  const handleSubmitForm = async (payload: {
+    name: string;
+    code: string;
+    description?: string;
+    status: "ACTIVE" | "ARCHIVED";
+  }) => {
+    if (!isAdmin) return;
+    if (formMode === "create") {
+      await createMutation.mutateAsync(payload);
+    } else if (editingProject?.id) {
+      await updateMutation.mutateAsync({
+        id: editingProject.id,
+        payload: {
+          name: payload.name,
+          code: payload.code,
+          description: payload.description,
+          isActive: payload.status === "ACTIVE",
+          status: payload.status,
+        },
+      });
+    }
+    setFormOpen(false);
+  };
+
+  const projectArchived = selectedProject?.status === "ARCHIVED";
 
   return (
     <section className="panel">
-      <h4>Project Management</h4>
-      <div className="inlineGrid">
-        <select className="input" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
-          {projects.map((project) => (
-            <option key={project.id} value={project.id}>
-              {project.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      {!selectedProject ? (
-        <p className="note">No projects available.</p>
+      <ProjectFormModal
+        open={formOpen}
+        mode={formMode}
+        project={editingProject}
+        saving={createMutation.isLoading || updateMutation.isLoading}
+        onClose={() => setFormOpen(false)}
+        onSubmit={handleSubmitForm}
+      />
+
+      {route.mode === "list" ? (
+        <ProjectList
+          isAdmin={isAdmin}
+          projects={filteredProjects}
+          search={search}
+          statusFilter={statusFilter}
+          onSearchChange={setSearch}
+          onStatusFilterChange={setStatusFilter}
+          onCreate={handleCreate}
+          onView={goToDetails}
+          onEdit={handleEdit}
+          onToggleArchive={handleArchiveRestore}
+          busyProjectId={busyProjectId}
+        />
       ) : (
-        <>
-          <div className="row" style={{ marginBottom: 12 }}>
-            <strong>{selectedProject.name}</strong>
-          </div>
-
-          <div className="inlineGrid" style={{ alignItems: "start" }}>
-            <div>
-              <h5>Members</h5>
-              <div className="inlineGrid">
-                <input
-                  className="input"
-                  placeholder="User ID"
-                  value={newMemberUserId}
-                  onChange={(e) => setNewMemberUserId(e.target.value)}
-                />
-                <select className="input" value={newMemberRole} onChange={(e) => setNewMemberRole(e.target.value as any)}>
-                  <option value="ADMIN">Admin</option>
-                  <option value="TESTER">Tester</option>
-                  <option value="DEVELOPER">Developer</option>
-                </select>
-              </div>
-              <button className="button small" onClick={addMember}>
-                Add Member
-              </button>
-              <div className="tableWrap adminUsersTableWrap" style={{ marginTop: 10 }}>
-                <table className="table adminUsersTable">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Email</th>
-                      <th>Role</th>
-                      <th />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(membersQuery.data || []).map((member: any) => (
-                      <tr key={member.id}>
-                        <td>{member.user?.name || "-"}</td>
-                        <td>{member.user?.email || "-"}</td>
-                        <td>{member.roleInProject}</td>
-                        <td>
-                          <button className="button tiny danger" onClick={() => removeMember(member.id)}>
-                            Remove
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div>
-              <h5>Configuration</h5>
-              <label className="label">Modules (JSON)</label>
-              <textarea className="input" rows={3} value={modulesText} onChange={(e) => setModulesText(e.target.value)} />
-              <label className="label">Environments (JSON)</label>
-              <textarea className="input" rows={3} value={environmentsText} onChange={(e) => setEnvironmentsText(e.target.value)} />
-              <label className="label">Custom Fields (JSON)</label>
-              <textarea className="input" rows={3} value={customFieldsText} onChange={(e) => setCustomFieldsText(e.target.value)} />
-              <label className="label">Workflow Config (JSON)</label>
-              <textarea className="input" rows={4} value={workflowConfigText} onChange={(e) => setWorkflowConfigText(e.target.value)} />
-              <button className="button small" onClick={saveConfiguration}>
-                Save Configuration
-              </button>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 16 }}>
-            <h5>Milestones</h5>
-            <div className="inlineGrid">
-              <input
-                className="input"
-                placeholder="Milestone name"
-                value={milestoneName}
-                onChange={(e) => setMilestoneName(e.target.value)}
-              />
-              <input className="input" type="date" value={milestoneDate} onChange={(e) => setMilestoneDate(e.target.value)} />
-            </div>
-            <button className="button small" onClick={createMilestone}>
-              Create Milestone
-            </button>
-
-            <div className="inlineGrid" style={{ marginTop: 10 }}>
-              <select className="input" value={selectedMilestoneId} onChange={(e) => setSelectedMilestoneId(e.target.value)}>
-                <option value="">Select milestone</option>
-                {(milestonesQuery.data || []).map((milestone: any) => (
-                  <option key={milestone.id} value={milestone.id}>
-                    {milestone.name}
-                  </option>
-                ))}
-              </select>
-              <select className="input" value={linkTestRunId} onChange={(e) => setLinkTestRunId(e.target.value)}>
-                <option value="">Link test run</option>
-                {testRuns.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {run.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button className="button small" onClick={linkRun}>
-              Link Test Run
-            </button>
-
-            {progressQuery.data && (
-              <div className="kpiRow" style={{ marginTop: 10 }}>
-                <div className="kpiItem">
-                  <strong>Pass Rate</strong>
-                  <span>{progressQuery.data.metrics?.passRate ?? 0}%</span>
-                </div>
-                <div className="kpiItem">
-                  <strong>Bug Closure</strong>
-                  <span>{progressQuery.data.metrics?.bugClosureRate ?? 0}%</span>
-                </div>
-                <div className="kpiItem">
-                  <strong>Linked Runs</strong>
-                  <span>{(progressQuery.data.linkedTestRuns || []).length}</span>
-                </div>
-              </div>
-            )}
-          </div>
-        </>
+        <ProjectDetails
+          isAdmin={isAdmin}
+          project={selectedProject}
+          members={Array.isArray(membersQuery.data) ? membersQuery.data : []}
+          milestones={Array.isArray(milestonesQuery.data) ? milestonesQuery.data : []}
+          milestonePassRate={Number(milestoneProgressQuery.data?.metrics?.passRate || 0)}
+          milestoneBugClosureRate={Number(milestoneProgressQuery.data?.metrics?.bugClosureRate || 0)}
+          onBackToProjects={goToList}
+          onEdit={() => selectedProject && handleEdit(selectedProject)}
+          onToggleArchive={() => selectedProject && handleArchiveRestore(selectedProject)}
+          onAddMember={async (userId, role) => {
+            if (!selectedProject?.id) return;
+            await upsertProjectMemberApi(selectedProject.id, { userId, roleInProject: role });
+            await refreshAll();
+          }}
+          onChangeRole={async (memberId, role) => {
+            if (!selectedProject?.id) return;
+            await updateProjectMemberRoleApi(selectedProject.id, memberId, role);
+            await refreshAll();
+          }}
+          onRemoveMember={async (memberId) => {
+            if (!selectedProject?.id) return;
+            await removeProjectMemberApi(selectedProject.id, memberId);
+            await refreshAll();
+          }}
+          userOptions={memberUserOptions}
+          disabledActions={projectArchived}
+          testCases={Array.isArray(projectTestCasesQuery.data) ? projectTestCasesQuery.data : []}
+          testCasesLoading={projectTestCasesQuery.isLoading}
+          onViewTestCases={async () => {
+            if (route.mode !== "details") return;
+            setActiveProjectId(route.projectId);
+            setShowProjectTestCases(true);
+            await projectTestCasesQuery.refetch();
+          }}
+        />
       )}
     </section>
   );

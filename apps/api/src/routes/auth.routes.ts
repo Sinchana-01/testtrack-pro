@@ -225,6 +225,119 @@ router.get("/verify-email", async (req: Request, res: Response) => {
 router.post("/login", loginController);
 
 /* =========================
+   LOGIN WITH GOOGLE
+========================= */
+router.post("/google", async (req: Request, res: Response) => {
+  try {
+    const idToken =
+      typeof req.body?.idToken === "string" ? req.body.idToken.trim() : "";
+    const googleAccessToken =
+      typeof req.body?.accessToken === "string" ? req.body.accessToken.trim() : "";
+    const rememberMe = Boolean(req.body?.rememberMe ?? true);
+
+    if (!idToken && !googleAccessToken) {
+      return res.status(400).json({ message: "Google token is required" });
+    }
+
+    const tokenInfoUrl = idToken
+      ? `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`
+      : `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(googleAccessToken)}`;
+    const tokenInfoResponse = await fetch(tokenInfoUrl);
+    if (!tokenInfoResponse.ok) {
+      return res.status(401).json({ message: "Invalid Google token" });
+    }
+
+    const tokenInfo = (await tokenInfoResponse.json()) as Record<string, string>;
+    let googleEmail = (tokenInfo.email || "").trim().toLowerCase();
+    let googleName = (tokenInfo.name || "").trim();
+    const googleAud = (tokenInfo.aud || "").trim();
+    const configuredClientId = (process.env.GOOGLE_CLIENT_ID || "").trim();
+
+    if (!googleEmail && googleAccessToken) {
+      const userInfoResponse = await fetch("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${googleAccessToken}` },
+      });
+      if (userInfoResponse.ok) {
+        const userInfo = (await userInfoResponse.json()) as Record<string, string>;
+        googleEmail = (userInfo.email || "").trim().toLowerCase();
+        googleName = (userInfo.name || "").trim();
+      }
+    }
+
+    if (!googleEmail) {
+      return res.status(401).json({ message: "Google account email is missing" });
+    }
+    if (configuredClientId && googleAud !== configuredClientId) {
+      return res.status(401).json({ message: "Google token audience mismatch" });
+    }
+    if (tokenInfo.email_verified && tokenInfo.email_verified !== "true") {
+      return res.status(401).json({ message: "Google email is not verified" });
+    }
+
+    let user = await prisma.user.findUnique({ where: { email: googleEmail } });
+    if (user && !user.isActive) {
+      return res.status(403).json({ message: "Account is inactive" });
+    }
+
+    if (!user) {
+      const generatedPasswordHash = await bcrypt.hash(
+        crypto.randomBytes(24).toString("hex"),
+        10
+      );
+      user = await prisma.user.create({
+        data: {
+          name: googleName || googleEmail.split("@")[0],
+          email: googleEmail,
+          password: generatedPasswordHash,
+          role: Role.TESTER,
+          isVerified: true,
+          passwordHistory: [generatedPasswordHash],
+        },
+      });
+    } else if (!user.isVerified || user.name !== (googleName || user.name)) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          isVerified: true,
+          name: googleName || user.name,
+          failedLoginAttempts: 0,
+          lockoutUntil: null,
+        },
+      });
+    }
+
+    const accessToken = signAccessToken({
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    });
+    const refreshToken = signRefreshToken({
+      id: user.id,
+      role: user.role,
+      tokenVersion: user.tokenVersion,
+    });
+
+    return res.json({
+      message: "Login successful",
+      accessToken,
+      refreshToken,
+      accessTokenExpiresIn: ACCESS_TOKEN_EXPIRY,
+      refreshTokenExpiresIn: REFRESH_TOKEN_EXPIRY,
+      rememberMe,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      },
+    });
+  } catch (error) {
+    console.error("GOOGLE LOGIN ERROR:", error);
+    return res.status(500).json({ message: "Google login failed" });
+  }
+});
+
+/* =========================
    REFRESH ACCESS TOKEN
 ========================= */
 router.post("/refresh-token", async (req: Request, res: Response) => {

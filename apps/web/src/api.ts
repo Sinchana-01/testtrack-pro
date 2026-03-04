@@ -4,12 +4,22 @@ const AUTH_API_URL = `${BASE_API_URL}/auth`;
 const TEST_API_URL = BASE_API_URL;
 const ACCESS_TOKEN_KEY = "accessToken";
 const REFRESH_TOKEN_KEY = "refreshToken";
+const ACTIVE_PROJECT_ID_KEY = "activeProjectId";
 
 const getTokenFromStorage = (key: string): string =>
   localStorage.getItem(key) || sessionStorage.getItem(key) || "";
 
 export const getAccessToken = (): string => getTokenFromStorage(ACCESS_TOKEN_KEY);
 export const getRefreshToken = (): string => getTokenFromStorage(REFRESH_TOKEN_KEY);
+export const getActiveProjectId = (): string => localStorage.getItem(ACTIVE_PROJECT_ID_KEY) || "";
+export const setActiveProjectId = (projectId: string) => {
+  const value = String(projectId || "").trim();
+  if (!value) {
+    localStorage.removeItem(ACTIVE_PROJECT_ID_KEY);
+    return;
+  }
+  localStorage.setItem(ACTIVE_PROJECT_ID_KEY, value);
+};
 
 export const setSessionTokens = (
   accessToken: string,
@@ -31,6 +41,7 @@ export const clearSessionTokens = () => {
   sessionStorage.removeItem(ACCESS_TOKEN_KEY);
   sessionStorage.removeItem(REFRESH_TOKEN_KEY);
   localStorage.removeItem("token");
+  localStorage.removeItem(ACTIVE_PROJECT_ID_KEY);
 };
 
 /* REGISTER */
@@ -59,6 +70,16 @@ export async function loginApi(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password, rememberMe }),
+  });
+
+  return res.json();
+}
+
+export async function googleLoginApi(accessToken: string, rememberMe: boolean) {
+  const res = await fetch(`${AUTH_API_URL}/google`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken, rememberMe }),
   });
 
   return res.json();
@@ -133,12 +154,20 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
 
   let accessToken = getAccessToken();
   const usingSessionStorage = Boolean(sessionStorage.getItem(REFRESH_TOKEN_KEY));
+  const activeProjectId = getActiveProjectId();
+  const withAuthHeaders = (sourceHeaders: HeadersInit | undefined, token: string): Headers => {
+    const headers = new Headers(sourceHeaders || {});
+    headers.set("Authorization", `Bearer ${token}`);
+    if (activeProjectId && activeProjectId !== "__ALL__") {
+      headers.set("x-project-id", activeProjectId);
+    } else {
+      headers.delete("x-project-id");
+    }
+    return headers;
+  };
   let response = await fetchWithRetry(input, {
     ...init,
-    headers: {
-      ...(init?.headers || {}),
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers: withAuthHeaders(init?.headers, accessToken),
   });
 
   if (response.status !== 401) {
@@ -161,10 +190,7 @@ export async function authFetch(input: RequestInfo | URL, init?: RequestInit) {
 
   return fetchWithRetry(input, {
     ...init,
-    headers: {
-      ...(init?.headers || {}),
-      Authorization: `Bearer ${accessToken}`,
-    },
+    headers: withAuthHeaders(init?.headers, accessToken),
   });
 }
 
@@ -178,11 +204,41 @@ const parseJson = async (res: Response) => {
   }
 };
 
+const normalizeApiErrorMessage = (status: number, message: string): string => {
+  const raw = String(message || "").trim();
+  if (status === 403) {
+    if (raw) {
+      return `Access denied. ${raw}`;
+    }
+    return "Access denied. You do not have permission for this action.";
+  }
+  if (status === 401) {
+    return "Your session expired. Please log in again.";
+  }
+  if (raw) {
+    return raw;
+  }
+  return "Request failed";
+};
+
+export class ApiHttpError extends Error {
+  status: number;
+  body: any;
+
+  constructor(status: number, message: string, body?: any) {
+    super(message);
+    this.name = "ApiHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 const authJson = async (path: string, init?: RequestInit) => {
   const res = await authFetch(`${TEST_API_URL}${path}`, init);
   const body = await parseJson(res);
   if (!res.ok) {
-    throw new Error(body?.message || "Request failed");
+    const message = normalizeApiErrorMessage(res.status, body?.message || body?.error || "");
+    throw new ApiHttpError(res.status, message, body);
   }
   return body;
 };
@@ -852,7 +908,7 @@ export async function getProjectApi(id: string) {
   return authJson(`/projects/${id}`);
 }
 
-export async function createAdminProjectApi(payload: { name: string; description?: string }) {
+export async function createAdminProjectApi(payload: { name: string; code: string; description?: string; ownerId?: string }) {
   return authJson("/admin/projects", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -862,7 +918,14 @@ export async function createAdminProjectApi(payload: { name: string; description
 
 export async function updateAdminProjectApi(
   id: string,
-  payload: { name?: string; code?: string; description?: string; isActive?: boolean; ownerId?: string }
+  payload: {
+    name?: string;
+    code?: string;
+    description?: string;
+    isActive?: boolean;
+    ownerId?: string;
+    status?: "ACTIVE" | "ARCHIVED";
+  }
 ) {
   return authJson(`/admin/projects/${id}`, {
     method: "PATCH",

@@ -4,6 +4,7 @@ import { exportTestExecutionReportApi, getTestExecutionReportSummaryApi, listPro
 
 type Props = {
   testRuns: any[];
+  roleName: string;
 };
 
 type ReportFilters = {
@@ -106,7 +107,7 @@ type ExecutionByTesterRow = NonNullable<ReportSummary["executionByTester"]>[numb
 type ExecutionTimelineRow = NonNullable<ReportSummary["executionTimeline"]>[number];
 type ExecutionByModuleRow = NonNullable<ReportSummary["executionByModule"]>[number];
 
-const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
+const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => {
   const [selectedRunId, setSelectedRunId] = useState<string>("");
   const [selectedProjectId, setSelectedProjectId] = useState<string>("");
   const [fromDate, setFromDate] = useState("");
@@ -280,7 +281,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns }) => {
       </div>
       <div className="inlineGrid">
         <select className="input" value={selectedProjectId} onChange={(e) => setSelectedProjectId(e.target.value)}>
-          <option value="">All Projects</option>
+          {roleName === "ADMIN" ? <option value="">All Projects</option> : null}
           {(projectsQuery.data || []).map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}

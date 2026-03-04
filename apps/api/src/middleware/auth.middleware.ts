@@ -9,6 +9,10 @@ export interface AuthRequest extends Request {
     role: Role;
     tokenVersion?: number;
   };
+  projectContext?: {
+    projectId: string;
+    isArchived: boolean;
+  };
 }
 
 export const authenticate = (

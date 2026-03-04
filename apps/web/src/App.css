@@ -2142,3 +2142,268 @@ body {
     justify-content: flex-start;
   }
 }
+
+/* ================= PROJECT MANAGEMENT ================= */
+
+.projectToolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.projectToolbarFilters {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 180px;
+  gap: 10px;
+  width: 100%;
+}
+
+.projectGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.projectCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 14px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+  display: grid;
+  gap: 10px;
+}
+
+.projectCardHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.projectCardTitle {
+  margin: 0;
+  font-size: 17px;
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.projectCardMetaRow {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.projectCodeBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.projectStatusBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.projectStatusBadge.active {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.projectStatusBadge.archived {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.projectCardActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.projectCardDescription {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  min-height: 40px;
+}
+
+.projectCardFooter {
+  display: grid;
+  gap: 4px;
+  color: #334155;
+  font-size: 12px;
+}
+
+.projectEmptyState {
+  border: 1px dashed #cbd5e1;
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 24px;
+  color: #475569;
+  text-align: center;
+}
+
+.projectDetailsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid #e2e8f0;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+}
+
+.projectBreadcrumb {
+  color: #64748b;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.projectDetailsTitle {
+  margin: 0 0 6px;
+  color: #0f172a;
+}
+
+.projectTabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+}
+
+.projectTab {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.projectTab.active {
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+  background: #eff6ff;
+}
+
+.projectOverviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.projectOverviewItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 10px;
+  display: grid;
+  gap: 6px;
+}
+
+.projectOverviewItem strong {
+  color: #0f172a;
+}
+
+.projectOverviewItem span {
+  color: #334155;
+  font-size: 14px;
+}
+
+.projectMembersSection,
+.projectMilestonesSection {
+  display: grid;
+  gap: 12px;
+}
+
+.projectProgressBlock {
+  display: grid;
+  gap: 4px;
+}
+
+.projectProgressLabel {
+  font-size: 12px;
+  color: #475569;
+}
+
+.projectProgressBar {
+  position: relative;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.projectProgressBar span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #059669, #10b981);
+}
+
+.projectProgressValue {
+  font-size: 12px;
+  color: #0f172a;
+  font-weight: 600;
+}
+
+.projectFormModal {
+  width: min(680px, 96vw);
+}
+
+.formError {
+  margin: -4px 0 8px;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.button.tiny {
+  width: auto;
+  padding: 4px 8px;
+  font-size: 11px;
+}
+
+@media (max-width: 900px) {
+  .projectToolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .projectToolbarFilters {
+    grid-template-columns: 1fr;
+  }
+
+  .projectGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .projectDetailsHeader {
+    flex-direction: column;
+  }
+
+  .projectOverviewGrid {
+    grid-template-columns: 1fr;
+  }
+}

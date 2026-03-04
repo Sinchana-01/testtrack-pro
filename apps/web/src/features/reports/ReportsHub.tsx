@@ -203,7 +203,9 @@ const ReportsHub: React.FC<Props> = ({
           ))}
         </aside>
         <div className="reportsHubContent">
-          {selectedReport === "execution_summary" && <TestExecutionReportSection testRuns={testRuns} />}
+          {selectedReport === "execution_summary" && (
+            <TestExecutionReportSection testRuns={testRuns} roleName={roleName} />
+          )}
           {selectedReport === "tester_performance" && <TesterPerformanceReportSection roleName={roleName} />}
 
           {selectedReport === "execution_history" && (

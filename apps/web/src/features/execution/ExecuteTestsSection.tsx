@@ -180,6 +180,19 @@ const ExecuteTestsSection = ({
     return Array.from(byNumber.values()).sort((a, b) => a.stepNumber - b.stepNumber);
   }, [selectedExecutionReport, previousExecutionReport]);
 
+  const selectedExecutionCase = useMemo(
+    () => executionSelectableCases.find((item) => item.id === executionCaseId) || null,
+    [executionSelectableCases, executionCaseId]
+  );
+  const selectedExecutionCaseStatus = String(selectedExecutionCase?.status || "").toUpperCase();
+  const isArchivedCase = selectedExecutionCaseStatus === "ARCHIVED";
+  const isApprovedCase = selectedExecutionCaseStatus === "APPROVED";
+  const canOpenExecution =
+    Boolean(executionCaseId) &&
+    !isArchivedCase &&
+    isApprovedCase &&
+    (!executionRunId || executionSelectableCases.some((tc) => tc.id === executionCaseId));
+
   const inferEvidenceType = (mimeType: string): string => {
     const type = String(mimeType || "").toLowerCase();
     if (type.startsWith("image/")) return "IMAGE";
@@ -219,11 +232,20 @@ const ExecuteTestsSection = ({
       </select>
       <button
         className="button"
+        disabled={!canOpenExecution}
         onClick={async () => {
           try {
             setActiveSuiteExecutionContext(null);
             if (!executionCaseId) {
               alert("Select a test case");
+              return;
+            }
+            if (isArchivedCase) {
+              alert("Access denied. Archived test cases cannot be modified or executed.");
+              return;
+            }
+            if (!isApprovedCase) {
+              alert("Only APPROVED test cases can be executed.");
               return;
             }
             if (executionRunId) {
@@ -241,6 +263,12 @@ const ExecuteTestsSection = ({
       >
         Open Execution Mode
       </button>
+      {executionCaseId && !isApprovedCase && !isArchivedCase ? (
+        <div className="note">Execution is enabled only when test case status is APPROVED.</div>
+      ) : null}
+      {executionCaseId && isArchivedCase ? (
+        <div className="note">Archived test cases cannot be executed.</div>
+      ) : null}
       {executionId && executionSteps.length > 0 && (
         <>
           <div className="note">Progress: {executionProgress}% (auto-saved)</div>

@@ -77,7 +77,7 @@ model TestCase {
   assignedTo               String?
   lastModifiedBy           String?
   lastModifiedAt           DateTime?
-  projectId                String?
+  projectId                String
   isDeleted                Boolean                  @default(false)
   deletedAt                DateTime?
   createdAt                DateTime                 @default(now())
@@ -87,7 +87,7 @@ model TestCase {
   assignee                 User?                    @relation("AssignedTestCases", fields: [assignedTo], references: [id])
   creator                  User                     @relation("CreatedTestCases", fields: [createdBy], references: [id])
   lastEditor               User?                    @relation("ModifiedTestCases", fields: [lastModifiedBy], references: [id])
-  project                  Project?                 @relation(fields: [projectId], references: [id])
+  project                  Project                  @relation(fields: [projectId], references: [id])
   versionHistory           TestCaseVersion[]
   executions               TestExecution[]
   testRunCases             TestRunCase[]
@@ -123,13 +123,13 @@ model TestRun {
   targetStartDate DateTime?
   targetEndDate   DateTime?
   status          TestRunStatus        @default(PLANNED)
-  projectId       String?
+  projectId       String
   milestoneId     String?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
   executions      TestExecution[]
   creator         User                 @relation("CreatedTestRuns", fields: [createdBy], references: [id], onDelete: Cascade)
-  project         Project?             @relation(fields: [projectId], references: [id])
+  project         Project              @relation(fields: [projectId], references: [id])
   milestone       ProjectMilestone?    @relation(fields: [milestoneId], references: [id])
   assignments     TestRunAssignment[]
   testCases       TestRunCase[]
@@ -174,7 +174,7 @@ model TestSuite {
   name           String
   description    String?
   createdBy      String
-  projectId      String?
+  projectId      String
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
   isArchived     Boolean                  @default(false)
@@ -185,7 +185,7 @@ model TestSuite {
   creator        User                     @relation("CreatedSuites", fields: [createdBy], references: [id])
   parentSuite    TestSuite?               @relation("SuiteHierarchy", fields: [parentSuiteId], references: [id])
   childSuites    TestSuite[]              @relation("SuiteHierarchy")
-  project        Project?                 @relation(fields: [projectId], references: [id])
+  project        Project                  @relation(fields: [projectId], references: [id])
   suiteCases     TestSuiteCase[]
   executions     TestSuiteExecution[]
   executionCases TestSuiteExecutionCase[]
@@ -270,6 +270,7 @@ model TestSuiteExecutionCase {
 model TestExecution {
   id                 String                   @id @default(uuid())
   testCaseId         String
+  projectId          String
   executedBy         String
   result             ExecutionStatus
   notes              String?
@@ -281,6 +282,7 @@ model TestExecution {
   updatedAt          DateTime                 @updatedAt
   issues             Issue[]
   executor           User                     @relation("ExecutedBy", fields: [executedBy], references: [id])
+  project            Project                  @relation(fields: [projectId], references: [id])
   testCase           TestCase                 @relation(fields: [testCaseId], references: [id], onDelete: Cascade)
   testRun            TestRun?                 @relation(fields: [testRunId], references: [id])
   runCaseRefs        TestRunCase[]            @relation("RunCaseLastExecution")
@@ -288,6 +290,7 @@ model TestExecution {
 
   @@index([testCaseId])
   @@index([executedBy])
+  @@index([projectId])
   @@index([testRunId])
 }
 
@@ -307,6 +310,7 @@ model Attachment {
 
 model Issue {
   id               String            @id @default(uuid())
+  projectId        String
   title            String
   description      String
   status           IssueStatus       @default(OPEN)
@@ -332,11 +336,13 @@ model Issue {
   attachments      BugAttachment[]
   assignee         User?             @relation("AssignedIssues", fields: [assignedTo], references: [id])
   execution        TestExecution?    @relation(fields: [executionId], references: [id])
+  project          Project           @relation(fields: [projectId], references: [id])
   reporter         User              @relation("ReportedIssues", fields: [reportedBy], references: [id])
   testCase         TestCase?         @relation(fields: [testCaseId], references: [id])
   comments         IssueComment[]
 
   @@index([assignedTo])
+  @@index([projectId])
   @@index([reportedBy])
 }
 
@@ -355,18 +361,21 @@ model IssueComment {
 model Project {
   id          String      @id @default(uuid())
   name        String
-  code        String?     @unique
+  code        String      @unique
   description String?
+  status      ProjectStatus @default(ACTIVE)
   isActive    Boolean     @default(true)
   createdBy   String
-  ownerId     String?
+  ownerId     String
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
   creator     User        @relation("CreatedProjects", fields: [createdBy], references: [id])
-  owner       User?       @relation("ProjectOwner", fields: [ownerId], references: [id])
+  owner       User        @relation("ProjectOwner", fields: [ownerId], references: [id])
   testCases   TestCase[]
   testSuites  TestSuite[]
   testRuns    TestRun[]
+  issues      Issue[]
+  executions  TestExecution[]
   members     ProjectMember[]
   config      ProjectConfig?
   milestones  ProjectMilestone[]
@@ -671,6 +680,11 @@ enum ProjectRole {
   ADMIN
   TESTER
   DEVELOPER
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
 }
 
 enum ProjectMilestoneStatus {
