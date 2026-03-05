@@ -27,6 +27,17 @@ import {
   projectGuards,
 } from "./testcase.project-scope";
 import { sendGenericEmail } from "../utils/email";
+import {
+  createNotification,
+  createNotificationsBulk,
+} from "../modules/notifications/notification.service";
+import {
+  sendBugAssignedEmail,
+  sendBugStatusChangedEmail,
+  sendCommentMentionEmail,
+  sendRetestRequestedEmail,
+  sendTestAssignedEmail,
+} from "../services/email.service";
 
 const router = Router();
 const prismaAny = prisma as any;
@@ -609,6 +620,126 @@ const parseMentions = (text: string): string[] => {
   return [...new Set(matches.map((item) => item.slice(1).toLowerCase()))];
 };
 
+const safeNotify = async (work: () => Promise<void>) => {
+  try {
+    await work();
+  } catch (error) {
+    console.error("NOTIFICATION_DISPATCH_ERROR", error);
+  }
+};
+
+const notifyBugAssigned = async (params: { assigneeId?: string | null; assigneeEmail?: string | null; bugCode: string; issueId: string }) => {
+  if (!params.assigneeId) return;
+  await safeNotify(async () => {
+    await createNotification({
+      userId: params.assigneeId!,
+      type: "BUG_ASSIGNED",
+      message: `New bug ${params.bugCode} assigned to you`,
+      entityId: params.issueId,
+      entityType: "Issue",
+    });
+    if (params.assigneeEmail) {
+      await sendBugAssignedEmail(params.assigneeId!, params.assigneeEmail, params.bugCode);
+    }
+  });
+};
+
+const notifyBugStatusChanged = async (params: {
+  issueId: string;
+  bugCode: string;
+  status: string;
+  reporter?: { id: string; email: string } | null;
+  assignee?: { id: string; email: string } | null;
+}) => {
+  const recipients = [params.reporter, params.assignee].filter(Boolean) as Array<{ id: string; email: string }>;
+  if (!recipients.length) return;
+  await safeNotify(async () => {
+    await createNotificationsBulk(
+      recipients.map((r) => ({
+        userId: r.id,
+        type: "BUG_STATUS_CHANGED",
+        message: `${params.bugCode} status changed to ${params.status}`,
+        entityId: params.issueId,
+        entityType: "Issue",
+      }))
+    );
+    for (const recipient of recipients) {
+      await sendBugStatusChangedEmail(recipient.id, recipient.email, params.bugCode, params.status);
+    }
+  });
+};
+
+const notifyTestAssigned = async (params: { testerId: string; testerEmail?: string | null; runId: string; runName: string }) => {
+  await safeNotify(async () => {
+    await createNotification({
+      userId: params.testerId,
+      type: "TEST_ASSIGNED",
+      message: `Test run '${params.runName}' assigned to you`,
+      entityId: params.runId,
+      entityType: "TestRun",
+    });
+    if (params.testerEmail) {
+      await sendTestAssignedEmail(params.testerId, params.testerEmail, params.runName);
+    }
+  });
+};
+
+const notifyCommentMentions = async (params: {
+  issueId: string;
+  bugCode: string;
+  mentions: string[];
+  authorId: string;
+}) => {
+  if (!params.mentions.length) return;
+  const users = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      id: { not: params.authorId },
+      OR: params.mentions.map((m) => ({
+        OR: [{ email: { contains: m, mode: "insensitive" } }, { name: { contains: m, mode: "insensitive" } }],
+      })),
+    },
+    select: { id: true, email: true },
+    take: 20,
+  });
+  if (!users.length) return;
+  await safeNotify(async () => {
+    await createNotificationsBulk(
+      users.map((u) => ({
+        userId: u.id,
+        type: "COMMENT_MENTION",
+        message: `@you mentioned in ${params.bugCode}`,
+        entityId: params.issueId,
+        entityType: "Issue",
+      }))
+    );
+    for (const u of users) {
+      await sendCommentMentionEmail(u.id, u.email, params.bugCode);
+    }
+  });
+};
+
+const notifyRetestRequested = async (params: {
+  issueId: string;
+  bugCode: string;
+  originalTesterId?: string | null;
+  originalTesterEmail?: string | null;
+}) => {
+  if (!params.originalTesterId) return;
+  await safeNotify(async () => {
+    await createNotification({
+      userId: params.originalTesterId!,
+      type: "RETEST_REQUESTED",
+      message: `Re-test requested for ${params.bugCode}`,
+      entityId: params.issueId,
+      entityType: "Issue",
+    });
+    if (params.originalTesterEmail) {
+      await sendRetestRequestedEmail(params.originalTesterId!, params.originalTesterEmail, params.bugCode);
+    }
+  });
+};
+
 const resolveActiveDeveloperId = async (raw: unknown): Promise<string | null> => {
   const input = asString(raw);
   if (!input) return null;
@@ -678,21 +809,27 @@ const enrichIssue = (issue: any) => {
 const isOwnerOrAssignee = (req: AuthRequest, createdBy: string, assignedTo: string | null): boolean =>
   req.user!.role === Role.ADMIN || req.user!.userId === createdBy || req.user!.userId === assignedTo;
 
-const ensureIssueAccess = async (req: AuthRequest, issueId: string): Promise<{ allowed: boolean; issue?: { id: string } }> => {
+const ensureIssueAccess = async (
+  req: AuthRequest,
+  issueId: string
+): Promise<{
+  allowed: boolean;
+  issue?: { id: string; assignedTo: string | null; reportedBy: string; bugCode: string | null };
+}> => {
   const issue = await prisma.issue.findUnique({
     where: { id: issueId },
-    select: { id: true, assignedTo: true },
+    select: { id: true, assignedTo: true, reportedBy: true, bugCode: true },
   });
   if (!issue) {
     return { allowed: false };
   }
   if (req.user!.role === Role.ADMIN) {
-    return { allowed: true, issue: { id: issue.id } };
+    return { allowed: true, issue };
   }
   if (req.user!.role === Role.DEVELOPER && issue.assignedTo !== req.user!.userId) {
-    return { allowed: false, issue: { id: issue.id } };
+    return { allowed: false, issue };
   }
-  return { allowed: true, issue: { id: issue.id } };
+  return { allowed: true, issue };
 };
 
 const parseCsvLine = (line: string): string[] => {
@@ -804,11 +941,14 @@ router.get(
   requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
+    const where: Prisma.TestCaseWhereInput = {
+      isDeleted: false,
+    };
+    if (projectId) {
+      where.projectId = projectId;
+    }
     const testCases = await prisma.testCase.findMany({
-      where: {
-        isDeleted: false,
-        projectId,
-      },
+      where,
       include: {
         creator: { select: { id: true, name: true, email: true } },
         assignee: { select: { id: true, name: true, email: true } },
@@ -2894,6 +3034,22 @@ router.post(
       testCaseCount: distinctCaseIds.length,
       testerCount: distinctTesterIds.length,
     });
+    if (distinctTesterIds.length > 0) {
+      const testers = await prisma.user.findMany({
+        where: { id: { in: distinctTesterIds } },
+        select: { id: true, email: true },
+      });
+      await Promise.all(
+        testers.map((tester) =>
+          notifyTestAssigned({
+            testerId: tester.id,
+            testerEmail: tester.email,
+            runId: created.id,
+            runName: created.name,
+          })
+        )
+      );
+    }
 
     return res.status(201).json(created);
   }
@@ -3040,6 +3196,12 @@ router.post(
     await writeAuditLog(req.user!.userId, "ASSIGN_TEST_RUN", "TestRunAssignment", assignment.id, {
       testerId,
       testRunId: run.id,
+    });
+    await notifyTestAssigned({
+      testerId: tester.id,
+      testerEmail: tester.email,
+      runId: run.id,
+      runName: run.name,
     });
     return res.status(201).json(assignment);
   }
@@ -5080,6 +5242,18 @@ router.post(
     });
 
     await writeAuditLog(req.user!.userId, "CREATE_BUG_REPORT", "Issue", issue.id, { executionId: execution.id });
+    if (issue.assignedTo) {
+      const assignee = await prisma.user.findUnique({
+        where: { id: issue.assignedTo },
+        select: { id: true, email: true },
+      });
+      await notifyBugAssigned({
+        assigneeId: assignee?.id,
+        assigneeEmail: assignee?.email,
+        bugCode: issue.bugCode || issue.id,
+        issueId: issue.id,
+      });
+    }
     return res.status(201).json(issue);
   }
 );
@@ -5186,6 +5360,18 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), requireProjectFrom
   });
 
   await writeAuditLog(req.user!.userId, "CREATE_BUG_REPORT", "Issue", issue.id, { bugCode, workflowStatus });
+  if (issue.assignedTo) {
+    const assignee = await prisma.user.findUnique({
+      where: { id: issue.assignedTo },
+      select: { id: true, email: true },
+    });
+    await notifyBugAssigned({
+      assigneeId: assignee?.id,
+      assigneeEmail: assignee?.email,
+      bugCode: issue.bugCode || issue.id,
+      issueId: issue.id,
+    });
+  }
   return res.status(201).json(enrichIssue(issue));
 });
 
@@ -5383,6 +5569,21 @@ router.patch("/bugs/:id/workflow", authorizeRoles(Role.TESTER, Role.DEVELOPER, R
       },
     });
     await writeAuditLog(req.user!.userId, "BUG_WORKFLOW_TRANSITION", "Issue", updated.id, { from, to: target });
+    const recipientIds = [issue.reportedBy, issue.assignedTo].filter(Boolean) as string[];
+    if (recipientIds.length > 0) {
+      const recipients = await prisma.user.findMany({
+        where: { id: { in: recipientIds } },
+        select: { id: true, email: true },
+      });
+      const byId = new Map(recipients.map((u) => [u.id, u]));
+      await notifyBugStatusChanged({
+        issueId: updated.id,
+        bugCode: updated.bugCode || updated.id,
+        status: target,
+        reporter: issue.reportedBy ? byId.get(issue.reportedBy) || null : null,
+        assignee: issue.assignedTo ? byId.get(issue.assignedTo) || null : null,
+      });
+    }
     return res.json(enrichIssue(updated));
   } catch (error: any) {
     console.error("BUG_WORKFLOW_TRANSITION_ERROR", error);
@@ -5448,6 +5649,21 @@ router.patch("/developer/bugs/:id/quick-status", authorizeRoles(Role.DEVELOPER),
     from,
     to: target,
   });
+  const recipientIds = [issue.reportedBy, issue.assignedTo].filter(Boolean) as string[];
+  if (recipientIds.length > 0) {
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: recipientIds } },
+      select: { id: true, email: true },
+    });
+    const byId = new Map(recipients.map((u) => [u.id, u]));
+    await notifyBugStatusChanged({
+      issueId: updated.id,
+      bugCode: updated.bugCode || updated.id,
+      status: target,
+      reporter: issue.reportedBy ? byId.get(issue.reportedBy) || null : null,
+      assignee: issue.assignedTo ? byId.get(issue.assignedTo) || null : null,
+    });
+  }
   return res.json(enrichIssue(updated));
 });
 
@@ -5481,6 +5697,33 @@ router.post("/bugs/:id/resolve", authorizeRoles(Role.DEVELOPER), async (req: Aut
     },
   });
   await writeAuditLog(req.user!.userId, "BUG_RESOLUTION_ACTION", "Issue", issue.id, { action });
+  const recipientIds = [issue.reportedBy, issue.assignedTo].filter(Boolean) as string[];
+  if (recipientIds.length > 0) {
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: recipientIds } },
+      select: { id: true, email: true },
+    });
+    const byId = new Map(recipients.map((u) => [u.id, u]));
+    await notifyBugStatusChanged({
+      issueId: updated.id,
+      bugCode: updated.bugCode || updated.id,
+      status: workflowStatus,
+      reporter: issue.reportedBy ? byId.get(issue.reportedBy) || null : null,
+      assignee: issue.assignedTo ? byId.get(issue.assignedTo) || null : null,
+    });
+  }
+  if (action === "REQUEST_RETEST" && issue.reportedBy) {
+    const tester = await prisma.user.findUnique({
+      where: { id: issue.reportedBy },
+      select: { id: true, email: true },
+    });
+    await notifyRetestRequested({
+      issueId: updated.id,
+      bugCode: updated.bugCode || updated.id,
+      originalTesterId: tester?.id,
+      originalTesterEmail: tester?.email,
+    });
+  }
   return res.json(enrichIssue(updated));
 });
 
@@ -5499,6 +5742,12 @@ router.post("/bugs/:id/comments", authorizeRoles(Role.TESTER, Role.DEVELOPER, Ro
     data: { issueId: issue.id, authorId: req.user!.userId, comment: payload },
   });
   await writeAuditLog(req.user!.userId, "BUG_COMMENT_ADD", "IssueComment", created.id, { mentions });
+  await notifyCommentMentions({
+    issueId: issue.id,
+    bugCode: issue.bugCode || issue.id,
+    mentions,
+    authorId: req.user!.userId,
+  });
   return res.status(201).json({ ...created, mentions, parentCommentId });
 });
 
@@ -5598,6 +5847,12 @@ router.post("/issues/:id/assign", authorizeRoles(Role.TESTER), async (req: AuthR
   });
 
   await writeAuditLog(req.user!.userId, "ASSIGN_ISSUE_TO_DEVELOPER", "Issue", issue.id, { developerId });
+  await notifyBugAssigned({
+    assigneeId: developer.id,
+    assigneeEmail: developer.email,
+    bugCode: issue.bugCode || issue.id,
+    issueId: issue.id,
+  });
   return res.json(issue);
 });
 
@@ -5618,6 +5873,14 @@ router.post(
         return res.status(403).json({ message: "You can comment only on issues assigned to you" });
       }
     }
+    const issueRow = await prisma.issue.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, bugCode: true },
+    });
+    if (!issueRow) {
+      return res.status(404).json({ message: "Issue not found" });
+    }
+    const mentions = parseMentions(comment);
 
     const created = await prisma.issueComment.create({
       data: {
@@ -5628,6 +5891,12 @@ router.post(
     });
 
     await writeAuditLog(req.user!.userId, "COMMENT_ON_ISSUE", "IssueComment", created.id);
+    await notifyCommentMentions({
+      issueId: issueRow.id,
+      bugCode: issueRow.bugCode || issueRow.id,
+      mentions,
+      authorId: req.user!.userId,
+    });
     return res.status(201).json(created);
   }
 );
@@ -5673,12 +5942,28 @@ router.patch("/issues/:id/status", authorizeRoles(Role.DEVELOPER), async (req: A
     return res.status(403).json({ message: "You can update only issues assigned to you" });
   }
 
+  const prev = access.issue;
   const issue = await prisma.issue.update({
     where: { id: req.params.id },
     data: { status },
   });
 
   await writeAuditLog(req.user!.userId, "UPDATE_ISSUE_STATUS", "Issue", issue.id, { status });
+  const recipientIds = [prev.reportedBy, prev.assignedTo].filter(Boolean) as string[];
+  if (recipientIds.length > 0) {
+    const recipients = await prisma.user.findMany({
+      where: { id: { in: recipientIds } },
+      select: { id: true, email: true },
+    });
+    const byId = new Map(recipients.map((u) => [u.id, u]));
+    await notifyBugStatusChanged({
+      issueId: issue.id,
+      bugCode: issue.bugCode || issue.id,
+      status: status,
+      reporter: prev.reportedBy ? byId.get(prev.reportedBy) || null : null,
+      assignee: prev.assignedTo ? byId.get(prev.assignedTo) || null : null,
+    });
+  }
   return res.json(issue);
 });
 
@@ -5735,6 +6020,7 @@ router.post(
     if (!access.allowed) {
       return res.status(403).json({ message: "You can update only issues assigned to you" });
     }
+    const prev = access.issue;
     const issue = await prisma.issue.update({
       where: { id: req.params.id },
       data: {
@@ -5743,6 +6029,18 @@ router.post(
       },
     });
     await writeAuditLog(req.user!.userId, "REQUEST_RETEST", "Issue", issue.id);
+    if (prev.reportedBy) {
+      const tester = await prisma.user.findUnique({
+        where: { id: prev.reportedBy },
+        select: { id: true, email: true },
+      });
+      await notifyRetestRequested({
+        issueId: issue.id,
+        bugCode: issue.bugCode || issue.id,
+        originalTesterId: tester?.id,
+        originalTesterEmail: tester?.email,
+      });
+    }
     return res.json(issue);
   }
 );

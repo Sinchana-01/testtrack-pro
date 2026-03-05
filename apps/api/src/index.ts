@@ -5,6 +5,7 @@ import path from "path";
 import authRoutes from "./routes/auth.routes";
 import testcaseRoutes from "./routes/testcase.routes";
 import projectRoutes from "./routes/project.routes";
+import notificationRoutes from "./modules/notifications/notification.routes";
 
 
 
@@ -42,6 +43,7 @@ app.use(express.urlencoded({ extended: true, limit: requestBodyLimit }));
 app.use("/api/auth", authRoutes);
 app.use("/api", testcaseRoutes);
 app.use("/api", projectRoutes);
+app.use("/api", notificationRoutes);
 
 
 app.get("/", (req, res) => {

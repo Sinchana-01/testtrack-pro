@@ -88,7 +88,7 @@ export const projectGuards = {
       return activeProjectIds[0];
     }
     return null;
-  }),
+  }, { allowAdminWithoutProject: true }),
   requireProjectFromTestCaseId: requireProjectAccess(async (req) => {
     const testCaseId = asString(req.params.id) || asString(req.params.testCaseId) || asString(req.body.testCaseId);
     if (!testCaseId) return null;
