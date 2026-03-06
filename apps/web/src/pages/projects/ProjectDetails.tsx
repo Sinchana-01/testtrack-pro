@@ -24,6 +24,7 @@ type Props = {
   members: any[];
   milestones: any[];
   testCases: any[];
+  showTestCases?: boolean;
   testCasesLoading?: boolean;
   milestonePassRate?: number;
   milestoneBugClosureRate?: number;
@@ -44,6 +45,7 @@ const ProjectDetails: React.FC<Props> = ({
   members,
   milestones,
   testCases,
+  showTestCases,
   testCasesLoading,
   milestonePassRate,
   milestoneBugClosureRate,
@@ -57,7 +59,7 @@ const ProjectDetails: React.FC<Props> = ({
   userOptions,
   disabledActions,
 }) => {
-  const [activeTab, setActiveTab] = useState<"overview" | "members" | "milestones">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "members">("overview");
   const [newMemberRole, setNewMemberRole] = useState<"ADMIN" | "TESTER" | "DEVELOPER">("TESTER");
   const [newMemberUserId, setNewMemberUserId] = useState("");
 
@@ -79,8 +81,8 @@ const ProjectDetails: React.FC<Props> = ({
         </div>
         <div className="toolbarActions">
           {isAdmin ? (
-            <button className="button small" onClick={onViewTestCases}>
-              {testCasesLoading ? "Loading..." : "View Test Cases"}
+            <button className="button small" onClick={onViewTestCases} disabled={Boolean(testCasesLoading)}>
+              View Test Cases
             </button>
           ) : null}
           <button className="button small" onClick={onBackToProjects}>
@@ -112,12 +114,6 @@ const ProjectDetails: React.FC<Props> = ({
         >
           Members
         </button>
-        <button
-          className={`projectTab ${activeTab === "milestones" ? "active" : ""}`}
-          onClick={() => setActiveTab("milestones")}
-        >
-          Milestones
-        </button>
       </div>
 
       {activeTab === "overview" ? (
@@ -145,7 +141,7 @@ const ProjectDetails: React.FC<Props> = ({
             </div>
           </div>
 
-          {isAdmin ? (
+          {isAdmin && showTestCases ? (
             <div className="projectTestCaseList">
               <div className="panelHeader">
                 <h4>Project Test Cases</h4>
@@ -224,43 +220,6 @@ const ProjectDetails: React.FC<Props> = ({
         </div>
       ) : null}
 
-      {activeTab === "milestones" ? (
-        <div className="projectMilestonesSection">
-          {milestones.length === 0 ? (
-            <div className="projectEmptyState">No milestones found</div>
-          ) : (
-            <div className="projectGrid">
-              {milestones.map((milestone: any) => {
-                const target = milestone?.targetDate ? new Date(milestone.targetDate).toLocaleDateString() : "N/A";
-                return (
-                  <article className="projectCard" key={milestone.id}>
-                    <h3 className="projectCardTitle">{milestone.name || "Milestone"}</h3>
-                    <p className="projectCardDescription">{milestone.description || "No description"}</p>
-                    <div className="projectCardFooter">
-                      <span>Status: {milestone.status || "PLANNED"}</span>
-                      <span>Target: {target}</span>
-                    </div>
-                    <div className="projectProgressBlock">
-                      <div className="projectProgressLabel">Pass Rate</div>
-                      <div className="projectProgressBar">
-                        <span style={{ width: `${Math.max(0, Math.min(100, Number(milestonePassRate || 0)))}%` }} />
-                      </div>
-                      <div className="projectProgressValue">{Number(milestonePassRate || 0).toFixed(1)}%</div>
-                    </div>
-                    <div className="projectProgressBlock">
-                      <div className="projectProgressLabel">Bug Closure</div>
-                      <div className="projectProgressBar">
-                        <span style={{ width: `${Math.max(0, Math.min(100, Number(milestoneBugClosureRate || 0)))}%` }} />
-                      </div>
-                      <div className="projectProgressValue">{Number(milestoneBugClosureRate || 0).toFixed(1)}%</div>
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      ) : null}
     </section>
   );
 };

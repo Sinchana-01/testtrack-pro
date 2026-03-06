@@ -33,17 +33,18 @@ const ProjectList: React.FC<Props> = ({
       <div className="projectToolbar">
         <div className="projectToolbarFilters">
           {isAdmin ? (
-          <button className="button" onClick={onCreate}>
-            Create Project
-          </button>
-        ) : null}<input
-            className="input"
+            <button className="button small projectCreateBtn" onClick={onCreate}>
+              Create Project
+            </button>
+          ) : null}
+          <input
+            className="input projectSearchInput"
             placeholder="Search by project name or code"
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
           />
           <select
-            className="input"
+            className="input projectStatusSelect"
             value={statusFilter}
             onChange={(e) => onStatusFilterChange(e.target.value as "ALL" | "ACTIVE" | "ARCHIVED")}
           >

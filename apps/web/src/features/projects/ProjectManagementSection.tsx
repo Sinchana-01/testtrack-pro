@@ -322,7 +322,10 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
           userOptions={memberUserOptions}
           disabledActions={projectArchived}
           testCases={Array.isArray(projectTestCasesQuery.data) ? projectTestCasesQuery.data : []}
-          testCasesLoading={projectTestCasesQuery.isLoading}
+          showTestCases={showProjectTestCases}
+          testCasesLoading={
+            showProjectTestCases && (projectTestCasesQuery.isLoading || projectTestCasesQuery.isFetching)
+          }
           onViewTestCases={async () => {
             if (route.mode !== "details") return;
             setActiveProjectId(route.projectId);

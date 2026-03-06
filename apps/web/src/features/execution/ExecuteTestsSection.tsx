@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createBugFromExecutionApi,
   deleteExecutionEvidenceApi,
@@ -6,10 +6,8 @@ import {
   getSuiteExecutionApi,
   listExecutionEvidenceApi,
   pauseExecutionTimerApi,
-  reexecuteExecutionApi,
   resumeExecutionTimerApi,
   saveExecutionStepApi,
-  setExecutionManualDurationApi,
   startExecutionTimerApi,
   stopExecutionTimerApi,
   uploadExecutionEvidenceApi,
@@ -69,6 +67,13 @@ type Props = {
   setQuickBugDescription: (value: string) => void;
   quickBugSeverity: string;
   setQuickBugSeverity: (value: string) => void;
+  quickBugExpectedBehavior: string;
+  setQuickBugExpectedBehavior: (value: string) => void;
+  quickBugActualBehavior: string;
+  setQuickBugActualBehavior: (value: string) => void;
+  quickBugAssignedTo: string;
+  setQuickBugAssignedTo: (value: string) => void;
+  developerDirectory: Array<{ id: string; name: string; email: string }>;
   resetQuickBugFields: () => void;
   setExecutionId: (value: string) => void;
   onQuickBugCreated?: (issue: any) => Promise<void> | void;
@@ -128,13 +133,23 @@ const ExecuteTestsSection = ({
   setQuickBugDescription,
   quickBugSeverity,
   setQuickBugSeverity,
+  quickBugExpectedBehavior,
+  setQuickBugExpectedBehavior,
+  quickBugActualBehavior,
+  setQuickBugActualBehavior,
+  quickBugAssignedTo,
+  setQuickBugAssignedTo,
+  developerDirectory,
   resetQuickBugFields,
   setExecutionId,
   onQuickBugCreated,
 }: Props) => {
   const [timerState, setTimerState] = useState<"RUNNING" | "PAUSED" | "STOPPED">("STOPPED");
-  const [manualDurationMinutes, setManualDurationMinutes] = useState("");
-  const [compareOpen, setCompareOpen] = useState(false);
+  const [showQuickBugModal, setShowQuickBugModal] = useState(false);
+  const [showEvidenceModal, setShowEvidenceModal] = useState(false);
+  const [showExecutionModal, setShowExecutionModal] = useState(false);
+  const [postFinalizeResult, setPostFinalizeResult] = useState<"" | "PASSED" | "FAILED" | "BLOCKED" | "SKIPPED">("");
+  const autoStartedExecutionRef = useRef<string>("");
 
   useEffect(() => {
     if (executionCompletedAt) {
@@ -148,37 +163,48 @@ const ExecuteTestsSection = ({
     setTimerState("STOPPED");
   }, [executionStartedAt, executionCompletedAt, executionId]);
 
+  useEffect(() => {
+    if (executionId && executionSteps.length > 0) {
+      setShowExecutionModal(true);
+    }
+  }, [executionId, executionSteps.length]);
+
+  useEffect(() => {
+    if (!executionId) {
+      autoStartedExecutionRef.current = "";
+      return;
+    }
+    if (executionStartedAt || executionCompletedAt) return;
+    if (autoStartedExecutionRef.current === executionId) return;
+    autoStartedExecutionRef.current = executionId;
+    startExecutionTimerApi(executionId)
+      .then((timer) => {
+        setExecutionStartedAt(timer?.startedAt || executionStartedAt);
+        setExecutionCompletedAt("");
+        setExecutionDurationSeconds(
+          typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
+        );
+        setTimerState("RUNNING");
+      })
+      .catch(() => {
+        // Message will be handled by next user action/finalize if timer control fails.
+      });
+  }, [
+    executionId,
+    executionStartedAt,
+    executionCompletedAt,
+    executionDurationSeconds,
+    setExecutionStartedAt,
+    setExecutionCompletedAt,
+    setExecutionDurationSeconds,
+  ]);
+
+  const effectiveEvidenceExecutionId = executionId || selectedExecutionReportId;
+
   const selectedExecutionReport = useMemo(
     () => executionReports.find((item) => item.id === selectedExecutionReportId) || null,
     [executionReports, selectedExecutionReportId]
   );
-  const previousExecutionReport = useMemo(() => {
-    if (!selectedExecutionReport) return null;
-    const prevId = String(selectedExecutionReport.reexecutionOfId || "");
-    if (!prevId) return null;
-    return executionReports.find((item) => item.id === prevId) || null;
-  }, [executionReports, selectedExecutionReport]);
-
-  const comparisonRows = useMemo(() => {
-    if (!selectedExecutionReport || !previousExecutionReport) return [];
-    const currentSteps = Array.isArray(selectedExecutionReport.stepResults) ? selectedExecutionReport.stepResults : [];
-    const previousSteps = Array.isArray(previousExecutionReport.stepResults)
-      ? previousExecutionReport.stepResults
-      : [];
-    const byNumber = new Map<number, any>();
-    previousSteps.forEach((step: any) => {
-      const n = Number(step?.stepNumber || 0);
-      if (n > 0) byNumber.set(n, { stepNumber: n, previous: step, current: null });
-    });
-    currentSteps.forEach((step: any) => {
-      const n = Number(step?.stepNumber || 0);
-      if (n <= 0) return;
-      const existing = byNumber.get(n) || { stepNumber: n, previous: null, current: null };
-      existing.current = step;
-      byNumber.set(n, existing);
-    });
-    return Array.from(byNumber.values()).sort((a, b) => a.stepNumber - b.stepNumber);
-  }, [selectedExecutionReport, previousExecutionReport]);
 
   const selectedExecutionCase = useMemo(
     () => executionSelectableCases.find((item) => item.id === executionCaseId) || null,
@@ -212,127 +238,93 @@ const ExecuteTestsSection = ({
     });
 
   return (
-    <section className="panel">
-      <h4>Execute Test Case</h4>
-      <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
-        <option value="">Select Test Case</option>
-        {executionSelectableCases.map((tc) => (
-          <option key={tc.id} value={tc.id}>
-            {tc.testCaseCode || tc.id} - {tc.title}
-          </option>
-        ))}
-      </select>
-      <select className="input" value={executionRunId} onChange={(e) => setExecutionRunId(e.target.value)}>
-        <option value="">Optional: Link to Test Run</option>
-        {testRuns.map((run) => (
-          <option key={run.id} value={run.id}>
-            {run.name}
-          </option>
-        ))}
-      </select>
-      <button
-        className="button"
-        disabled={!canOpenExecution}
-        onClick={async () => {
-          try {
-            setActiveSuiteExecutionContext(null);
-            if (!executionCaseId) {
-              alert("Select a test case");
-              return;
-            }
-            if (isArchivedCase) {
-              alert("Access denied. Archived test cases cannot be modified or executed.");
-              return;
-            }
-            if (!isApprovedCase) {
-              alert("Only APPROVED test cases can be executed.");
-              return;
-            }
-            if (executionRunId) {
-              const inRun = executionSelectableCases.some((tc) => tc.id === executionCaseId);
-              if (!inRun) {
-                alert("Selected test case is not part of the selected test run.");
+    <section className="panel executionCompactPanel">
+      <div className="executionEntryCard">
+        <h4 style={{ marginTop: 0, marginBottom: 8 }}>Execute Tests</h4>
+        <div className="note" style={{ marginBottom: 10 }}>
+          Run test cases step-by-step with evidence and timing.
+        </div>
+        <select className="input" value={executionCaseId} onChange={(e) => setExecutionCaseId(e.target.value)}>
+          <option value="">Select Test Case</option>
+          {executionSelectableCases.map((tc) => (
+            <option key={tc.id} value={tc.id}>
+              {tc.testCaseCode || tc.id} - {tc.title}
+            </option>
+          ))}
+        </select>
+        <select className="input" value={executionRunId} onChange={(e) => setExecutionRunId(e.target.value)}>
+          <option value="">Optional: Link to Test Run</option>
+          {testRuns.map((run) => (
+            <option key={run.id} value={run.id}>
+              {run.name}
+            </option>
+          ))}
+        </select>
+        <button
+          className="button"
+          disabled={!canOpenExecution}
+          onClick={async () => {
+            try {
+              setActiveSuiteExecutionContext(null);
+              if (!executionCaseId) {
+                alert("Select a test case");
                 return;
               }
+              if (isArchivedCase) {
+                alert("Access denied. Archived test cases cannot be modified or executed.");
+                return;
+              }
+              if (!isApprovedCase) {
+                alert("Only APPROVED test cases can be executed.");
+                return;
+              }
+              if (executionRunId) {
+                const inRun = executionSelectableCases.some((tc) => tc.id === executionCaseId);
+                if (!inRun) {
+                  alert("Selected test case is not part of the selected test run.");
+                  return;
+                }
+              }
+              await openExecutionSession(executionCaseId, executionRunId || undefined);
+              setShowExecutionModal(true);
+            } catch (error: any) {
+              alert(error?.message || "Open execution failed");
             }
-            await openExecutionSession(executionCaseId, executionRunId || undefined);
-          } catch (error: any) {
-            alert(error?.message || "Open execution failed");
-          }
-        }}
-      >
-        Open Execution Mode
-      </button>
+          }}
+        >
+          Open Execution Mode
+        </button>
+      </div>
       {executionCaseId && !isApprovedCase && !isArchivedCase ? (
         <div className="note">Execution is enabled only when test case status is APPROVED.</div>
       ) : null}
       {executionCaseId && isArchivedCase ? (
         <div className="note">Archived test cases cannot be executed.</div>
       ) : null}
-      {executionId && executionSteps.length > 0 && (
-        <>
+      {executionId && executionSteps.length > 0 && showExecutionModal && (
+        <div className="modalBackdrop" onClick={() => setShowExecutionModal(false)}>
+          <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h4 style={{ margin: 0 }}>Execution Workspace</h4>
+              <button className="button small" onClick={() => setShowExecutionModal(false)}>Close</button>
+            </div>
           <div className="note">Progress: {executionProgress}% (auto-saved)</div>
           <div className="inlineGrid">
             <button
               className="button"
+              disabled={timerState === "STOPPED"}
               onClick={async () => {
                 try {
-                  const timer = await startExecutionTimerApi(executionId);
-                  setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                  setExecutionCompletedAt("");
-                  setExecutionDurationSeconds(
-                    typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                  );
-                  setTimerState("RUNNING");
-                } catch (error: any) {
-                  alert(error?.message || "Failed to start timer");
-                }
-              }}
-            >
-              Start Timer
-            </button>
-            <button
-              className="button"
-              onClick={async () => {
-                try {
-                  const timer = await stopExecutionTimerApi(executionId);
-                  setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                  setExecutionCompletedAt(timer?.completedAt || "");
-                  setExecutionDurationSeconds(
-                    typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                  );
-                  setTimerState("STOPPED");
-                } catch (error: any) {
-                  alert(error?.message || "Failed to stop timer");
-                }
-              }}
-            >
-              Stop Timer
-            </button>
-            <button
-              className="button"
-              disabled={timerState !== "RUNNING"}
-              onClick={async () => {
-                try {
-                  const timer = await pauseExecutionTimerApi(executionId);
-                  setExecutionStartedAt(timer?.startedAt || executionStartedAt);
-                  setExecutionCompletedAt("");
-                  setExecutionDurationSeconds(
-                    typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                  );
-                  setTimerState("PAUSED");
-                } catch (error: any) {
-                  alert(error?.message || "Failed to pause timer");
-                }
-              }}
-            >
-              Pause Timer
-            </button>
-            <button
-              className="button"
-              disabled={timerState !== "PAUSED"}
-              onClick={async () => {
-                try {
+                  if (timerState === "RUNNING") {
+                    const timer = await pauseExecutionTimerApi(executionId);
+                    setExecutionStartedAt(timer?.startedAt || executionStartedAt);
+                    setExecutionCompletedAt("");
+                    setExecutionDurationSeconds(
+                      typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
+                    );
+                    setTimerState("PAUSED");
+                    return;
+                  }
                   const timer = await resumeExecutionTimerApi(executionId);
                   setExecutionStartedAt(timer?.startedAt || executionStartedAt);
                   setExecutionCompletedAt("");
@@ -341,11 +333,11 @@ const ExecuteTestsSection = ({
                   );
                   setTimerState("RUNNING");
                 } catch (error: any) {
-                  alert(error?.message || "Failed to resume timer");
+                  alert(error?.message || "Failed to update timer");
                 }
               }}
             >
-              Resume Timer
+              Pause / Resume Timer
             </button>
           </div>
           <div className="note">
@@ -353,40 +345,6 @@ const ExecuteTestsSection = ({
             Started: {executionStartedAt ? new Date(executionStartedAt).toLocaleString() : "N/A"} | Completed:{" "}
             {executionCompletedAt ? new Date(executionCompletedAt).toLocaleString() : "N/A"} | Duration:{" "}
             {typeof executionDurationSeconds === "number" ? `${executionDurationSeconds}s` : "N/A"}
-          </div>
-          <div className="inlineGrid">
-            <input
-              className="input"
-              type="number"
-              min={0}
-              placeholder="Manual duration (minutes)"
-              value={manualDurationMinutes}
-              onChange={(e) => setManualDurationMinutes(e.target.value)}
-            />
-            <button
-              className="button"
-              onClick={async () => {
-                try {
-                  const minutes = Number(manualDurationMinutes);
-                  if (!Number.isFinite(minutes) || minutes < 0) {
-                    alert("Enter a valid non-negative duration");
-                    return;
-                  }
-                  const timer = await setExecutionManualDurationApi(executionId, {
-                    durationMinutes: minutes,
-                  });
-                  setExecutionDurationSeconds(
-                    typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
-                  );
-                  setManualDurationMinutes("");
-                  alert("Manual duration saved");
-                } catch (error: any) {
-                  alert(error?.message || "Failed to set manual duration");
-                }
-              }}
-            >
-              Save Manual Duration
-            </button>
           </div>
           <select
             className="input"
@@ -446,7 +404,13 @@ const ExecuteTestsSection = ({
                 const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
                 setExecutionSteps(nextSteps);
                 setExecutionProgress(saved?.progressPercent || 0);
-                setExecutionSelectedStepNumber("");
+                const sortedSteps = [...nextSteps]
+                  .map((step: any) => ({ ...step, stepNumber: Number(step?.stepNumber || 0) }))
+                  .filter((step: any) => step.stepNumber > 0)
+                  .sort((a: any, b: any) => a.stepNumber - b.stepNumber);
+                const currentIndex = sortedSteps.findIndex((step: any) => step.stepNumber === stepNumber);
+                const nextStep = currentIndex >= 0 ? sortedSteps[currentIndex + 1] : null;
+                setExecutionSelectedStepNumber(nextStep ? String(nextStep.stepNumber) : "");
                 setExecutionStepStatus("");
                 setExecutionActualResult("");
                 setExecutionStepNotes("");
@@ -461,6 +425,19 @@ const ExecuteTestsSection = ({
             className="button"
             onClick={async () => {
               try {
+                if (!executionCompletedAt) {
+                  try {
+                    const timer = await stopExecutionTimerApi(executionId);
+                    setExecutionStartedAt(timer?.startedAt || executionStartedAt);
+                    setExecutionCompletedAt(timer?.completedAt || "");
+                    setExecutionDurationSeconds(
+                      typeof timer?.durationSeconds === "number" ? timer.durationSeconds : executionDurationSeconds
+                    );
+                    setTimerState("STOPPED");
+                  } catch {
+                    // continue finalize even if timer endpoint fails
+                  }
+                }
                 const final = await finalizeExecutionApi(executionId, {
                   notes: executionNotes,
                 });
@@ -502,7 +479,7 @@ const ExecuteTestsSection = ({
                 setExecutionCompletedAt("");
                 setExecutionDurationSeconds(null);
                 setExecutionEvidence([]);
-                setManualDurationMinutes("");
+                setShowExecutionModal(false);
                 if (
                   freshSuiteExecution &&
                   String(activeSuiteExecutionContext?.mode || "").toUpperCase() === "SEQUENTIAL"
@@ -517,7 +494,23 @@ const ExecuteTestsSection = ({
                   }
                   setActiveSuiteExecutionContext(null);
                 }
-                alert(`Execution finalized: ${final.result}`);
+                const finalResult = String(final?.result || "").toUpperCase();
+                if (finalResult === "FAILED") {
+                  setSelectedExecutionReportIdState(final.id);
+                  setShowQuickBugModal(true);
+                  setPostFinalizeResult("FAILED");
+                  alert("Execution failed. Please create a bug report now.");
+                }
+                if (finalResult === "PASSED") {
+                  setSelectedExecutionReportIdState(final.id);
+                  setPostFinalizeResult("PASSED");
+                  alert("Execution completed successfully.");
+                }
+                if (finalResult === "BLOCKED") setPostFinalizeResult("BLOCKED");
+                if (finalResult === "SKIPPED") {
+                  setPostFinalizeResult("SKIPPED");
+                  alert("Execution skipped. You can execute skipped execution again.");
+                }
               } catch (error: any) {
                 alert(error?.message || "Finalize failed");
               }
@@ -525,258 +518,305 @@ const ExecuteTestsSection = ({
           >
             Finalize Execution
           </button>
-          <h4>Execution Evidence</h4>
-          <div className="inlineGrid">
-            <select className="input" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
-              <option value="">Select evidence type</option>
-              <option value="IMAGE">IMAGE</option>
-              <option value="VIDEO">VIDEO</option>
-              <option value="LOG">LOG</option>
-              <option value="DOCUMENT">DOCUMENT</option>
-            </select>
-            <input
-              className="input"
-              placeholder="Evidence file name"
-              value={evidenceName}
-              onChange={(e) => setEvidenceName(e.target.value)}
-            />
           </div>
-          <input
-            className="input"
-            type="file"
-            onChange={async (e) => {
-              try {
-                const file = e.target.files?.[0];
-                if (!file) return;
-                const dataUrl = await readFileAsDataUrl(file);
-                setEvidenceUrl(dataUrl);
-                if (!evidenceName.trim()) {
-                  setEvidenceName(file.name);
-                }
-                if (!evidenceType) {
-                  setEvidenceType(inferEvidenceType(file.type));
-                }
-              } catch (error: any) {
-                alert(error?.message || "Failed to read selected file");
-              }
-            }}
-          />
-          <div className="note">
-            {evidenceUrl
-              ? "File attached and ready to upload."
-              : "Attach a file to upload as execution evidence."}
-          </div>
-          <input
-            className="input"
-            placeholder="Evidence notes (optional)"
-            value={evidenceNotes}
-            onChange={(e) => setEvidenceNotes(e.target.value)}
-          />
-          <div className="inlineGrid">
-            <button
-              className="button"
-              onClick={async () => {
-                try {
-                  if (!evidenceUrl.trim() || !evidenceName.trim()) {
-                    alert("Attach file and provide evidence name");
-                    return;
-                  }
-                  const created = await uploadExecutionEvidenceApi(executionId, {
-                    fileType: evidenceType,
-                    fileUrl: evidenceUrl,
-                    fileName: evidenceName,
-                    notes: evidenceNotes,
-                  });
-                  setExecutionEvidence((prev: any[]) => [created, ...prev]);
-                  setEvidenceType("");
-                  setEvidenceUrl("");
-                  setEvidenceName("");
-                  setEvidenceNotes("");
-                } catch (error: any) {
-                  alert(error?.message || "Evidence upload failed");
-                }
-              }}
-            >
-              Add Evidence
-            </button>
-            <button
-              className="button"
-              onClick={async () => {
-                try {
-                  const rows = await listExecutionEvidenceApi(executionId);
-                  setExecutionEvidence(Array.isArray(rows) ? rows : []);
-                } catch (error: any) {
-                  alert(error?.message || "Failed to refresh evidence");
-                }
-              }}
-            >
-              Refresh Evidence
-            </button>
-          </div>
-          {executionEvidence.length > 0 && (
-            <div className="listCompact">
-              {executionEvidence.map((item) => (
-                <div className="row" key={item.id}>
-                  <span className="title">
-                    {item.fileUrl ? (
-                      <a href={item.fileUrl} target="_blank" rel="noreferrer">
-                        {item.fileName}
-                      </a>
-                    ) : (
-                      item.fileName
-                    )}
-                  </span>
-                  <span className="meta">{item.fileType}</span>
-                  <button
-                    className="button small danger"
-                    onClick={async () => {
-                      try {
-                        await deleteExecutionEvidenceApi(executionId, item.id);
-                        setExecutionEvidence((prev: any[]) => prev.filter((row) => row.id !== item.id));
-                      } catch (error: any) {
-                        alert(error?.message || "Delete evidence failed");
-                      }
-                    }}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
+        </div>
+      )}
+      {selectedExecutionReportId ? (
+        <>
+          <h4>Post Execution</h4>
+          {selectedExecutionReport && (
+            <div className="note">
+              Selected result: {selectedExecutionReport.result} | Executed at{" "}
+              {new Date(selectedExecutionReport.executedAt).toLocaleString()}
             </div>
           )}
+          {postFinalizeResult === "PASSED" ? (
+            <div className="testCaseDetails" style={{ marginBottom: 8 }}>
+              <div><strong>Execution Passed.</strong> Add evidence or skip.</div>
+            </div>
+          ) : null}
+          {postFinalizeResult === "FAILED" ? (
+            <div className="testCaseDetails" style={{ marginBottom: 8 }}>
+              <div><strong>Execution Failed.</strong> Create a bug report.</div>
+            </div>
+          ) : null}
+          {postFinalizeResult === "SKIPPED" ? (
+            <div className="testCaseDetails" style={{ marginBottom: 8 }}>
+              <div><strong>Execution Skipped.</strong> Run skipped execution now.</div>
+            </div>
+          ) : null}
+          {String(selectedExecutionReport?.result || "").toUpperCase() === "PASSED" ? (
+            <div className="inlineGrid">
+              <button className="button small" onClick={() => setShowEvidenceModal(true)}>
+                Add Evidence
+              </button>
+              <button
+                className="button small"
+                onClick={() => {
+                  setPostFinalizeResult("");
+                  setSelectedExecutionReportIdState("");
+                }}
+              >
+                Skip
+              </button>
+            </div>
+          ) : null}
+          {String(selectedExecutionReport?.result || "").toUpperCase() === "FAILED" ? (
+            <button className="button small" onClick={() => setShowQuickBugModal(true)}>
+              Create Bug Report
+            </button>
+          ) : null}
+          {String(selectedExecutionReport?.result || "").toUpperCase() === "SKIPPED" ? (
+            <button
+              className="button small"
+              onClick={async () => {
+                try {
+                  const tcId = String(
+                    selectedExecutionReport?.testCaseId ||
+                      selectedExecutionReport?.testCase?.id ||
+                      ""
+                  ).trim();
+                  if (!tcId) {
+                    alert("Unable to resolve skipped test case for re-execution.");
+                    return;
+                  }
+                  const runId = String(selectedExecutionReport?.testRunId || "").trim();
+                  setPostFinalizeResult("");
+                  setSelectedExecutionReportIdState("");
+                  setExecutionCaseId(tcId);
+                  setExecutionRunId(runId);
+                  await openExecutionSession(tcId, runId || undefined);
+                  setShowExecutionModal(true);
+                  alert("Skipped execution opened for re-run.");
+                } catch (error: any) {
+                  alert(error?.message || "Failed to reopen skipped execution");
+                }
+              }}
+            >
+              Execute Skipped Execution
+            </button>
+          ) : null}
         </>
-      )}
-      <h4>Quick Bug / Re-execution</h4>
-      <select
-        className="input"
-        value={selectedExecutionReportId}
-        onChange={(e) => setSelectedExecutionReportIdState(e.target.value)}
-      >
-        <option value="">Select execution report</option>
-        {executionReports
-          .filter((item) => !executionCaseId || item.testCaseId === executionCaseId)
-          .map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.testCase?.title || item.testCaseId} | {item.result} | {new Date(item.executedAt).toLocaleString()}
-            </option>
-          ))}
-      </select>
-      {selectedExecutionReport && (
-        <div className="note">
-          Selected result: {selectedExecutionReport.result} | Executed at{" "}
-          {new Date(selectedExecutionReport.executedAt).toLocaleString()}
-          {previousExecutionReport ? " | Previous execution available for comparison" : ""}
+      ) : null}
+      {showQuickBugModal ? (
+        <div className="modalBackdrop" onClick={() => setShowQuickBugModal(false)}>
+          <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h4 style={{ margin: 0 }}>Create Bug Report</h4>
+              <button className="button small" onClick={() => setShowQuickBugModal(false)}>Close</button>
+            </div>
+            <input
+              className="input"
+              placeholder="Bug title (optional)"
+              value={quickBugTitle}
+              onChange={(e) => setQuickBugTitle(e.target.value)}
+            />
+            <input
+              className="input"
+              placeholder="Bug description (optional)"
+              value={quickBugDescription}
+              onChange={(e) => setQuickBugDescription(e.target.value)}
+            />
+            <select className="input" value={quickBugSeverity} onChange={(e) => setQuickBugSeverity(e.target.value)}>
+              <option value="">Select severity</option>
+              <option value="LOW">LOW</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="HIGH">HIGH</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Expected behavior"
+              value={quickBugExpectedBehavior}
+              onChange={(e) => setQuickBugExpectedBehavior(e.target.value)}
+            />
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Actual behavior"
+              value={quickBugActualBehavior}
+              onChange={(e) => setQuickBugActualBehavior(e.target.value)}
+            />
+            <select
+              className="input"
+              value={quickBugAssignedTo}
+              onChange={(e) => setQuickBugAssignedTo(e.target.value)}
+            >
+              <option value="">Assign to Developer (optional)</option>
+              {developerDirectory.map((dev) => (
+                <option key={dev.id} value={dev.id}>
+                  {dev.name ? `${dev.name} - ` : ""}
+                  {dev.email}
+                </option>
+              ))}
+            </select>
+            <button
+              className="button"
+              onClick={async () => {
+                try {
+                  if (!selectedExecutionReportId) {
+                    alert("Select an execution report");
+                    return;
+                  }
+                  const issue = await createBugFromExecutionApi(selectedExecutionReportId, {
+                    title: quickBugTitle || undefined,
+                    description: quickBugDescription || undefined,
+                    severity: quickBugSeverity,
+                    expectedBehavior: quickBugExpectedBehavior || undefined,
+                    actualBehavior: quickBugActualBehavior || undefined,
+                    assignedTo: quickBugAssignedTo || undefined,
+                  });
+                  resetQuickBugFields();
+                  if (onQuickBugCreated) {
+                    await onQuickBugCreated(issue);
+                  }
+                  setPostFinalizeResult("");
+                  setShowQuickBugModal(false);
+                  alert(`Bug created: ${issue.id}`);
+                } catch (error: any) {
+                  alert(error?.message || "Quick bug creation failed");
+                }
+              }}
+            >
+              Create Bug
+            </button>
+          </div>
         </div>
-      )}
-      {previousExecutionReport && (
-        <button className="button small" onClick={() => setCompareOpen((prev) => !prev)}>
-          {compareOpen ? "Hide" : "Show"} Previous vs Current Comparison
-        </button>
-      )}
-      {compareOpen && selectedExecutionReport && previousExecutionReport && (
-        <div className="testCaseDetails">
-          <div>
-            <strong>Previous:</strong> {previousExecutionReport.id.slice(0, 8)} ({previousExecutionReport.result})
-          </div>
-          <div>
-            <strong>Current:</strong> {selectedExecutionReport.id.slice(0, 8)} ({selectedExecutionReport.result})
-          </div>
-          <div className="listCompact" style={{ marginTop: "8px" }}>
-            {comparisonRows.map((row: any) => (
-              <div className="row" key={`cmp-${row.stepNumber}`}>
-                <span className="title">Step {row.stepNumber}</span>
-                <span className="meta">
-                  Prev: {row.previous?.status || "N/A"} | Curr: {row.current?.status || "N/A"}
-                </span>
-                <span className="meta">
-                  Prev Actual: {row.previous?.actualResult || "-"} | Curr Actual:{" "}
-                  {row.current?.actualResult || "-"}
-                </span>
+      ) : null}
+      {showEvidenceModal ? (
+        <div className="modalBackdrop" onClick={() => setShowEvidenceModal(false)}>
+          <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h4 style={{ margin: 0 }}>Add Evidence</h4>
+              <button className="button small" onClick={() => setShowEvidenceModal(false)}>Close</button>
+            </div>
+            <div className="inlineGrid">
+              <select className="input" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>
+                <option value="">Select evidence type</option>
+                <option value="IMAGE">IMAGE</option>
+                <option value="VIDEO">VIDEO</option>
+                <option value="LOG">LOG</option>
+                <option value="DOCUMENT">DOCUMENT</option>
+              </select>
+              <input
+                className="input"
+                placeholder="Evidence file name"
+                value={evidenceName}
+                onChange={(e) => setEvidenceName(e.target.value)}
+              />
+            </div>
+            <input
+              className="input"
+              type="file"
+              onChange={async (e) => {
+                try {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const dataUrl = await readFileAsDataUrl(file);
+                  setEvidenceUrl(dataUrl);
+                  if (!evidenceName.trim()) {
+                    setEvidenceName(file.name);
+                  }
+                  if (!evidenceType) {
+                    setEvidenceType(inferEvidenceType(file.type));
+                  }
+                } catch (error: any) {
+                  alert(error?.message || "Failed to read selected file");
+                }
+              }}
+            />
+            <input
+              className="input"
+              placeholder="Evidence notes (optional)"
+              value={evidenceNotes}
+              onChange={(e) => setEvidenceNotes(e.target.value)}
+            />
+            <div className="inlineGrid">
+              <button
+                className="button"
+                onClick={async () => {
+                  try {
+                    if (!effectiveEvidenceExecutionId) {
+                      alert("Select an execution report");
+                      return;
+                    }
+                    if (!evidenceUrl.trim() || !evidenceName.trim()) {
+                      alert("Attach file and provide evidence name");
+                      return;
+                    }
+                    const created = await uploadExecutionEvidenceApi(effectiveEvidenceExecutionId, {
+                      fileType: evidenceType,
+                      fileUrl: evidenceUrl,
+                      fileName: evidenceName,
+                      notes: evidenceNotes,
+                    });
+                    setExecutionEvidence((prev: any[]) => [created, ...prev]);
+                    setEvidenceType("");
+                    setEvidenceUrl("");
+                    setEvidenceName("");
+                    setEvidenceNotes("");
+                    alert("Evidence added");
+                  } catch (error: any) {
+                    alert(error?.message || "Evidence upload failed");
+                  }
+                }}
+              >
+                Add Evidence
+              </button>
+              <button
+                className="button"
+                onClick={async () => {
+                  try {
+                    if (!effectiveEvidenceExecutionId) {
+                      alert("Select an execution report");
+                      return;
+                    }
+                    const rows = await listExecutionEvidenceApi(effectiveEvidenceExecutionId);
+                    setExecutionEvidence(Array.isArray(rows) ? rows : []);
+                  } catch (error: any) {
+                    alert(error?.message || "Failed to refresh evidence");
+                  }
+                }}
+              >
+                Refresh Evidence
+              </button>
+            </div>
+            {executionEvidence.length > 0 ? (
+              <div className="listCompact">
+                {executionEvidence.map((item) => (
+                  <div className="row" key={item.id}>
+                    <span className="title">
+                      {item.fileUrl ? (
+                        <a href={item.fileUrl} target="_blank" rel="noreferrer">
+                          {item.fileName}
+                        </a>
+                      ) : (
+                        item.fileName
+                      )}
+                    </span>
+                    <span className="meta">{item.fileType}</span>
+                    <button
+                      className="button small danger"
+                      onClick={async () => {
+                        try {
+                          if (!effectiveEvidenceExecutionId) return;
+                          await deleteExecutionEvidenceApi(effectiveEvidenceExecutionId, item.id);
+                          setExecutionEvidence((prev: any[]) => prev.filter((row) => row.id !== item.id));
+                        } catch (error: any) {
+                          alert(error?.message || "Delete evidence failed");
+                        }
+                      }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : null}
           </div>
         </div>
-      )}
-      <input
-        className="input"
-        placeholder="Bug title (optional)"
-        value={quickBugTitle}
-        onChange={(e) => setQuickBugTitle(e.target.value)}
-      />
-      <input
-        className="input"
-        placeholder="Bug description (optional)"
-        value={quickBugDescription}
-        onChange={(e) => setQuickBugDescription(e.target.value)}
-      />
-      <select className="input" value={quickBugSeverity} onChange={(e) => setQuickBugSeverity(e.target.value)}>
-        <option value="">Select severity</option>
-        <option value="LOW">LOW</option>
-        <option value="MEDIUM">MEDIUM</option>
-        <option value="HIGH">HIGH</option>
-        <option value="CRITICAL">CRITICAL</option>
-      </select>
-      <div className="inlineGrid">
-        <button
-          className="button"
-          onClick={async () => {
-            try {
-              if (!selectedExecutionReportId) {
-                alert("Select an execution report");
-                return;
-              }
-              const issue = await createBugFromExecutionApi(selectedExecutionReportId, {
-                title: quickBugTitle || undefined,
-                description: quickBugDescription || undefined,
-                severity: quickBugSeverity,
-              });
-              resetQuickBugFields();
-              if (onQuickBugCreated) {
-                await onQuickBugCreated(issue);
-              }
-              alert(`Bug created: ${issue.id}`);
-            } catch (error: any) {
-              alert(error?.message || "Quick bug creation failed");
-            }
-          }}
-        >
-          Create Quick Bug
-        </button>
-        <button
-          className="button"
-          onClick={async () => {
-            try {
-              if (!selectedExecutionReportId) {
-                alert("Select an execution report");
-                return;
-              }
-              const restarted = await reexecuteExecutionApi(selectedExecutionReportId, {
-                notes: "Re-execution requested",
-              });
-              setExecutionId(restarted.id);
-              setExecutionCaseId(restarted.testCaseId);
-              setExecutionRunId(restarted.testRunId || "");
-              setExecutionSteps(Array.isArray(restarted.stepResults) ? restarted.stepResults : []);
-              setExecutionSelectedStepNumber(
-                Array.isArray(restarted.stepResults) && restarted.stepResults.length > 0
-                  ? String(restarted.stepResults[0].stepNumber)
-                  : ""
-              );
-              setExecutionProgress(restarted.progressPercent || 0);
-              setExecutionNotes(restarted.notes || "");
-              setExecutionStartedAt(restarted.startedAt || "");
-              setExecutionCompletedAt("");
-              setExecutionDurationSeconds(null);
-              setExecutionEvidence([]);
-              alert("Re-execution draft created");
-            } catch (error: any) {
-              alert(error?.message || "Re-execution failed");
-            }
-          }}
-        >
-          Re-execute
-        </button>
-      </div>
+      ) : null}
     </section>
   );
 };

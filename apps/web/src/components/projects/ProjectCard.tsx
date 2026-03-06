@@ -36,31 +36,31 @@ const ProjectCard: React.FC<Props> = ({ project, isAdmin, onView, onEdit, onTogg
             <span className={`projectStatusBadge ${isArchived ? "archived" : "active"}`}>{project.status}</span>
           </div>
         </div>
-        <div className="projectCardActions">
-          <button className="button small" onClick={() => onView(project.id)}>
-            View
-          </button>
-          {isAdmin ? (
-            <>
-              <button className="button small" disabled={isArchived} onClick={() => onEdit(project)}>
-                Edit
-              </button>
-              <button
-                className="button small"
-                disabled={busyId === project.id}
-                onClick={() => onToggleArchive(project)}
-              >
-                {isArchived ? "Restore" : "Archive"}
-              </button>
-            </>
-          ) : null}
-        </div>
       </div>
       <p className="projectCardDescription">{descriptionPreview}</p>
       <div className="projectCardFooter">
         <span>Owner: {project.ownerName || "N/A"}</span>
         <span>Members: {project.memberCount}</span>
         <span>Created: {createdLabel}</span>
+      </div>
+      <div className="projectCardActions">
+        <button className="button small projectActionBtnBlack" onClick={() => onView(project.id)}>
+          View
+        </button>
+        {isAdmin ? (
+          <>
+            <button className="button small projectActionBtnBlack" disabled={isArchived} onClick={() => onEdit(project)}>
+              Edit
+            </button>
+            <button
+              className="button small projectActionBtnBlack"
+              disabled={busyId === project.id}
+              onClick={() => onToggleArchive(project)}
+            >
+              {isArchived ? "Restore" : "Archive"}
+            </button>
+          </>
+        ) : null}
       </div>
     </article>
   );
