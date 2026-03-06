@@ -1529,13 +1529,13 @@ router.patch(
 
 router.delete(
   "/testcase-templates/:id",
-  authorizeRoles(Role.TESTER),
+  authorizeRoles(Role.TESTER, Role.ADMIN),
   async (req: AuthRequest, res: Response) => {
     const template = await prisma.testCaseTemplate.findUnique({ where: { id: req.params.id } });
     if (!template) {
       return res.status(404).json({ message: "Template not found" });
     }
-    if (template.createdBy !== req.user!.userId) {
+    if (template.createdBy !== req.user!.userId && req.user!.role !== Role.ADMIN) {
       return res.status(403).json({ message: "You can only delete templates you created" });
     }
 
@@ -5383,7 +5383,7 @@ router.get("/bugs", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN), req
   const priorityFilter = asString(req.query.priority).toUpperCase();
   const severityFilter = asString(req.query.severity).toUpperCase();
   const projectId = getProjectIdFromRequest(req);
-  const projectWhere = projectId ? { testCase: { is: { projectId } } } : {};
+  const projectWhere = projectId ? { projectId } : {};
   const rows = await prismaAny.issue.findMany({
     where:
       req.user!.role === Role.DEVELOPER && !developerAllScope
@@ -5451,7 +5451,8 @@ router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
     },
   });
   if (!issue) return res.status(404).json({ message: "Bug not found" });
-  if (projectId && issue.testCase?.projectId !== projectId) {
+  const issueProjectId = issue.projectId || issue.testCase?.projectId || "";
+  if (projectId && issueProjectId !== projectId) {
     return res.status(404).json({ message: "Bug not found in selected project" });
   }
   if (req.user!.role === Role.DEVELOPER && !developerAllScope && issue.assignedTo !== req.user!.userId) {

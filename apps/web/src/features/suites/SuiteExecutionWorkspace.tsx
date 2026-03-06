@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
+  createBugFromExecutionApi,
   finalizeExecutionApi,
   getSuiteExecutionApi,
+  listDeveloperUsersApi,
   openExecutionApi,
   pauseExecutionTimerApi,
   resumeExecutionTimerApi,
@@ -10,7 +12,6 @@ import {
   startExecutionApi,
   startSuiteExecutionApi,
   startExecutionTimerApi,
-  stopExecutionTimerApi,
 } from "../../api";
 
 type Props = {
@@ -77,6 +78,17 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
   const [manualDurationMinutes, setManualDurationMinutes] = useState("");
   const [savingStep, setSavingStep] = useState(false);
   const [finalizingCase, setFinalizingCase] = useState(false);
+  const [developerOptions, setDeveloperOptions] = useState<Array<{ id: string; name: string; email: string }>>([]);
+  const [showFailedBugModal, setShowFailedBugModal] = useState(false);
+  const [failedExecutionId, setFailedExecutionId] = useState("");
+  const [failedCaseLabel, setFailedCaseLabel] = useState("");
+  const [bugTitle, setBugTitle] = useState("");
+  const [bugDescription, setBugDescription] = useState("");
+  const [bugSeverity, setBugSeverity] = useState("HIGH");
+  const [bugExpectedBehavior, setBugExpectedBehavior] = useState("");
+  const [bugActualBehavior, setBugActualBehavior] = useState("");
+  const [bugAssignedTo, setBugAssignedTo] = useState("");
+  const [creatingBug, setCreatingBug] = useState(false);
 
   const refreshExecution = async () => {
     if (!executionId) return;
@@ -104,6 +116,25 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
     }, 4000);
     return () => window.clearInterval(timer);
   }, [executionId]);
+
+  useEffect(() => {
+    listDeveloperUsersApi()
+      .then((rows) => {
+        const normalized = Array.isArray(rows)
+          ? rows
+              .map((row: any) => ({
+                id: String(row?.id || ""),
+                name: String(row?.name || "").trim(),
+                email: String(row?.email || "").trim(),
+              }))
+              .filter((row) => row.id && row.email)
+          : [];
+        setDeveloperOptions(normalized);
+      })
+      .catch(() => {
+        setDeveloperOptions([]);
+      });
+  }, []);
 
   const caseRows = useMemo(() => (Array.isArray(execution?.cases) ? execution.cases : []), [execution]);
   const total = Number(execution?.totalCases || caseRows.length || 0);
@@ -220,6 +251,15 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
       setManualDurationMinutes(
         typeof draft.manualDurationSeconds === "number" ? String(Math.round(draft.manualDurationSeconds / 60)) : ""
       );
+      if (!draft.startedAt && !draft.completedAt) {
+        try {
+          const timer = await startExecutionTimerApi(draft.id);
+          updateTimerFromResponse(timer);
+          setTimerState("RUNNING");
+        } catch {
+          // keep execution open even if timer auto-start fails
+        }
+      }
     } catch (error: any) {
       alert(getSuiteFriendlyError(error, "Open case executor failed"));
     }
@@ -273,8 +313,11 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
         alert("Execution draft not ready");
         return;
       }
+      const draftIdBeforeFinalize = activeDraftId;
+      const activeCaseBeforeFinalize = activeCase;
       setFinalizingCase(true);
-      await finalizeExecutionApi(activeDraftId, { notes: activeExecutionNotes });
+      const finalized = await finalizeExecutionApi(activeDraftId, { notes: activeExecutionNotes });
+      const finalResult = String(finalized?.result || "").toUpperCase();
       const previousMode = String(execution?.mode || "").toUpperCase();
       await refreshExecution();
       const currentExecution = await getSuiteExecutionApi(executionId);
@@ -288,6 +331,26 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
         if (nextCase) {
           await openCaseExecutor(nextCase);
         }
+      }
+      if (finalResult === "FAILED") {
+        setFailedExecutionId(draftIdBeforeFinalize);
+        setFailedCaseLabel(
+          `${activeCaseBeforeFinalize?.testCase?.testCaseCode || activeCaseBeforeFinalize?.testCaseId || ""} - ${activeCaseBeforeFinalize?.testCase?.title || "Untitled"}`
+        );
+        setBugTitle(`Failure in ${activeCaseBeforeFinalize?.testCase?.title || "test case"}`);
+        setBugDescription("Test case execution failed in suite execution workspace.");
+        setBugSeverity("HIGH");
+        setBugExpectedBehavior("");
+        setBugActualBehavior("");
+        setBugAssignedTo("");
+        setShowFailedBugModal(true);
+        alert("Test case execution failed. Create bug report now.");
+      } else if (finalResult === "PASSED") {
+        alert("Test case execution completed successfully.");
+      } else if (finalResult === "SKIPPED") {
+        alert("Test case execution skipped. Use Execute Skipped Execution to run again.");
+      } else {
+        alert(`Test case execution finalized: ${finalResult || "DONE"}`);
       }
     } catch (error: any) {
       alert(getSuiteFriendlyError(error, "Finalize case execution failed"));
@@ -426,7 +489,9 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
                     <div><strong>Last Change:</strong> {nextSequentialCase?.updatedAt ? new Date(nextSequentialCase.updatedAt).toLocaleString() : "N/A"}</div>
                   </div>
                   <button className="button" onClick={() => openCaseExecutor(nextSequentialCase)}>
-                    Open Step Execution
+                    {String(nextSequentialCase?.status || "").toUpperCase() === "SKIPPED"
+                      ? "Execute Skipped Execution"
+                      : "Open Step Execution"}
                   </button>
                 </>
               ) : (
@@ -458,7 +523,9 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
                         <td>{row?.updatedAt ? new Date(row.updatedAt).toLocaleString() : "N/A"}</td>
                         <td>
                           <button className="button small" onClick={() => openCaseExecutor(row)}>
-                            Open Step Execution
+                            {String(row?.status || "").toUpperCase() === "SKIPPED"
+                              ? "Execute Skipped Execution"
+                              : "Open Step Execution"}
                           </button>
                         </td>
                       </tr>
@@ -559,42 +626,26 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
             <div className="suiteExecSection">
               <div className="suiteExecSectionTitle">Timer</div>
               <div className="suiteExecButtonRow">
-                <button className="button small" onClick={async () => {
-                try {
-                  const timer = await startExecutionTimerApi(activeDraftId);
-                  updateTimerFromResponse(timer);
-                  setTimerState("RUNNING");
-                } catch (error: any) {
-                  alert(getSuiteFriendlyError(error, "Start timer failed"));
-                }
-                }}>Start</button>
-                <button className="button small" onClick={async () => {
-                try {
-                  const timer = await stopExecutionTimerApi(activeDraftId);
-                  updateTimerFromResponse(timer);
-                  setTimerState("STOPPED");
-                } catch (error: any) {
-                  alert(getSuiteFriendlyError(error, "Stop timer failed"));
-                }
-                }}>Stop</button>
-                <button className="button small" disabled={timerState !== "RUNNING"} onClick={async () => {
-                try {
-                  const timer = await pauseExecutionTimerApi(activeDraftId);
-                  updateTimerFromResponse(timer);
-                  setTimerState("PAUSED");
-                } catch (error: any) {
-                  alert(getSuiteFriendlyError(error, "Pause timer failed"));
-                }
-                }}>Pause</button>
-                <button className="button small" disabled={timerState !== "PAUSED"} onClick={async () => {
-                try {
-                  const timer = await resumeExecutionTimerApi(activeDraftId);
-                  updateTimerFromResponse(timer);
-                  setTimerState("RUNNING");
-                } catch (error: any) {
-                  alert(getSuiteFriendlyError(error, "Resume timer failed"));
-                }
-                }}>Resume</button>
+                <button
+                  className="button small"
+                  onClick={async () => {
+                    try {
+                      if (timerState === "RUNNING") {
+                        const timer = await pauseExecutionTimerApi(activeDraftId);
+                        updateTimerFromResponse(timer);
+                        setTimerState("PAUSED");
+                        return;
+                      }
+                      const timer = await resumeExecutionTimerApi(activeDraftId);
+                      updateTimerFromResponse(timer);
+                      setTimerState("RUNNING");
+                    } catch (error: any) {
+                      alert(getSuiteFriendlyError(error, "Pause/Resume timer failed"));
+                    }
+                  }}
+                >
+                  {timerState === "RUNNING" ? "Pause Timer" : "Resume Timer"}
+                </button>
               </div>
               <div className="note">
                 Timer: {timerState} | Started: {timerStartedAt ? new Date(timerStartedAt).toLocaleString() : "N/A"} | Completed:{" "}
@@ -683,6 +734,93 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
                 Finalize Test Case Execution
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {showFailedBugModal && (
+        <div className="modalBackdrop" onClick={() => setShowFailedBugModal(false)}>
+          <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
+            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+              <h4 style={{ margin: 0 }}>Create Bug Report</h4>
+              <button className="button small" onClick={() => setShowFailedBugModal(false)}>Close</button>
+            </div>
+            <div className="note">
+              Linked execution: {failedExecutionId || "N/A"} {failedCaseLabel ? `| ${failedCaseLabel}` : ""}
+            </div>
+            <input
+              className="input"
+              placeholder="Bug title"
+              value={bugTitle}
+              onChange={(e) => setBugTitle(e.target.value)}
+            />
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Bug description"
+              value={bugDescription}
+              onChange={(e) => setBugDescription(e.target.value)}
+            />
+            <select className="input" value={bugSeverity} onChange={(e) => setBugSeverity(e.target.value)}>
+              <option value="LOW">LOW</option>
+              <option value="MEDIUM">MEDIUM</option>
+              <option value="HIGH">HIGH</option>
+              <option value="CRITICAL">CRITICAL</option>
+            </select>
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Expected behavior"
+              value={bugExpectedBehavior}
+              onChange={(e) => setBugExpectedBehavior(e.target.value)}
+            />
+            <textarea
+              className="input"
+              rows={2}
+              placeholder="Actual behavior"
+              value={bugActualBehavior}
+              onChange={(e) => setBugActualBehavior(e.target.value)}
+            />
+            <select className="input" value={bugAssignedTo} onChange={(e) => setBugAssignedTo(e.target.value)}>
+              <option value="">Assign to Developer (optional)</option>
+              {developerOptions.map((dev) => (
+                <option key={dev.id} value={dev.id}>
+                  {dev.name ? `${dev.name} - ` : ""}
+                  {dev.email}
+                </option>
+              ))}
+            </select>
+            <button
+              className="button"
+              disabled={creatingBug || !failedExecutionId}
+              onClick={async () => {
+                try {
+                  if (!failedExecutionId) {
+                    alert("Missing failed execution context.");
+                    return;
+                  }
+                  setCreatingBug(true);
+                  const issue = await createBugFromExecutionApi(failedExecutionId, {
+                    title: bugTitle || undefined,
+                    description: bugDescription || undefined,
+                    severity: bugSeverity || undefined,
+                    expectedBehavior: bugExpectedBehavior || undefined,
+                    actualBehavior: bugActualBehavior || undefined,
+                    assignedTo: bugAssignedTo || undefined,
+                  });
+                  setShowFailedBugModal(false);
+                  alert(
+                    `Bug created and linked to suite execution: ${issue?.bugId || issue?.id}.` +
+                      (bugAssignedTo ? " Assigned developer has been notified." : "")
+                  );
+                } catch (error: any) {
+                  alert(getSuiteFriendlyError(error, "Create bug report failed"));
+                } finally {
+                  setCreatingBug(false);
+                }
+              }}
+            >
+              {creatingBug ? "Creating..." : "Create Bug"}
+            </button>
           </div>
         </div>
       )}

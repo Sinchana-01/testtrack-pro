@@ -6,6 +6,7 @@ import {
   createSuiteApi,
   deleteSuiteApi,
   getSuiteApi,
+  getSuiteExecutionApi,
   listSuiteExecutionsApi,
   listTesterUsersApi,
   removeSuiteTestCaseApi,
@@ -33,6 +34,14 @@ type Props = {
 
 const toCaseLabel = (tc: any): string =>
   `${tc?.testCaseCode || tc?.id || "N/A"} - ${tc?.title || "Untitled"}`;
+
+const safeEnumText = (value: unknown): string => {
+  const text = String(value ?? "").trim();
+  if (!text || text.toLowerCase() === "null" || text.toLowerCase() === "undefined") {
+    return "N/A";
+  }
+  return text;
+};
 
 const SuiteManagementSection: React.FC<Props> = ({
   suites,
@@ -79,9 +88,23 @@ const SuiteManagementSection: React.FC<Props> = ({
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({});
 
   const activeSuites = useMemo(() => suites, [suites]);
-  const parentSuites = useMemo(
-    () => activeSuites.filter((suite) => !suite?.parentSuiteId),
+  const latestSuiteExecution = useMemo(() => {
+    if (!Array.isArray(suiteExecutionHistory) || suiteExecutionHistory.length === 0) return null;
+    return [...suiteExecutionHistory].sort(
+      (a: any, b: any) => new Date(b?.createdAt || 0).getTime() - new Date(a?.createdAt || 0).getTime()
+    )[0];
+  }, [suiteExecutionHistory]);
+  const suiteIdSet = useMemo(
+    () => new Set(activeSuites.map((suite) => String(suite?.id || ""))),
     [activeSuites]
+  );
+  const parentSuites = useMemo(
+    () =>
+      activeSuites.filter((suite) => {
+        const parentId = String(suite?.parentSuiteId || "").trim();
+        return !parentId || !suiteIdSet.has(parentId);
+      }),
+    [activeSuites, suiteIdSet]
   );
 
   const resetForm = () => {
@@ -213,6 +236,48 @@ const SuiteManagementSection: React.FC<Props> = ({
     }
   };
 
+  const openLatestExecutionFlow = () => {
+    if (!latestSuiteExecution?.id) return;
+    setActiveExecutionId(String(latestSuiteExecution.id));
+    setExecuteModalOpen(false);
+    setView("EXECUTION");
+  };
+
+  const rerunFailedOnlyFlow = async () => {
+    try {
+      const targetSuiteId = suiteDetails?.id || suiteId;
+      if (!targetSuiteId || !latestSuiteExecution?.id) {
+        alert("No previous execution available for re-run.");
+        return;
+      }
+      const sourceExecution = await getSuiteExecutionApi(String(latestSuiteExecution.id));
+      const failedCount = Array.isArray(sourceExecution?.cases)
+        ? sourceExecution.cases.filter((row: any) => String(row?.status || "").toUpperCase() === "FAILED").length
+        : 0;
+      if (failedCount <= 0) {
+        alert("No failed test cases found in latest execution.");
+        return;
+      }
+      const started = await startSuiteExecutionApi({
+        suiteId: targetSuiteId,
+        mode: executeMode,
+        linkedTestRunId: executeRunId || undefined,
+        testerIds: selectedTesterIds,
+        reexecuteFromExecutionId: sourceExecution?.id || latestSuiteExecution.id,
+        reexecuteFailedOnly: true,
+      });
+      if (started?.id) {
+        setActiveExecutionId(started.id);
+        setView("EXECUTION");
+      }
+      setExecuteModalOpen(false);
+      await loadSuiteDetailBundle(targetSuiteId, { preserveExecutionId: true });
+      await onRefreshData();
+    } catch (error: any) {
+      alert(getSuiteFriendlyError(error, "Re-run failed only failed"));
+    }
+  };
+
   const availableCases = useMemo(() => {
     const term = availableSearch.trim().toLowerCase();
     return testCases.filter((tc) => {
@@ -230,6 +295,18 @@ const SuiteManagementSection: React.FC<Props> = ({
       .filter(Boolean)
       .filter((tc: any) => !term || toCaseLabel(tc).toLowerCase().includes(term));
   }, [testCases, selectedCaseIds, selectedSearch]);
+
+  const moduleOptions = useMemo(() => {
+    const options = Array.from(
+      new Set(
+        testCases
+          .map((tc) => String(tc?.module || "").trim())
+          .filter((name) => !!name)
+      )
+    ).sort((a, b) => a.localeCompare(b));
+    if (options.length > 0) return options;
+    return ["Authentication", "User Management", "Reporting", "General"];
+  }, [testCases]);
 
   const saveSuite = async () => {
     try {
@@ -423,7 +500,7 @@ const SuiteManagementSection: React.FC<Props> = ({
   return (
     <section className="panel">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <h4>Suite Management (4.5)</h4>
+        <h4>Suite Management </h4>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="button small" onClick={() => setView("LIST")}>Suite List</button>
           <button className="button small" onClick={goCreate}>Create Suite</button>
@@ -452,7 +529,13 @@ const SuiteManagementSection: React.FC<Props> = ({
                 </tr>
               </thead>
               <tbody>
-                {parentSuites.map((parent: any) => {
+                {parentSuites.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="note" style={{ padding: 12 }}>
+                      No suites available for the selected project.
+                    </td>
+                  </tr>
+                ) : parentSuites.map((parent: any) => {
                   const children = activeSuites.filter((row) => row.parentSuiteId === parent.id);
                   const expanded = Boolean(expandedParents[parent.id]);
                   return (
@@ -514,14 +597,32 @@ const SuiteManagementSection: React.FC<Props> = ({
       )}
 
       {view === "FORM" && (
-        <>
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <strong>{formMode === "CREATE" ? "Create Suite" : "Edit Suite"}</strong>
-            <button className="button small" onClick={() => setView("LIST")}>Back to List</button>
+        <div className="suiteCreateLikeCard testerCompactPanel">
+          <div className="compactFormHeader">
+            <h4>{formMode === "CREATE" ? "Create Suite" : "Edit Suite"}</h4>
+            <div className="note">Group related test cases into a suite for execution planning.</div>
+          </div>
+          <div className="suiteFormTopActions">
+            <button className="button small compactButton" onClick={() => setView("LIST")}>Back to List</button>
           </div>
           <div className="inlineGrid">
             <input className="input" placeholder="Suite Name" value={suiteName} onChange={(e) => setSuiteName(e.target.value)} />
-            <input className="input" placeholder="Module" value={suiteModule} onChange={(e) => setSuiteModule(e.target.value)} />
+            {suiteCreateType === "DYNAMIC" ? (
+              <select
+                className="input"
+                value={suiteModule}
+                onChange={(e) => setSuiteModule(e.target.value)}
+              >
+                <option value="">Select module for dynamic filter</option>
+                {moduleOptions.map((moduleName) => (
+                  <option key={moduleName} value={moduleName}>
+                    {moduleName}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input className="input" placeholder="Module" value={suiteModule} onChange={(e) => setSuiteModule(e.target.value)} />
+            )}
           </div>
           <textarea className="input" rows={2} placeholder="Description" value={suiteDescription} onChange={(e) => setSuiteDescription(e.target.value)} />
           <div className="inlineGrid">
@@ -586,11 +687,11 @@ const SuiteManagementSection: React.FC<Props> = ({
               </div>
             </div>
           )}
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <button className="button" onClick={saveSuite}>Save Suite</button>
-            <button className="button secondary" onClick={() => setView("LIST")}>Cancel</button>
+          <div className="suiteFormFooterActions">
+            <button className="button small compactButton" onClick={saveSuite}>Save Suite</button>
+            <button className="button small compactButton secondary" onClick={() => setView("LIST")}>Cancel</button>
           </div>
-        </>
+        </div>
       )}
       {view === "DETAIL" && suiteDetails && (
         <>
@@ -633,8 +734,8 @@ const SuiteManagementSection: React.FC<Props> = ({
                     <td style={{ padding: 10 }}>{idx + 1}</td>
                     <td style={{ padding: 10 }}>{row.testCase?.testCaseCode || row.testCaseId}</td>
                     <td style={{ padding: 10 }}>{row.testCase?.title || "Untitled"}</td>
-                    <td style={{ padding: 10 }}>{row.testCase?.priority || "N/A"}</td>
-                    <td style={{ padding: 10 }}>{row.testCase?.status || "N/A"}</td>
+                    <td style={{ padding: 10 }}>{safeEnumText(row.testCase?.priority)}</td>
+                    <td style={{ padding: 10 }}>{safeEnumText(row.testCase?.status)}</td>
                     <td style={{ padding: 10 }}>
                       <button
                         className="button small danger"
@@ -728,6 +829,19 @@ const SuiteManagementSection: React.FC<Props> = ({
             <div className="note" style={{ marginBottom: 8 }}>
               {suiteDetails.name} | Configure execution and start.
             </div>
+            {latestSuiteExecution && (
+              <div className="testCaseDetails" style={{ marginBottom: 10 }}>
+                <div>
+                  <strong>Latest Execution:</strong> {String(latestSuiteExecution.id).slice(0, 8)} |{" "}
+                  {latestSuiteExecution.mode} | {latestSuiteExecution.status}
+                </div>
+                <div>
+                  <strong>Summary:</strong> Total {latestSuiteExecution.totalCases || 0} | Passed{" "}
+                  {latestSuiteExecution.passed || 0} | Failed {latestSuiteExecution.failed || 0} | Blocked{" "}
+                  {latestSuiteExecution.blocked || 0} | Skipped {latestSuiteExecution.skipped || 0}
+                </div>
+              </div>
+            )}
             <label className="fieldLabel">Execution Mode</label>
             <select className="input" value={executeMode} onChange={(e) => setExecuteMode((e.target.value as "SEQUENTIAL" | "PARALLEL") || "SEQUENTIAL")}>
               <option value="SEQUENTIAL">SEQUENTIAL (default)</option>
@@ -764,6 +878,19 @@ const SuiteManagementSection: React.FC<Props> = ({
               <button className="button" onClick={startSuiteExecutionFlow}>
                 Start Execution
               </button>
+              {latestSuiteExecution?.id && (
+                <button className="button small" onClick={openLatestExecutionFlow}>
+                  Open Latest Execution
+                </button>
+              )}
+              {latestSuiteExecution?.id && (
+                <button
+                  className="button small"
+                  onClick={rerunFailedOnlyFlow}
+                >
+                  Re-execute Failed Only
+                </button>
+              )}
               <button className="button small" onClick={() => setExecuteModalOpen(false)}>
                 Cancel
               </button>

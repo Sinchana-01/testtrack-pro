@@ -264,7 +264,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
   const isLoading = reportQuery.isLoading || reportQuery.isFetching;
 
   return (
-    <section className="panel reportPanel">
+    <section className="panel reportPanel testExecutionReportPanel">
       <div className="reportPanelHeader">
         <h4 style={{ margin: 0 }}>Test Execution Report (FR-RPT-001)</h4>
         <div className="toolbarActions">
@@ -410,38 +410,10 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
               )}
             </article>
 
-            <article className="reportChartCard">
-              <h5 className="reportChartTitle">Execution Timeline</h5>
-              {timelinePoints.length === 0 ? (
-                <div className="note">No timeline data.</div>
-              ) : (
-                <div className="reportTimelineWrap">
-                  <svg viewBox="0 0 100 100" className="reportTimelineChart" preserveAspectRatio="none">
-                    <polyline
-                      points={timelinePoints.map((point) => `${point.x},${point.y}`).join(" ")}
-                      fill="none"
-                      stroke="#2563eb"
-                      strokeWidth={2}
-                    />
-                    {linePath &&
-                      timelinePoints.map((point: TimelinePoint) => (
-                        <circle key={`${point.label}-${point.total}`} cx={point.x} cy={point.y} r={1.8} fill="#1d4ed8" />
-                      ))}
-                  </svg>
-                  <div className="reportTimelineLegend">
-                    {timelinePoints.map((point: TimelinePoint) => (
-                      <div key={`${point.label}-${point.total}`} className="reportTimelineLegendItem">
-                        <span>{point.label}</span>
-                        <strong>{point.total}</strong>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </article>
           </div>
 
-          <div className="tableWrap adminUsersTableWrap">
+          <div className="executionInsightsGrid">
+          <div className="tableWrap adminUsersTableWrap reportInsightCard">
             <h5 style={{ margin: "8px 0" }}>Top Failed Modules</h5>
             <table className="table adminUsersTable">
               <thead>
@@ -467,7 +439,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
             </table>
           </div>
 
-          <div className="tableWrap adminUsersTableWrap">
+          <div className="tableWrap adminUsersTableWrap reportInsightCard">
             <h5 style={{ margin: "8px 0" }}>Execution By Tester</h5>
             <div className="reportMetricNote">Total executions handled by each tester.</div>
             <div className="reportBarList">
@@ -515,7 +487,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
             </table>
           </div>
 
-          <div className="tableWrap adminUsersTableWrap">
+          <div className="tableWrap adminUsersTableWrap reportInsightCard">
             <h5 style={{ margin: "8px 0" }}>Execution By Module</h5>
             <div className="reportMetricNote">Execution distribution by application module.</div>
             <div className="reportBarList">
@@ -563,67 +535,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
             </table>
           </div>
 
-          <div className="tableWrap adminUsersTableWrap">
-            <h5 style={{ margin: "8px 0" }}>Execution Timeline</h5>
-            <div className="reportMetricNote">Daily execution trend across the selected period.</div>
-            <div className="reportTimelineWrap" style={{ marginBottom: "10px" }}>
-              {timelinePoints.length === 0 ? (
-                <div className="note">No timeline data.</div>
-              ) : (
-                <>
-                  <svg viewBox="0 0 100 100" className="reportTimelineChart" preserveAspectRatio="none">
-                    <polyline
-                      points={timelinePoints.map((point) => `${point.x},${point.y}`).join(" ")}
-                      fill="none"
-                      stroke="#0ea5e9"
-                      strokeWidth={2.2}
-                    />
-                    {timelinePoints.map((point: TimelinePoint) => (
-                      <circle key={`timeline-point-${point.label}`} cx={point.x} cy={point.y} r={2.1} fill="#0284c7" />
-                    ))}
-                  </svg>
-                  <div className="reportTimelineLegend">
-                    {timelinePoints.map((point: TimelinePoint) => (
-                      <div key={`timeline-legend-${point.label}`} className="reportTimelineLegendItem">
-                        <span>{point.label}</span>
-                        <strong>{point.total}</strong>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-            <table className="table adminUsersTable">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Total</th>
-                  <th>Passed</th>
-                  <th>Failed</th>
-                  <th>Blocked</th>
-                  <th>Skipped</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(report.executionTimeline || []).length === 0 ? (
-                  <tr><td colSpan={6} className="note">No timeline data.</td></tr>
-                ) : (
-                  (report.executionTimeline || []).map((item: any) => (
-                    <tr key={item.date}>
-                      <td>{item.date}</td>
-                      <td>{item.total}</td>
-                      <td>{item.passed}</td>
-                      <td>{item.failed}</td>
-                      <td>{item.blocked}</td>
-                      <td>{item.skipped}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="tableWrap adminUsersTableWrap">
+          <div className="tableWrap adminUsersTableWrap reportInsightCard reportInsightCardWide">
             <h5 style={{ margin: "8px 0" }}>Failed Test Case Details</h5>
             <table className="table adminUsersTable">
               <thead>
@@ -651,6 +563,7 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
                 )}
               </tbody>
             </table>
+          </div>
           </div>
         </>
       )}

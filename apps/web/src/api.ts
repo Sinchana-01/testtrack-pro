@@ -601,7 +601,14 @@ export async function deleteExecutionEvidenceApi(executionId: string, evidenceId
 
 export async function createBugFromExecutionApi(
   executionId: string,
-  payload?: { title?: string; description?: string; severity?: string; assignedTo?: string }
+  payload?: {
+    title?: string;
+    description?: string;
+    severity?: string;
+    assignedTo?: string;
+    expectedBehavior?: string;
+    actualBehavior?: string;
+  }
 ) {
   return authJson(`/issues/from-executions/${executionId}`, {
     method: "POST",

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import "./DashboardLayout.css";
 
 export type DashboardNavItem = {
@@ -59,6 +59,8 @@ const DashboardLayout = ({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const isDashboardHomeHeader = pageTitle === "Dashboard";
+  const hasPageHeaderContent = Boolean(pageTitle || pageSubtitle || projectContextLabel);
 
   const initial = useMemo(() => {
     const source = String(currentUserName || "U").trim();
@@ -105,9 +107,69 @@ const DashboardLayout = ({
         </div>
         <div className="topbarCenter">
           <h1 className="topbarTitle">{appTitle}</h1>
+        </div>
+        <div className="topbarRight">
+          <div className="topbarRightControls">
+            <div className="notifWrap">
+              <button
+                type="button"
+                className="topbarCircleBtn"
+                aria-label="Notifications"
+                onClick={() => setNotifOpen((prev) => !prev)}
+              >
+                <span className="bellIcon">&#128276;</span>
+                {notificationCount > 0 ? <span className="notifBadge">{notificationCount}</span> : null}
+              </button>
+              {notifOpen ? (
+                <div className="notifDropdown">
+                  <div className="notifHeader">Notifications</div>
+                  {notificationItems.length === 0 ? (
+                    <div className="notifItem">No new notifications</div>
+                  ) : (
+                    notificationItems.slice(0, 10).map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={`notifItemBtn ${item.isRead ? "read" : "unread"}`}
+                        onClick={() => onNotificationClick?.(item.id)}
+                      >
+                        <strong>{item.title}</strong>
+                        {item.subtitle ? <span>{item.subtitle}</span> : null}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : null}
+            </div>
+            <div className="userMenuWrap">
+              <button
+                type="button"
+                className="topbarAvatarBtn"
+                aria-label="User menu"
+                onClick={() => setUserMenuOpen((prev) => !prev)}
+              >
+                <span className="avatarCircle">{initial}</span>
+              </button>
+              {userMenuOpen ? (
+                <div className="userDropdown" role="menu">
+                  <div className="userDropdownMeta">
+                    <strong>{currentUserName || "User"}</strong>
+                    <span>{currentRole || "USER"}</span>
+                  </div>
+                  
+                  <button type="button" onClick={onLogout}>
+                    Logout
+                  </button>
+                  <button type="button" onClick={onLogoutAll}>
+                    Logout All Devices
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
           {onProjectChange ? (
             <select
-              className="topbarProjectSelect"
+              className="topbarProjectSelect topbarProjectSelectRight"
               value={activeProjectId || (allowAllProjectsOption ? "__ALL__" : "")}
               onChange={(e) => onProjectChange(e.target.value)}
             >
@@ -119,64 +181,6 @@ const DashboardLayout = ({
               ))}
             </select>
           ) : null}
-        </div>
-        <div className="topbarRight">
-          <div className="notifWrap">
-            <button
-              type="button"
-              className="topbarCircleBtn"
-              aria-label="Notifications"
-              onClick={() => setNotifOpen((prev) => !prev)}
-            >
-              <span className="bellIcon">&#128276;</span>
-              {notificationCount > 0 ? <span className="notifBadge">{notificationCount}</span> : null}
-            </button>
-            {notifOpen ? (
-              <div className="notifDropdown">
-                <div className="notifHeader">Notifications</div>
-                {notificationItems.length === 0 ? (
-                  <div className="notifItem">No new notifications</div>
-                ) : (
-                  notificationItems.slice(0, 10).map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`notifItemBtn ${item.isRead ? "read" : "unread"}`}
-                      onClick={() => onNotificationClick?.(item.id)}
-                    >
-                      <strong>{item.title}</strong>
-                      {item.subtitle ? <span>{item.subtitle}</span> : null}
-                    </button>
-                  ))
-                )}
-              </div>
-            ) : null}
-          </div>
-          <div className="userMenuWrap">
-            <button
-              type="button"
-              className="topbarAvatarBtn"
-              aria-label="User menu"
-              onClick={() => setUserMenuOpen((prev) => !prev)}
-            >
-              <span className="avatarCircle">{initial}</span>
-            </button>
-            {userMenuOpen ? (
-              <div className="userDropdown" role="menu">
-                <div className="userDropdownMeta">
-                  <strong>{currentUserName || "User"}</strong>
-                  <span>{currentRole || "USER"}</span>
-                </div>
-                
-                <button type="button" onClick={onLogout}>
-                  Logout
-                </button>
-                <button type="button" onClick={onLogoutAll}>
-                  Logout All Devices
-                </button>
-              </div>
-            ) : null}
-          </div>
         </div>
       </header>
 
@@ -216,11 +220,12 @@ const DashboardLayout = ({
 
       <main className={`dashboardMain ${sidebarOpen ? "sidebarFull" : "sidebarMini"}`}>
         <section className="dashboardPageContent">
-          <header className="dashboardPageHeader">
-            <h2>{pageTitle}</h2>
-            <p>{pageSubtitle}</p>
-            {projectContextLabel ? <div className="dashboardProjectBreadcrumb">{projectContextLabel}</div> : null}
-          </header>
+          {!isDashboardHomeHeader && hasPageHeaderContent ? (
+            <header className="dashboardPageHeader">
+              <h2>{pageTitle}</h2>
+              {pageSubtitle ? <p>{pageSubtitle}</p> : null}
+            </header>
+          ) : null}
           {primaryActionLabel && onPrimaryAction ? (
             <div className="dashboardContentToolbar">
               <button type="button" className="pagePrimaryAction" onClick={onPrimaryAction}>
@@ -236,3 +241,4 @@ const DashboardLayout = ({
 };
 
 export default DashboardLayout;
+

@@ -1,5 +1,5 @@
 .dashboardLayoutRoot {
-  --topbar-h: 64px;
+  --topbar-h: 94px;
   --sidebar-w: 260px;
   --sidebar-mini-w: 80px;
   min-height: 100vh;
@@ -13,12 +13,13 @@
   right: 0;
   height: var(--topbar-h);
   display: grid;
-  grid-template-columns: 128px 1fr 220px;
+  grid-template-columns: 148px 1fr 240px;
   align-items: center;
   background: linear-gradient(90deg, #0b1220 0%, #111c35 100%);
   color: #fff;
   z-index: 80;
-  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.28);
+  box-shadow: 0 10px 20px rgba(2, 6, 23, 0.32);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .topbarLeft {
@@ -38,7 +39,7 @@
 .topbarCenter {
   display: grid;
   justify-items: center;
-  gap: 4px;
+  gap: 0;
 }
 
 .topbarProjectSelect {
@@ -53,6 +54,11 @@
   font-size: 12px;
   font-weight: 600;
   padding: 0 8px;
+}
+
+.topbarProjectSelectRight {
+  width: 260px;
+  min-width: 260px;
 }
 
 .topbarIconBtn {
@@ -97,10 +103,17 @@
 
 .topbarRight {
   display: flex;
-  justify-content: flex-end;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 8px;
+  padding-right: 16px;
+}
+
+.topbarRightControls {
+  display: flex;
   align-items: center;
   gap: 10px;
-  padding-right: 16px;
 }
 
 .notifWrap {
@@ -350,10 +363,11 @@
 }
 
 .dashboardPageContent {
-  padding: 20px 24px 28px;
+  padding: 26px 24px 28px;
   width: 100%;
   margin-left: 0;
   margin-right: 0;
+  background: #ffffff;
 }
 
 .dashboardPageHeader {
@@ -451,3 +465,4 @@
     width: min(46vw, 260px);
   }
 }
+
