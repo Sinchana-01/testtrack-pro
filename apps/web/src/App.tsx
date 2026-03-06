@@ -21,7 +21,7 @@ import {
   getRefreshToken,
   getMyRolePermissionsApi,
   listBugCommentsApi,
-  listBugNotificationsApi,
+  listNotificationsApi,
   listBugsApi,
   listExecutionReportsApi,
   listDeveloperUsersApi,
@@ -69,7 +69,7 @@ import {
   updateAdminUserApi,
   updateSuiteApi,
   updateTestCaseApi,
-  markBugNotificationReadApi,
+  markNotificationReadApi,
 } from "./api";
 import Login from "./components/auth/Login";
 import Register from "./components/auth/Register";
@@ -120,8 +120,7 @@ type DashboardFeature =
 
 type AppNotificationItem = {
   id: string;
-  sourceId?: string;
-  type: "mention" | "bug";
+  type: string;
   title: string;
   subtitle?: string;
   isRead: boolean;
@@ -1227,42 +1226,42 @@ function App() {
       return;
     }
 
-    const canUseMentionApi = isTester || isDeveloper;
-    let mentionItems: AppNotificationItem[] = [];
-
-    if (canUseMentionApi) {
-      try {
-        const payload = await listBugNotificationsApi({ unread: "0", take: 30 });
-        const rows = Array.isArray(payload?.notifications) ? payload.notifications : [];
-        mentionItems = rows.map((row: any) => ({
-          id: `mention:${String(row?.id || Math.random())}`,
-          sourceId: String(row?.id || ""),
-          type: "mention" as const,
-          title: String(row?.message || "You were mentioned in a bug comment"),
-          subtitle:
-            String(row?.bugCode || "").trim() && String(row?.issueTitle || "").trim()
-              ? `${row.bugCode} â€¢ ${row.issueTitle}`
-              : String(row?.issueTitle || row?.commentPreview || "").trim(),
-          isRead: Boolean(row?.isRead),
-          bugId: String(row?.issueId || ""),
-        }));
-      } catch {
-        mentionItems = [];
-      }
+    try {
+      const payload = await listNotificationsApi({ unread: "0", take: 30 });
+      const rows = Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.notifications)
+          ? payload.notifications
+          : [];
+      const items: AppNotificationItem[] = rows.map((row: any) => ({
+        id: String(row?.id || `notif:${Math.random()}`),
+        type: String(row?.type || "GENERAL"),
+        title: String(row?.message || "Notification"),
+        subtitle:
+          String(row?.entityType || "").trim() && String(row?.entityId || "").trim()
+            ? `${row.entityType} • ${row.entityId}`
+            : String(row?.issueTitle || row?.commentPreview || "").trim(),
+        isRead: Boolean(row?.isRead),
+        bugId:
+          String(row?.entityType || "").toUpperCase() === "ISSUE"
+            ? String(row?.entityId || "")
+            : String(row?.issueId || ""),
+      }));
+      setNotificationItems(items);
+      setNotificationUnreadCount(Number(payload?.unreadCount || items.filter((item) => !item.isRead).length));
+    } catch {
+      setNotificationItems([]);
+      setNotificationUnreadCount(0);
     }
-
-    const bugItems = canUseMentionApi ? buildBugNotificationItems(bugs) : [];
-    setNotificationItems([...mentionItems, ...bugItems]);
-    setNotificationUnreadCount(mentionItems.filter((item) => !item.isRead).length);
   };
 
   const handleNotificationClick = async (id: string) => {
     const selected = notificationItems.find((item) => item.id === id);
     if (!selected) return;
 
-    if (selected.type === "mention" && selected.sourceId && !selected.isRead) {
+    if (!selected.isRead) {
       try {
-        await markBugNotificationReadApi(selected.sourceId);
+        await markNotificationReadApi(selected.id);
       } catch {
         // no-op for optimistic UI
       }
@@ -1280,7 +1279,6 @@ function App() {
       });
     }
   };
-
   const resetExecutionPanel = () => {
     setExecutionCaseId("");
     setExecutionRunId("");
@@ -4104,6 +4102,7 @@ function App() {
                 <TestRunManagementSection
                   selectedIds={selectedIds}
                   testRuns={testRuns}
+                  testCases={testCases}
                   onRefreshData={loadTestCaseData}
                 />
               )}
@@ -4113,6 +4112,8 @@ function App() {
                   suites={suites}
                   testCases={testCases}
                   testRuns={testRuns}
+                  activeProjectId={scopedProjectId}
+                  activeProjectName={activeProjectName}
                   showArchivedSuites={showArchivedSuites}
                   setShowArchivedSuites={setShowArchivedSuites}
                   onRefreshData={loadTestCaseData}
@@ -4966,6 +4967,7 @@ function App() {
 }
 
 export default App;
+
 
 
 

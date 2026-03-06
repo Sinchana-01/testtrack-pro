@@ -50,6 +50,8 @@ model User {
   ownedProjects          Project[]            @relation("ProjectOwner")
   updatedProjectConfigs  ProjectConfig[]
   createdMilestones      ProjectMilestone[]   @relation("MilestoneCreator")
+  notifications          Notification[]
+  notificationPreference NotificationPreference?
 }
 
 model TestCase {
@@ -404,9 +406,37 @@ model ProjectConfig {
   workflowConfig Json?
   environments   Json?
   updatedBy      String
+  createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   project        Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
   updater        User     @relation(fields: [updatedBy], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+model Notification {
+  id         String   @id @default(uuid())
+  userId     String
+  type       String
+  message    String
+  entityId   String?
+  entityType String?
+  isRead     Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+}
+
+model NotificationPreference {
+  id                String  @id @default(uuid())
+  userId            String  @unique
+  emailBugAssigned  Boolean @default(true)
+  emailComments     Boolean @default(true)
+  emailStatusChange Boolean @default(true)
+  quietHoursStart   String?
+  quietHoursEnd     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model ProjectMilestone {

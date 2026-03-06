@@ -22,6 +22,8 @@ type SuiteFormMode = "CREATE" | "EDIT";
 type Props = {
   suites: any[];
   testCases: any[];
+  activeProjectId: string;
+  activeProjectName?: string;
   showArchivedSuites: boolean;
   setShowArchivedSuites: (next: boolean) => void;
   onRefreshData: () => Promise<void>;
@@ -35,6 +37,8 @@ const toCaseLabel = (tc: any): string =>
 const SuiteManagementSection: React.FC<Props> = ({
   suites,
   testCases,
+  activeProjectId,
+  activeProjectName,
   showArchivedSuites,
   setShowArchivedSuites,
   onRefreshData,
@@ -85,7 +89,7 @@ const SuiteManagementSection: React.FC<Props> = ({
     setSuiteName("");
     setSuiteDescription("");
     setSuiteModule("");
-    setSuiteProjectId("");
+    setSuiteProjectId(String(activeProjectId || "").trim());
     setSuiteParentId("");
     setSuiteCreateType("STATIC");
     setSuiteStatus("ACTIVE");
@@ -95,6 +99,12 @@ const SuiteManagementSection: React.FC<Props> = ({
     setLeftPickedIds([]);
     setRightPickedIds([]);
   };
+
+  useEffect(() => {
+    if (formMode === "CREATE") {
+      setSuiteProjectId(String(activeProjectId || "").trim());
+    }
+  }, [activeProjectId, formMode, view]);
 
   useEffect(() => {
     listTesterUsersApi()
@@ -233,12 +243,17 @@ const SuiteManagementSection: React.FC<Props> = ({
       }
 
       if (formMode === "CREATE") {
+        const effectiveProjectId = String(activeProjectId || suiteProjectId || "").trim();
+        if (!effectiveProjectId) {
+          alert("Select an active project in the header before creating a suite.");
+          return;
+        }
         const payload: Record<string, unknown> = {
           name: suiteName,
           description: suiteDescription || undefined,
           module: suiteModule || undefined,
           parentSuiteId: suiteParentId || undefined,
-          projectId: suiteProjectId || undefined,
+          projectId: effectiveProjectId || undefined,
           type: suiteCreateType,
         };
         if (suiteCreateType === "DYNAMIC") {
@@ -516,7 +531,16 @@ const SuiteManagementSection: React.FC<Props> = ({
                 <option key={row.id} value={row.id}>{row.name}</option>
               ))}
             </select>
-            <input className="input" placeholder="Project ID (optional)" value={suiteProjectId} onChange={(e) => setSuiteProjectId(e.target.value)} />
+            <input
+              className="input"
+              placeholder="Project ID (auto)"
+              value={suiteProjectId}
+              readOnly
+              title={suiteProjectId ? "Auto-filled from selected project" : "Select a project in header"}
+            />
+          </div>
+          <div className="note">
+            Project: {activeProjectName || "Select a project"} {suiteProjectId ? `(${suiteProjectId})` : ""}
           </div>
           <div className="inlineGrid">
             <select className="input" value={suiteCreateType} onChange={(e) => setSuiteCreateType((e.target.value as "STATIC" | "DYNAMIC") || "STATIC")} disabled={formMode === "EDIT"}>

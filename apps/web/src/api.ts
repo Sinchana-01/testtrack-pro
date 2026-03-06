@@ -1096,11 +1096,65 @@ export async function listBugNotificationsApi(params?: { unread?: "0" | "1"; tak
   if (params?.unread) qp.set("unread", params.unread);
   if (typeof params?.take === "number") qp.set("take", String(params.take));
   const query = qp.toString();
-  return authJson(`/notifications/bugs${query ? `?${query}` : ""}`);
+  const payload = await authJson(`/notifications/bugs${query ? `?${query}` : ""}`);
+  const notifications = Array.isArray(payload?.notifications)
+    ? payload.notifications
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : [];
+  return { ...payload, notifications };
 }
 
 export async function markBugNotificationReadApi(notificationId: string) {
   return authJson(`/notifications/bugs/${notificationId}/read`, {
     method: "PATCH",
+  });
+}
+
+export async function listNotificationsApi(params?: { unread?: "0" | "1"; take?: number }) {
+  const qp = new URLSearchParams();
+  if (params?.unread) qp.set("unread", params.unread);
+  if (typeof params?.take === "number") qp.set("take", String(params.take));
+  const query = qp.toString();
+  const payload = await authJson(`/notifications${query ? `?${query}` : ""}`);
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload?.notifications)
+      ? payload.notifications
+      : [];
+  return {
+    ...payload,
+    items,
+    unreadCount: Number(payload?.unreadCount || 0),
+  };
+}
+
+export async function markNotificationReadApi(notificationId: string) {
+  return authJson(`/notifications/${notificationId}/read`, {
+    method: "PATCH",
+  });
+}
+
+export async function markAllNotificationsReadApi() {
+  return authJson("/notifications/read-all", {
+    method: "PATCH",
+  });
+}
+
+export async function getNotificationPreferencesApi() {
+  return authJson("/notification-preferences");
+}
+
+export async function updateNotificationPreferencesApi(payload: {
+  emailBugAssigned?: boolean;
+  emailComments?: boolean;
+  emailStatusChange?: boolean;
+  quietHoursStart?: string | null;
+  quietHoursEnd?: string | null;
+}) {
+  return authJson("/notification-preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 }

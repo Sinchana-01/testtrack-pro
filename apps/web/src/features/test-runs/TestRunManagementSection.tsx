@@ -5,22 +5,29 @@ type TesterRow = { id: string; name: string; email: string };
 
 type Props = {
   selectedIds: string[];
+  testCases: any[];
   testRuns: any[];
   onRefreshData: () => Promise<void>;
 };
 
-const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Props) => {
+const TestRunManagementSection = ({ selectedIds, testCases, testRuns, onRefreshData }: Props) => {
   const [runName, setRunName] = useState("");
   const [runDescription, setRunDescription] = useState("");
   const [runStartDate, setRunStartDate] = useState("");
   const [runEndDate, setRunEndDate] = useState("");
   const [runTesterIds, setRunTesterIds] = useState<string[]>([]);
+  const [runTestCaseIds, setRunTestCaseIds] = useState<string[]>([]);
+
+  const [runCasePickerOpen, setRunCasePickerOpen] = useState(false);
+  const [runCaseQuery, setRunCaseQuery] = useState("");
   const [runTesterPickerOpen, setRunTesterPickerOpen] = useState(false);
   const [runTesterQuery, setRunTesterQuery] = useState("");
   const [testerDirectory, setTesterDirectory] = useState<TesterRow[]>([]);
   const [selectedRunId, setSelectedRunId] = useState("");
   const [runDetails, setRunDetails] = useState<any>(null);
+
   const runTesterPickerRef = useRef<HTMLDivElement | null>(null);
+  const runCasePickerRef = useRef<HTMLDivElement | null>(null);
 
   const filteredTesterOptions = useMemo(() => {
     const query = runTesterQuery.trim().toLowerCase();
@@ -33,6 +40,17 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
     });
   }, [runTesterQuery, testerDirectory]);
 
+  const filteredCaseOptions = useMemo(() => {
+    const query = runCaseQuery.trim().toLowerCase();
+    const rows = Array.isArray(testCases) ? testCases : [];
+    if (!query) return rows;
+    return rows.filter((tc: any) => {
+      const code = String(tc?.testCaseCode || "").toLowerCase();
+      const title = String(tc?.title || "").toLowerCase();
+      return code.includes(query) || title.includes(query);
+    });
+  }, [runCaseQuery, testCases]);
+
   const runTesterSelectedSummary =
     runTesterIds.length === 0
       ? "No tester selected"
@@ -40,12 +58,22 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
       ? "1 tester selected"
       : `${runTesterIds.length} testers selected`;
 
+  const runCaseSelectedSummary =
+    runTestCaseIds.length === 0
+      ? "No test case selected"
+      : runTestCaseIds.length === 1
+      ? "1 test case selected"
+      : `${runTestCaseIds.length} test cases selected`;
+
   const resetRunFields = () => {
     setRunName("");
     setRunDescription("");
     setRunStartDate("");
     setRunEndDate("");
     setRunTesterIds([]);
+    setRunTestCaseIds([]);
+    setRunCasePickerOpen(false);
+    setRunCaseQuery("");
     setRunTesterPickerOpen(false);
     setRunTesterQuery("");
     setSelectedRunId("");
@@ -80,6 +108,10 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
   }, []);
 
   useEffect(() => {
+    setRunTestCaseIds((prev) => (prev.length > 0 ? prev : Array.from(new Set(selectedIds))));
+  }, [selectedIds]);
+
+  useEffect(() => {
     if (!runTesterPickerOpen) return;
     const handlePointerDown = (event: MouseEvent) => {
       if (!runTesterPickerRef.current) return;
@@ -97,6 +129,25 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
       document.removeEventListener("keydown", handleEscape);
     };
   }, [runTesterPickerOpen]);
+
+  useEffect(() => {
+    if (!runCasePickerOpen) return;
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!runCasePickerRef.current) return;
+      if (!runCasePickerRef.current.contains(event.target as Node)) {
+        setRunCasePickerOpen(false);
+      }
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setRunCasePickerOpen(false);
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [runCasePickerOpen]);
 
   return (
     <section className="panel">
@@ -128,6 +179,68 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
         onChange={(e) => setRunEndDate(e.target.value)}
       />
 
+      <label className="fieldLabel">Select Test Cases</label>
+      <div className="bulkCasePicker" ref={runCasePickerRef}>
+        <button
+          type="button"
+          className="bulkCasePickerTrigger"
+          onClick={() => setRunCasePickerOpen((prev) => !prev)}
+          aria-expanded={runCasePickerOpen}
+          aria-haspopup="listbox"
+        >
+          <span>{runCaseSelectedSummary}</span>
+          <span>{runCasePickerOpen ? "?" : "?"}</span>
+        </button>
+        {runCasePickerOpen ? (
+          <div className="bulkCasePickerMenu" role="listbox" aria-multiselectable="true">
+            <input
+              className="input bulkCasePickerSearch"
+              placeholder="Search by test case code or title"
+              value={runCaseQuery}
+              onChange={(e) => setRunCaseQuery(e.target.value)}
+            />
+            <div className="bulkCasePickerList">
+              {filteredCaseOptions.length === 0 ? (
+                <div className="note">No test cases available in this project.</div>
+              ) : (
+                filteredCaseOptions.map((tc: any) => {
+                  const id = String(tc?.id || "");
+                  const checked = runTestCaseIds.includes(id);
+                  const label = `${tc?.testCaseCode || "TC"} - ${tc?.title || "Untitled"}`;
+                  return (
+                    <label key={id} className="bulkCasePickerItem">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setRunTestCaseIds((prev) => Array.from(new Set([...prev, id])));
+                          } else {
+                            setRunTestCaseIds((prev) => prev.filter((rowId) => rowId !== id));
+                          }
+                        }}
+                      />
+                      <span className="bulkCasePickerText">{label}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            <div className="bulkCasePickerFooter">
+              <span className="note">Selected: {runTestCaseIds.length}</span>
+              <button
+                type="button"
+                className="button small"
+                onClick={() => setRunTestCaseIds([])}
+                disabled={runTestCaseIds.length === 0}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       <label className="fieldLabel">Select Testers (Email)</label>
       <div className="bulkCasePicker" ref={runTesterPickerRef}>
         <button
@@ -138,7 +251,7 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
           aria-haspopup="listbox"
         >
           <span>{runTesterSelectedSummary}</span>
-          <span>{runTesterPickerOpen ? "▲" : "▼"}</span>
+          <span>{runTesterPickerOpen ? "?" : "?"}</span>
         </button>
         {runTesterPickerOpen ? (
           <div className="bulkCasePickerMenu" role="listbox" aria-multiselectable="true">
@@ -190,6 +303,7 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
           </div>
         ) : null}
       </div>
+
       <button
         className="button"
         onClick={async () => {
@@ -198,8 +312,8 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
               alert("Run name is required");
               return;
             }
-            if (selectedIds.length === 0) {
-              alert("Select at least one test case from the list section");
+            if (runTestCaseIds.length === 0) {
+              alert("Select at least one test case");
               return;
             }
             await createTestRunApi({
@@ -207,7 +321,7 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
               description: runDescription || undefined,
               targetStartDate: runStartDate ? new Date(runStartDate).toISOString() : undefined,
               targetEndDate: runEndDate ? new Date(runEndDate).toISOString() : undefined,
-              testCaseIds: selectedIds,
+              testCaseIds: runTestCaseIds,
               testerIds: runTesterIds,
             });
             resetRunFields();
@@ -220,6 +334,7 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
       >
         Create Test Run
       </button>
+
       <select className="input" value={selectedRunId} onChange={(e) => setSelectedRunId(e.target.value)}>
         <option value="">Select Test Run</option>
         {testRuns.map((run) => (
@@ -260,4 +375,3 @@ const TestRunManagementSection = ({ selectedIds, testRuns, onRefreshData }: Prop
 };
 
 export default TestRunManagementSection;
-
