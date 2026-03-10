@@ -628,13 +628,30 @@ const safeNotify = async (work: () => Promise<void>) => {
   }
 };
 
-const notifyBugAssigned = async (params: { assigneeId?: string | null; assigneeEmail?: string | null; bugCode: string; issueId: string }) => {
+const resolveUserEmail = async (userId?: string | null): Promise<string> => {
+  const id = asString(userId);
+  if (!id) return "unknown@system";
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: { email: true },
+  });
+  return user?.email || "unknown@system";
+};
+
+const notifyBugAssigned = async (params: {
+  assigneeId?: string | null;
+  assigneeEmail?: string | null;
+  bugCode: string;
+  issueId: string;
+  actorId?: string | null;
+}) => {
   if (!params.assigneeId) return;
   await safeNotify(async () => {
+    const actorEmail = await resolveUserEmail(params.actorId);
     await createNotification({
       userId: params.assigneeId!,
       type: "BUG_ASSIGNED",
-      message: `New bug ${params.bugCode} assigned to you`,
+      message: `New bug ${params.bugCode} assigned to you by ${actorEmail}`,
       entityId: params.issueId,
       entityType: "Issue",
     });
@@ -648,17 +665,19 @@ const notifyBugStatusChanged = async (params: {
   issueId: string;
   bugCode: string;
   status: string;
+  actorId?: string | null;
   reporter?: { id: string; email: string } | null;
   assignee?: { id: string; email: string } | null;
 }) => {
   const recipients = [params.reporter, params.assignee].filter(Boolean) as Array<{ id: string; email: string }>;
   if (!recipients.length) return;
   await safeNotify(async () => {
+    const actorEmail = await resolveUserEmail(params.actorId);
     await createNotificationsBulk(
       recipients.map((r) => ({
         userId: r.id,
         type: "BUG_STATUS_CHANGED",
-        message: `${params.bugCode} status changed to ${params.status}`,
+        message: `${params.bugCode} status changed to ${params.status} by ${actorEmail}`,
         entityId: params.issueId,
         entityType: "Issue",
       }))
@@ -704,11 +723,12 @@ const notifyCommentMentions = async (params: {
   });
   if (!users.length) return;
   await safeNotify(async () => {
+    const authorEmail = await resolveUserEmail(params.authorId);
     await createNotificationsBulk(
       users.map((u) => ({
         userId: u.id,
         type: "COMMENT_MENTION",
-        message: `@you mentioned in ${params.bugCode}`,
+        message: `@you mentioned in ${params.bugCode} by ${authorEmail}`,
         entityId: params.issueId,
         entityType: "Issue",
       }))
@@ -724,13 +744,15 @@ const notifyRetestRequested = async (params: {
   bugCode: string;
   originalTesterId?: string | null;
   originalTesterEmail?: string | null;
+  actorId?: string | null;
 }) => {
   if (!params.originalTesterId) return;
   await safeNotify(async () => {
+    const actorEmail = await resolveUserEmail(params.actorId);
     await createNotification({
       userId: params.originalTesterId!,
       type: "RETEST_REQUESTED",
-      message: `Re-test requested for ${params.bugCode}`,
+      message: `Re-test requested for ${params.bugCode} by ${actorEmail}`,
       entityId: params.issueId,
       entityType: "Issue",
     });
@@ -5252,6 +5274,7 @@ router.post(
         assigneeEmail: assignee?.email,
         bugCode: issue.bugCode || issue.id,
         issueId: issue.id,
+        actorId: req.user!.userId,
       });
     }
     return res.status(201).json(issue);
@@ -5370,6 +5393,7 @@ router.post("/bugs", authorizeRoles(Role.TESTER, Role.ADMIN), requireProjectFrom
       assigneeEmail: assignee?.email,
       bugCode: issue.bugCode || issue.id,
       issueId: issue.id,
+      actorId: req.user!.userId,
     });
   }
   return res.status(201).json(enrichIssue(issue));
@@ -5444,7 +5468,28 @@ router.get("/bugs/:id", authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
     include: {
       reporter: { select: { id: true, name: true, email: true } },
       assignee: { select: { id: true, name: true, email: true } },
-      testCase: { select: { id: true, title: true, testCaseCode: true } },
+      testCase: {
+        select: {
+          id: true,
+          title: true,
+          testCaseCode: true,
+          description: true,
+          module: true,
+          priority: true,
+          status: true,
+          severity: true,
+          type: true,
+          steps: true,
+          preConditions: true,
+          postConditions: true,
+          testDataRequirements: true,
+          environmentRequirements: true,
+          tags: true,
+          estimatedDurationMinutes: true,
+          automationStatus: true,
+          automationScriptLink: true,
+        },
+      },
       execution: { select: { id: true, result: true, executedAt: true } },
       comments: { orderBy: { createdAt: "asc" } },
       attachments: true,
@@ -5581,6 +5626,7 @@ router.patch("/bugs/:id/workflow", authorizeRoles(Role.TESTER, Role.DEVELOPER, R
         issueId: updated.id,
         bugCode: updated.bugCode || updated.id,
         status: target,
+        actorId: req.user!.userId,
         reporter: issue.reportedBy ? byId.get(issue.reportedBy) || null : null,
         assignee: issue.assignedTo ? byId.get(issue.assignedTo) || null : null,
       });
@@ -5661,6 +5707,7 @@ router.patch("/developer/bugs/:id/quick-status", authorizeRoles(Role.DEVELOPER),
       issueId: updated.id,
       bugCode: updated.bugCode || updated.id,
       status: target,
+      actorId: req.user!.userId,
       reporter: issue.reportedBy ? byId.get(issue.reportedBy) || null : null,
       assignee: issue.assignedTo ? byId.get(issue.assignedTo) || null : null,
     });
@@ -5709,6 +5756,7 @@ router.post("/bugs/:id/resolve", authorizeRoles(Role.DEVELOPER), async (req: Aut
       issueId: updated.id,
       bugCode: updated.bugCode || updated.id,
       status: workflowStatus,
+      actorId: req.user!.userId,
       reporter: issue.reportedBy ? byId.get(issue.reportedBy) || null : null,
       assignee: issue.assignedTo ? byId.get(issue.assignedTo) || null : null,
     });
@@ -5723,6 +5771,7 @@ router.post("/bugs/:id/resolve", authorizeRoles(Role.DEVELOPER), async (req: Aut
       bugCode: updated.bugCode || updated.id,
       originalTesterId: tester?.id,
       originalTesterEmail: tester?.email,
+      actorId: req.user!.userId,
     });
   }
   return res.json(enrichIssue(updated));
@@ -5853,6 +5902,7 @@ router.post("/issues/:id/assign", authorizeRoles(Role.TESTER), async (req: AuthR
     assigneeEmail: developer.email,
     bugCode: issue.bugCode || issue.id,
     issueId: issue.id,
+    actorId: req.user!.userId,
   });
   return res.json(issue);
 });
@@ -5961,6 +6011,7 @@ router.patch("/issues/:id/status", authorizeRoles(Role.DEVELOPER), async (req: A
       issueId: issue.id,
       bugCode: issue.bugCode || issue.id,
       status: status,
+      actorId: req.user!.userId,
       reporter: prev.reportedBy ? byId.get(prev.reportedBy) || null : null,
       assignee: prev.assignedTo ? byId.get(prev.assignedTo) || null : null,
     });
@@ -6040,6 +6091,7 @@ router.post(
         bugCode: issue.bugCode || issue.id,
         originalTesterId: tester?.id,
         originalTesterEmail: tester?.email,
+        actorId: req.user!.userId,
       });
     }
     return res.json(issue);
