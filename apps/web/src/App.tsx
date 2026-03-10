@@ -127,10 +127,11 @@ type AppNotificationItem = {
   subtitle?: string;
   isRead: boolean;
   bugId?: string;
+  senderEmail?: string;
 };
 
 function App() {
-  const [inlineNotice, setInlineNotice] = useState<{ type: "info" | "error"; text: string } | null>(null);
+  const [inlineNotice, setInlineNotice] = useState<{ type: "info" | "error" | "success"; text: string } | null>(null);
   const [screen, setScreen] = useState<Screen>("login");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -924,7 +925,7 @@ function App() {
         severity: bugFilterSeverity,
         sortBy: bugSortBy,
       };
-      if (bugViewMode === "mine" && !isTester) {
+      if (bugViewMode === "mine") {
         bugParams.mine = "1";
       }
       if (isDeveloper && (activeMenuKey === "all_bugs" || bugViewMode === "all")) {
@@ -1029,12 +1030,18 @@ function App() {
       setSelectedBug(null);
       setBugComments([]);
       setBugCommentThreads([]);
+      setBugTransitionToStatus("");
+      setBugTransitionReason("");
+      setBugTransitionDuplicateOf("");
       return;
     }
     const bugScope =
       isDeveloper && (activeMenuKey === "all_bugs" || bugViewMode === "all") ? { scope: "all" } : undefined;
     const [bug, commentsPayload] = await Promise.all([getBugApi(bugId, bugScope), listBugCommentsApi(bugId)]);
     setSelectedBug(bug || null);
+    setBugTransitionToStatus(String(bug?.workflowStatus || "OPEN").toUpperCase());
+    setBugTransitionReason("");
+    setBugTransitionDuplicateOf("");
     setBugComments(Array.isArray(commentsPayload?.comments) ? commentsPayload.comments : []);
     setBugCommentThreads(Array.isArray(commentsPayload?.threaded) ? commentsPayload.threaded : []);
   };
@@ -1117,6 +1124,58 @@ function App() {
     showBugActionNotice("Bug resolution updated successfully");
     await loadTestCaseData();
     await loadBugDetails(selectedBug.id);
+  };
+
+  const createBugFromBugManagement = async () => {
+    if (!scopedProjectId) {
+      showBugActionNotice("Select a project before creating a bug", "error");
+      return;
+    }
+    if (
+      !bugCreateTitle.trim() ||
+      !bugCreateDescription.trim() ||
+      !bugCreateStepsToReproduce.trim() ||
+      !bugCreateExpectedBehavior.trim() ||
+      !bugCreateActualBehavior.trim()
+    ) {
+      showBugActionNotice(
+        "Title, description, steps to reproduce, expected behavior, and actual behavior are required",
+        "error"
+      );
+      return;
+    }
+    try {
+      const attachments = bugCreateAttachmentsText.trim()
+        ? parseBugAttachmentsInput(bugCreateAttachmentsText)
+        : undefined;
+      const created = await createBugApi({
+        projectId: scopedProjectId,
+        title: bugCreateTitle.trim(),
+        description: bugCreateDescription.trim(),
+        stepsToReproduce: bugCreateStepsToReproduce.trim(),
+        expectedBehavior: bugCreateExpectedBehavior.trim(),
+        actualBehavior: bugCreateActualBehavior.trim(),
+        severity: bugCreateSeverity || "MEDIUM",
+        priority: bugCreatePriority || "P3_MEDIUM",
+        environment: bugCreateEnvironment.trim() || undefined,
+        affectedVersion: bugCreateAffectedVersion.trim() || undefined,
+        assignedTo: bugCreateAssignedTo || undefined,
+        testCaseId: bugCreateTestCaseId || undefined,
+        executionId: bugCreateExecutionId || undefined,
+        dueDate: bugCreateDueDate || undefined,
+        attachments,
+      });
+      resetBugCreateFields();
+      setShowBugCreateForm(false);
+      showBugActionNotice(`Bug created: ${created?.bugId || created?.id || "new bug"}`);
+      await loadTestCaseData();
+      if (created?.id) {
+        setSelectedBugId(created.id);
+        await loadBugDetails(created.id);
+      }
+    } catch (error: any) {
+      showBugActionNotice(error?.message || "Bug creation failed", "error");
+    }
   };
 
   const addBugComment = async () => {
@@ -1237,6 +1296,10 @@ function App() {
     window.setTimeout(() => setAdminUserToast(""), 2500);
   };
 
+  const showAppNotice = (text: string, type: "info" | "error" | "success" = "info") => {
+    setInlineNotice({ type, text });
+  };
+
   const showBugActionNotice = (text: string, type: "info" | "error" = "info") => {
     setBugActionNotice({ type, text });
     window.setTimeout(() => {
@@ -1316,20 +1379,26 @@ function App() {
         : Array.isArray(payload?.notifications)
           ? payload.notifications
           : [];
-      const items: AppNotificationItem[] = rows.map((row: any) => ({
-        id: String(row?.id || `notif:${Math.random()}`),
-        type: String(row?.type || "GENERAL"),
-        title: String(row?.message || "Notification"),
-        subtitle:
-          String(row?.entityType || "").trim() && String(row?.entityId || "").trim()
-            ? `${row.entityType} • ${row.entityId}`
-            : String(row?.issueTitle || row?.commentPreview || "").trim(),
-        isRead: Boolean(row?.isRead),
-        bugId:
-          String(row?.entityType || "").toUpperCase() === "ISSUE"
-            ? String(row?.entityId || "")
-            : String(row?.issueId || ""),
-      }));
+      const items: AppNotificationItem[] = rows.map((row: any) => {
+        const message = String(row?.message || "Notification");
+        const senderMatch = message.match(/(?:by|from)\s+([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i);
+        const senderEmail = String(row?.senderEmail || "").trim().toLowerCase();
+        return {
+          id: String(row?.id || `notif:${Math.random()}`),
+          type: String(row?.type || "GENERAL"),
+          title: message,
+          subtitle:
+            String(row?.entityType || "").trim() && String(row?.entityId || "").trim()
+              ? `${row.entityType} • ${row.entityId}`
+              : String(row?.issueTitle || row?.commentPreview || "").trim(),
+          isRead: Boolean(row?.isRead),
+          bugId:
+            String(row?.entityType || "").toUpperCase() === "ISSUE"
+              ? String(row?.entityId || "")
+              : String(row?.issueId || ""),
+          senderEmail: senderEmail || senderMatch?.[1]?.toLowerCase() || "",
+        };
+      });
       setNotificationItems(items);
       setNotificationUnreadCount(Number(payload?.unreadCount || items.filter((item) => !item.isRead).length));
     } catch {
@@ -1346,7 +1415,7 @@ function App() {
       try {
         await markNotificationReadApi(selected.id);
       } catch {
-        // no-op for optimistic UI
+        showAppNotice("Notification opened, but failed to mark it as read", "error");
       }
       setNotificationItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, isRead: true } : item))
@@ -1357,10 +1426,42 @@ function App() {
     if (selected.bugId) {
       setSelectedBugId(selected.bugId);
       const targetMenuKey = isDeveloper ? "my_assigned_bugs" : "bug_management";
-      handleDashboardNavSelect(targetMenuKey).catch(() => {
-        // no-op
+      handleDashboardNavSelect(targetMenuKey).then(() => {
+        showAppNotice("Notification opened", "success");
+      }).catch(() => {
+        showAppNotice("Failed to open the linked bug from notification", "error");
       });
     }
+  };
+
+  const handleNotificationReply = async (id: string, message: string) => {
+    const selected = notificationItems.find((item) => item.id === id);
+    if (!selected) {
+      throw new Error("Notification not found");
+    }
+    const comment = String(message || "").trim();
+    if (!comment) {
+      throw new Error("Reply message is required");
+    }
+    if (!selected.bugId) {
+      throw new Error("Reply is not available for this notification");
+    }
+
+    await createBugCommentApi(selected.bugId, { comment });
+
+    if (!selected.isRead) {
+      try {
+        await markNotificationReadApi(selected.id);
+      } catch {
+        // Ignore read-status failure on successful reply.
+      }
+      setNotificationItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, isRead: true } : item))
+      );
+      setNotificationUnreadCount((prev) => Math.max(0, prev - 1));
+    }
+
+    showAppNotice("Reply sent successfully", "success");
   };
   const resetExecutionPanel = () => {
     setExecutionCaseId("");
@@ -1410,6 +1511,7 @@ function App() {
     setBugCreateExecutionId("");
     setBugCreateDueDate("");
     setBugCreateAttachmentsText("");
+    setShowBugCreateForm(false);
     setBugTransitionToStatus("");
     setBugTransitionReason("");
     setBugTransitionDuplicateOf("");
@@ -1554,6 +1656,7 @@ function App() {
   };
 
   const resetBugCreateFields = () => {
+    setShowBugCreateForm(false);
     setBugCreateTitle("");
     setBugCreateDescription("");
     setBugCreateStepsToReproduce("");
@@ -1639,61 +1742,101 @@ function App() {
 
   const isDeletedComment = (item: any): boolean => String(item.comment || "").trim() === "[DELETED]";
 
+  const renderFormattedComment = (text: string): JSX.Element[] => {
+    const lines = String(text || "").split(/\r?\n/);
+    const renderInline = (input: string, keyPrefix: string): React.ReactNode[] => {
+      const nodes: React.ReactNode[] = [];
+      const pattern = /(\*\*[^*]+\*\*|_[^_]+_|`[^`]+`)/g;
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      let tokenIndex = 0;
+      while ((match = pattern.exec(input)) !== null) {
+        if (match.index > lastIndex) {
+          nodes.push(input.slice(lastIndex, match.index));
+        }
+        const token = match[0];
+        if (token.startsWith("**") && token.endsWith("**")) {
+          nodes.push(<strong key={`${keyPrefix}-b-${tokenIndex}`}>{token.slice(2, -2)}</strong>);
+        } else if (token.startsWith("_") && token.endsWith("_")) {
+          nodes.push(<em key={`${keyPrefix}-i-${tokenIndex}`}>{token.slice(1, -1)}</em>);
+        } else if (token.startsWith("`") && token.endsWith("`")) {
+          nodes.push(<code key={`${keyPrefix}-c-${tokenIndex}`}>{token.slice(1, -1)}</code>);
+        } else {
+          nodes.push(token);
+        }
+        lastIndex = match.index + token.length;
+        tokenIndex += 1;
+      }
+      if (lastIndex < input.length) {
+        nodes.push(input.slice(lastIndex));
+      }
+      return nodes;
+    };
+
+    return lines.flatMap((line, lineIndex) => {
+      const content = renderInline(line, `line-${lineIndex}`);
+      return lineIndex < lines.length - 1 ? [...content, <br key={`br-${lineIndex}`} />] : content;
+    }) as JSX.Element[];
+  };
+
   const renderCommentThreads = (items: any[], depth = 0): JSX.Element[] =>
     items.map((item) => (
-      <div key={item.id} style={{ marginLeft: depth > 0 ? `${Math.min(depth * 18, 54)}px` : "0" }}>
-        <div className="row">
-          <span className="title">
-            <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
-            {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
-              <>
-                <br />
-                <strong>Mentions:</strong> {item.mentions.map((m: string) => `@${m}`).join(", ")}
-              </>
-            ) : null}
+      <div
+        key={item.id}
+        className={`bugCommentItem ${isDeletedComment(item) ? "isDeleted" : ""}`}
+        style={{ marginLeft: depth > 0 ? `${Math.min(depth * 18, 54)}px` : "0" }}
+      >
+        <div className="bugCommentBody">
+          {isDeletedComment(item) ? "[Comment deleted]" : renderFormattedComment(item.comment || "")}
+          {Array.isArray(item.mentions) && item.mentions.length > 0 ? (
+            <div className="bugCommentMentions">
+              Mentioned: {item.mentions.map((m: string) => `@${m}`).join(", ")}
+            </div>
+          ) : null}
+        </div>
+        <div className="bugCommentFooter">
+          <span className="bugCommentMeta">
+            {item.author?.name || item.authorId} | {new Date(item.createdAt).toLocaleString()}
           </span>
-          <span className="meta">
-            <strong>By:</strong> {item.author?.name || item.authorId}
-            <br />
-            <strong>At:</strong> {new Date(item.createdAt).toLocaleString()}
-          </span>
-          <button
-            className="button small"
-            onClick={() => {
-              setBugCommentParentId(item.id);
-              appendCommentSnippet(`@${(item.author?.name || "user").replace(/\s+/g, ".").toLowerCase()}`);
-            }}
-            disabled={isDeletedComment(item)}
-          >
-            Reply
-          </button>
-          <button
-            className="button small"
-            onClick={() => {
-              setEditingCommentId(item.id);
-              setEditingCommentText(item.comment || "");
-            }}
-            disabled={!canModifyComment(item) || isDeletedComment(item)}
-          >
-            Edit
-          </button>
-          <button
-            className="button small danger"
-            onClick={async () => {
-              try {
-                await deleteBugCommentApi(item.id);
-                if (selectedBug?.id) {
-                  await loadBugDetails(selectedBug.id);
+          <div className="bugCommentActions">
+            <button
+              className="button small"
+              onClick={() => {
+                setBugCommentParentId(item.id);
+                appendCommentSnippet(`@${(item.author?.name || "user").replace(/\s+/g, ".").toLowerCase()}`);
+              }}
+              disabled={isDeletedComment(item)}
+            >
+              Reply
+            </button>
+            <button
+              className="button small"
+              onClick={() => {
+                setEditingCommentId(item.id);
+                setEditingCommentText(item.comment || "");
+              }}
+              disabled={!canModifyComment(item) || isDeletedComment(item)}
+            >
+              Edit
+            </button>
+            <button
+              className="button small danger"
+              onClick={async () => {
+                try {
+                  await deleteBugCommentApi(item.id);
+                  if (selectedBug?.id) {
+                    await loadBugDetails(selectedBug.id);
+                  }
+                  showBugActionNotice("Comment deleted");
+                } catch (error: any) {
+                  showBugActionNotice(error?.message || "Delete comment failed", "error");
                 }
-                showBugActionNotice("Comment deleted");
-              } catch (error: any) {
-                showBugActionNotice(error?.message || "Delete comment failed", "error");
-              }
-            }}
-            disabled={!canModifyComment(item) || isDeletedComment(item)}
-          >
-            Delete
-          </button>
+              }}
+              disabled={!canModifyComment(item) || isDeletedComment(item)}
+            >
+              Delete
+            </button>
+          </div>
         </div>
         {Array.isArray(item.replies) && item.replies.length > 0 ? renderCommentThreads(item.replies, depth + 1) : null}
       </div>
@@ -2144,10 +2287,6 @@ function App() {
 
   useEffect(() => {
     if (screen !== "dashboard" || !showBugs) return;
-    if (isTester && bugViewMode !== "all") {
-      setBugViewMode("all");
-      return;
-    }
     if (!isDeveloper) return;
     if (activeMenuKey === "all_bugs" && bugViewMode !== "all") {
       setBugViewMode("all");
@@ -2751,7 +2890,7 @@ function App() {
         await loadBugDetails(selectedBugId);
       }
     } catch {
-      // Intentionally silent here: existing page-level actions already show explicit alerts.
+      showAppNotice("Failed to open the selected dashboard feature", "error");
     }
   };
 
@@ -2823,7 +2962,7 @@ function App() {
     document.addEventListener("focusin", updateNoticeHostFromEvent, true);
     document.addEventListener("pointerdown", updateNoticeHostFromEvent, true);
 
-    const showFormScopedNotice = (text: string, type: "info" | "error") => {
+    const showFormScopedNotice = (text: string, type: "info" | "error" | "success") => {
       const active = document.activeElement as HTMLElement | null;
       const host = resolveNoticeHost(active) || formNoticeHostRef.current;
       if (!host) return false;
@@ -2837,6 +2976,7 @@ function App() {
       notice.textContent = text;
       notice.classList.toggle("formInlineNoticeError", type === "error");
       notice.classList.toggle("formInlineNoticeInfo", type === "info");
+      notice.classList.toggle("formInlineNoticeSuccess", type === "success");
 
       const prevTimer = notice.dataset.timeoutId ? Number(notice.dataset.timeoutId) : null;
       if (prevTimer) window.clearTimeout(prevTimer);
@@ -2863,11 +3003,31 @@ function App() {
         normalized.includes("denied") ||
         normalized.includes("required") ||
         normalized.includes("invalid");
-      const type: "info" | "error" = isErrorLike ? "error" : "info";
-      const shownInForm = showFormScopedNotice(text, type);
-      if (!shownInForm) {
-        setInlineNotice({ type, text });
-      }
+      const isSuccessLike =
+        normalized.includes("success") ||
+        normalized.includes("successful") ||
+        normalized.includes("created") ||
+        normalized.includes("updated") ||
+        normalized.includes("saved") ||
+        normalized.includes("deleted") ||
+        normalized.includes("loaded") ||
+        normalized.includes("refreshed") ||
+        normalized.includes("completed") ||
+        normalized.includes("linked") ||
+        normalized.includes("requested") ||
+        normalized.includes("opened") ||
+        normalized.includes("switched") ||
+        normalized.includes("triggered") ||
+        normalized.includes("added") ||
+        normalized.includes("removed") ||
+        normalized.includes("activated") ||
+        normalized.includes("deactivated") ||
+        normalized.includes("finalized") ||
+        normalized.includes("import complete") ||
+        normalized.includes("export");
+      const type: "info" | "error" | "success" = isErrorLike ? "error" : isSuccessLike ? "success" : "info";
+      showFormScopedNotice(text, type);
+      setInlineNotice({ type, text });
     };
     window.addEventListener(TT_INLINE_ALERT_EVENT, handleInlineAlert as EventListener);
     window.alert = patchedAlert;
@@ -2980,6 +3140,7 @@ function App() {
           <DashboardLayout
             key={`layout-${currentUserId || "anon"}-${currentRole || "none"}`}
             currentUserName={name || email || "User"}
+            currentUserEmail={email || ""}
             currentRole={currentRole || "USER"}
             notificationCount={notificationUnreadCount}
             notificationItems={notificationItems.map((item) => ({
@@ -2987,8 +3148,12 @@ function App() {
               title: item.title,
               subtitle: item.subtitle,
               isRead: item.isRead,
+              bugId: item.bugId,
+              type: item.type,
+              senderEmail: item.senderEmail,
             }))}
             onNotificationClick={handleNotificationClick}
+            onNotificationReply={handleNotificationReply}
             navItems={roleNavItems}
             activeKey={activeMenuKey}
             onSelect={(feature) => {
@@ -4551,50 +4716,249 @@ function App() {
                   </div>
                 ) : null}
                 {isTester && (
-                  <div className="panel" style={{ marginBottom: "10px" }}>
-                    <h5 style={{ marginTop: 0, marginBottom: "8px" }}>Select Bug Report</h5>
-                    <div className="inlineGrid">
-                      <select
-                        className="input"
-                        value={selectedBugId}
-                        onChange={async (e) => {
-                          const nextBugId = e.target.value;
-                          if (!nextBugId) {
-                            setSelectedBugId("");
-                            setSelectedBug(null);
-                            setBugComments([]);
-                            setBugCommentThreads([]);
-                            return;
-                          }
-                          await selectBugForInlineActions(nextBugId);
-                        }}
-                      >
-                        <option value="">Choose bug report</option>
-                        {testerBugSelectionOptions.map((item) => (
-                          <option key={`tester-select-${item.id}`} value={item.id}>
-                            {(item.bugId || item.id)} | {item.title || "Untitled Bug"} | {item.workflowStatus || "OPEN"}
-                          </option>
-                        ))}
-                      </select>
+                  <>
+                    <div className="row" style={{ justifyContent: "flex-end", alignItems: "center", width: "100%", marginBottom: "10px" }}>
                       <button
                         className="button small"
-                        onClick={async () => {
-                          await loadTestCaseData();
-                          showBugActionNotice("Bug reports refreshed");
+                        onClick={() => {
+                          if (showBugCreateForm) {
+                            setShowBugCreateForm(false);
+                            resetBugCreateFields();
+                            return;
+                          }
+                          setShowBugCreateForm(true);
                         }}
                       >
-                        Refresh
+                        {showBugCreateForm ? "Hide Form" : "Add New Bug"}
                       </button>
                     </div>
-                    {testerBugSelectionOptions.length === 0 ? (
-                      <div className="note" style={{ marginTop: "8px" }}>
-                        No bug reports available in current project scope.
+                    {showBugCreateForm && (
+                      <div className="panel" style={{ marginBottom: "10px" }}>
+                        <div className="note" style={{ marginBottom: "8px" }}>
+                          Create a tester bug directly in the current project scope.
+                        </div>
+                        <input
+                          className="input"
+                          value={scopedProjectId ? `${activeProjectName || "Selected Project"} (${scopedProjectId})` : "No active project selected"}
+                          readOnly
+                          disabled
+                        />
+                        <div className="inlineGrid">
+                          <input
+                            className="input"
+                            placeholder="Bug title"
+                            value={bugCreateTitle}
+                            onChange={(e) => setBugCreateTitle(e.target.value)}
+                          />
+                          <select
+                            className="input"
+                            value={bugCreateAssignedTo}
+                            onChange={(e) => setBugCreateAssignedTo(e.target.value)}
+                          >
+                            <option value="">Assign developer (optional)</option>
+                            {developerDirectory.map((dev) => (
+                              <option key={dev.id} value={dev.id}>
+                                {dev.name || dev.email} {dev.email ? `(${dev.email})` : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <textarea
+                          className="input"
+                          rows={3}
+                          placeholder="Bug description"
+                          value={bugCreateDescription}
+                          onChange={(e) => setBugCreateDescription(e.target.value)}
+                        />
+                        <textarea
+                          className="input"
+                          rows={3}
+                          placeholder="Steps to reproduce"
+                          value={bugCreateStepsToReproduce}
+                          onChange={(e) => setBugCreateStepsToReproduce(e.target.value)}
+                        />
+                        <div className="inlineGrid">
+                          <textarea
+                            className="input"
+                            rows={2}
+                            placeholder="Expected behavior"
+                            value={bugCreateExpectedBehavior}
+                            onChange={(e) => setBugCreateExpectedBehavior(e.target.value)}
+                          />
+                          <textarea
+                            className="input"
+                            rows={2}
+                            placeholder="Actual behavior"
+                            value={bugCreateActualBehavior}
+                            onChange={(e) => setBugCreateActualBehavior(e.target.value)}
+                          />
+                        </div>
+                        <div className="inlineGrid">
+                          <select
+                            className="input"
+                            value={bugCreateSeverity}
+                            onChange={(e) => setBugCreateSeverity(e.target.value)}
+                          >
+                            <option value="">Severity (default MEDIUM)</option>
+                            <option value="LOW">LOW</option>
+                            <option value="MEDIUM">MEDIUM</option>
+                            <option value="HIGH">HIGH</option>
+                            <option value="CRITICAL">CRITICAL</option>
+                          </select>
+                          <select
+                            className="input"
+                            value={bugCreatePriority}
+                            onChange={(e) => setBugCreatePriority(e.target.value)}
+                          >
+                            <option value="">Priority (default P3_MEDIUM)</option>
+                            <option value="P1_URGENT">P1_URGENT</option>
+                            <option value="P2_HIGH">P2_HIGH</option>
+                            <option value="P3_MEDIUM">P3_MEDIUM</option>
+                            <option value="P4_LOW">P4_LOW</option>
+                          </select>
+                        </div>
+                        <div className="inlineGrid">
+                          <select
+                            className="input"
+                            value={bugCreateTestCaseId}
+                            onChange={(e) => setBugCreateTestCaseId(e.target.value)}
+                          >
+                            <option value="">Linked test case (optional)</option>
+                            {testCases.map((tc) => (
+                              <option key={tc.id} value={tc.id}>
+                                {tc.testCaseCode || tc.id} | {tc.title || "Untitled Test Case"}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            className="input"
+                            value={bugCreateExecutionId}
+                            onChange={(e) => setBugCreateExecutionId(e.target.value)}
+                          >
+                            <option value="">Linked execution (optional)</option>
+                            {executionReports.map((report) => (
+                              <option key={report.id} value={report.id}>
+                                {report.testCase?.testCaseCode || report.testCaseId || report.id} | {report.result || "N/A"}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="inlineGrid">
+                          <input
+                            className="input"
+                            placeholder="Environment (optional)"
+                            value={bugCreateEnvironment}
+                            onChange={(e) => setBugCreateEnvironment(e.target.value)}
+                          />
+                          <input
+                            className="input"
+                            placeholder="Affected version (optional)"
+                            value={bugCreateAffectedVersion}
+                            onChange={(e) => setBugCreateAffectedVersion(e.target.value)}
+                          />
+                        </div>
+                        <div className="inlineGrid">
+                          <input
+                            className="input"
+                            type="date"
+                            value={bugCreateDueDate}
+                            onChange={(e) => setBugCreateDueDate(e.target.value)}
+                          />
+                          <input
+                            className="input"
+                            placeholder="Optional attachments JSON"
+                            value={bugCreateAttachmentsText}
+                            onChange={(e) => setBugCreateAttachmentsText(e.target.value)}
+                          />
+                        </div>
+                        {testerFailedExecutionQueue.length > 0 && (
+                          <div className="toolbarActions" style={{ marginBottom: "8px" }}>
+                            {testerFailedExecutionQueue.slice(0, 3).map((row) => (
+                              <button
+                                key={row._executionId}
+                                className="button small"
+                                onClick={() => prefillBugFromFailedExecution(row)}
+                              >
+                                Prefill {row.testCase?.testCaseCode || row._executionId}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="toolbarActions">
+                          <button className="button small" onClick={createBugFromBugManagement}>
+                            Create Bug
+                          </button>
+                          <button
+                            className="button small danger"
+                            onClick={() => {
+                              resetBugCreateFields();
+                              setShowBugCreateForm(false);
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
-                    ) : null}
-                  </div>
+                    )}
+                  {!showBugCreateForm ? (
+                    <div className="panel" style={{ marginBottom: "10px" }}>
+                      <div style={{ marginBottom: "10px" }}>
+                        <select
+                          className="input"
+                          value={bugViewMode}
+                          onChange={(e) => setBugViewMode(e.target.value as "all" | "mine" | "assigned")}
+                        >
+                          <option value="all">All Bugs In Project</option>
+                          <option value="mine">My Created Bugs</option>
+                        </select>
+                      </div>
+                      <h5 style={{ marginTop: 0, marginBottom: "8px" }}>Select Bug Report</h5>
+                      <div className="inlineGrid">
+                      <select
+                          className="input"
+                          value={selectedBugId}
+                          onChange={async (e) => {
+                            const nextBugId = e.target.value;
+                            if (!nextBugId) {
+                              setSelectedBugId("");
+                              setSelectedBug(null);
+                              setBugComments([]);
+                              setBugCommentThreads([]);
+                              return;
+                            }
+                            await selectBugForInlineActions(nextBugId);
+                            setBugModalOpen(true);
+                          }}
+                        >
+                          <option value="">Choose bug report</option>
+                          {testerBugSelectionOptions.map((item) => (
+                            <option key={`tester-select-${item.id}`} value={item.id}>
+                              {(item.bugId || item.id)} | {item.title || "Untitled Bug"} | {item.workflowStatus || "OPEN"}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          className="button small"
+                          onClick={async () => {
+                            await loadTestCaseData();
+                            showBugActionNotice("Bug reports refreshed");
+                          }}
+                        >
+                          Refresh
+                        </button>
+                      </div>
+                      {testerBugSelectionOptions.length === 0 ? (
+                        <div className="note" style={{ marginTop: "8px" }}>
+                          No bug reports available in current project scope.
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  </>
                 )}
                 <div className="testCaseDetails" style={{ marginBottom: "10px" }}>
                   </div>
+                {!(isTester && showBugCreateForm) ? (
                 <div className="tableWrap adminUsersTableWrap" style={{ marginBottom: "12px" }}>
                   <table className="table adminUsersTable">
                     <thead>
@@ -4604,40 +4968,47 @@ function App() {
                         <th>Priority</th>
                         <th>Severity</th>
                         <th>Assignee</th>
-                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {testerVisibleBugRows.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="note">
+                          <td colSpan={5} className="note">
                             {isTester ? "No bug reports available in current scope." : "No bug reports created by you yet."}
                           </td>
                         </tr>
                       ) : (
                         testerVisibleBugRows.map((item) => (
-                          <tr key={`mine-${item.id}`}>
+                          <tr
+                            key={`mine-${item.id}`}
+                            className="adminUsersRow"
+                            tabIndex={0}
+                            role="button"
+                            aria-label={`Open bug ${item.title || item.bugId || item.id}`}
+                            onClick={async () => {
+                              await selectBugForInlineActions(item.id);
+                              setBugModalOpen(true);
+                            }}
+                            onKeyDown={async (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                await selectBugForInlineActions(item.id);
+                                setBugModalOpen(true);
+                              }
+                            }}
+                          >
                             <td className="truncateCell">{(item.bugId || item.id)} | {item.title || "Untitled Bug"}</td>
                             <td>{item.workflowStatus || "OPEN"}</td>
                             <td>{item.priority || "N/A"}</td>
                             <td>{item.severity || "N/A"}</td>
                             <td>{item.assignee?.name || item.assignee?.email || "Unassigned"}</td>
-                            <td>
-                              <button
-                                className="button small"
-                                onClick={async () => {
-                                  await selectBugForInlineActions(item.id);
-                                }}
-                              >
-                                {selectedBugId === item.id ? "Selected" : "Select"}
-                              </button>
-                            </td>
                           </tr>
                         ))
                       )}
                     </tbody>
                   </table>
                 </div>
+                ) : null}
 
                 {!isTester && (
                   <>
@@ -4824,7 +5195,7 @@ function App() {
                 </>
                 )}
 
-                {selectedBug && (
+                {selectedBug && !(isTester && showBugCreateForm) && (
                   <div className="panel" style={{ marginTop: "10px" }}>
                     <h5 style={{ marginTop: 0 }}>Selected Bug Actions</h5>
                     <div className="note" style={{ marginBottom: "8px" }}>
@@ -4851,18 +5222,63 @@ function App() {
                           </select>
                           <input
                             className="input"
-                            placeholder="Reason / duplicate bug id (optional)"
+                            placeholder="Reason (used for Won't Fix)"
                             value={bugTransitionReason}
                             onChange={(e) => setBugTransitionReason(e.target.value)}
+                          />
+                          <input
+                            className="input"
+                            placeholder="Duplicate bug code (used for Duplicate)"
+                            value={bugTransitionDuplicateOf}
+                            onChange={(e) => setBugTransitionDuplicateOf(e.target.value)}
                           />
                         </div>
                         <div style={{ marginTop: "8px" }}>
                           <button className="button small" onClick={applyBugTransition} disabled={!bugTransitionToStatus}>
                             Apply Transition
                           </button>
+                          <button
+                            className="button small"
+                            style={{ marginLeft: "8px" }}
+                            onClick={() => setBugModalOpen(true)}
+                          >
+                            Open Details
+                          </button>
                         </div>
                       </div>
                     )}
+                    <div className="bugDetailsGrid" style={{ marginBottom: "10px" }}>
+                      <section className="bugDetailsCard">
+                        <h5 className="bugDetailsHeading">Overview</h5>
+                        <div className="bugDetailsMetaGrid">
+                          <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reporter?.email || "N/A"}</div>
+                          <div><strong>Assignee:</strong> {selectedBug.assignee?.name || selectedBug.assignee?.email || "Unassigned"}</div>
+                          <div><strong>Priority:</strong> {selectedBug.priority || "N/A"}</div>
+                          <div><strong>Severity:</strong> {selectedBug.severity || "N/A"}</div>
+                          <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
+                          <div><strong>Execution:</strong> {selectedBug.executionId || "N/A"}</div>
+                        </div>
+                        <div className="bugDetailsField">
+                          <strong>Description</strong>
+                          <p>{selectedBug.description || "N/A"}</p>
+                        </div>
+                      </section>
+                      <section className="bugDetailsCard">
+                        <h5 className="bugDetailsHeading">Behavior</h5>
+                        <div className="bugDetailsField">
+                          <strong>Steps to Reproduce</strong>
+                          <p>{selectedBug.bugMeta?.stepsToReproduce || "N/A"}</p>
+                        </div>
+                        <div className="bugDetailsField">
+                          <strong>Expected Behavior</strong>
+                          <p>{selectedBug.bugMeta?.expectedBehavior || "N/A"}</p>
+                        </div>
+                        <div className="bugDetailsField">
+                          <strong>Actual Behavior</strong>
+                          <p>{selectedBug.bugMeta?.actualBehavior || "N/A"}</p>
+                        </div>
+                      </section>
+                    </div>
                     <div>
                       <div className="toolbarActions" style={{ marginBottom: "8px" }}>
                         <button className="button small" onClick={() => appendCommentSnippet("@username")}>@Mention</button>
@@ -4889,12 +5305,41 @@ function App() {
                       <div style={{ marginTop: "8px" }}>
                         <button className="button small" onClick={addBugComment}>Add Comment</button>
                       </div>
+                      {bugCommentParentId ? (
+                        <div className="note" style={{ marginTop: "8px" }}>
+                          Replying to comment: {bugCommentParentId}
+                        </div>
+                      ) : null}
+                      {bugCommentThreads.length > 0 ? (
+                        <div className="listCompact" style={{ marginTop: "10px" }}>
+                          {renderCommentThreads(bugCommentThreads)}
+                        </div>
+                      ) : bugComments.length > 0 ? (
+                        <div className="listCompact" style={{ marginTop: "10px" }}>
+                          {bugComments.map((item) => (
+                            <div className={`bugCommentItem ${isDeletedComment(item) ? "isDeleted" : ""}`} key={item.id}>
+                              <div className="bugCommentBody">
+                                {isDeletedComment(item) ? "[Comment deleted]" : renderFormattedComment(item.comment || "")}
+                              </div>
+                              <div className="bugCommentFooter">
+                                <span className="bugCommentMeta">
+                                  {item.author?.name || item.authorId} | {new Date(item.createdAt).toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="note" style={{ marginTop: "10px" }}>
+                          No comments yet for this bug.
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
 
                 <BugDetailsModal
-                  isOpen={bugModalOpen && !!selectedBug && !isTester}
+                  isOpen={bugModalOpen && !!selectedBug}
                   onClose={() => {
                     setBugModalOpen(false);
                     setSelectedBugId("");
@@ -4934,6 +5379,7 @@ function App() {
                   bugComments={bugComments}
                   renderCommentThreads={renderCommentThreads}
                   isDeletedComment={isDeletedComment}
+                  renderFormattedComment={renderFormattedComment}
                 />
               </section>
               )}
@@ -5094,6 +5540,7 @@ function App() {
                               );
                               await cloneTestCaseApi(selectedTestCaseModal.id, { includeAttachments });
                               await loadTestCaseData();
+                              alert("Test case cloned successfully");
                             } catch (error: any) {
                               alert(error?.message || "Clone failed");
                             }
@@ -5111,6 +5558,7 @@ function App() {
                               await deleteTestCaseApi(selectedTestCaseModal.id);
                               setSelectedTestCaseModalId("");
                               await loadTestCaseData();
+                              alert("Test case deleted successfully");
                             } catch (error: any) {
                               alert(error?.message || "Delete failed");
                             }

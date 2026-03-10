@@ -304,9 +304,9 @@ const ExecuteTestsSection = ({
       {executionId && executionSteps.length > 0 && showExecutionModal && (
         <div className="modalBackdrop" onClick={() => setShowExecutionModal(false)}>
           <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <h4 style={{ margin: 0 }}>Execution Workspace</h4>
-              <button className="button small" onClick={() => setShowExecutionModal(false)}>Close</button>
+              <button className="button small" aria-label="Close execution modal" onClick={() => setShowExecutionModal(false)}>X</button>
             </div>
           <div className="note">Progress: {executionProgress}% (auto-saved)</div>
           <div className="inlineGrid">
@@ -601,9 +601,9 @@ const ExecuteTestsSection = ({
       {showQuickBugModal ? (
         <div className="modalBackdrop" onClick={() => setShowQuickBugModal(false)}>
           <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <h4 style={{ margin: 0 }}>Create Bug Report</h4>
-              <button className="button small" onClick={() => setShowQuickBugModal(false)}>Close</button>
+              <button className="button small" aria-label="Close create bug modal" onClick={() => setShowQuickBugModal(false)}>X</button>
             </div>
             <input
               className="input"
@@ -687,9 +687,9 @@ const ExecuteTestsSection = ({
       {showEvidenceModal ? (
         <div className="modalBackdrop" onClick={() => setShowEvidenceModal(false)}>
           <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <h4 style={{ margin: 0 }}>Add Evidence</h4>
-              <button className="button small" onClick={() => setShowEvidenceModal(false)}>Close</button>
+              <button className="button small" aria-label="Close evidence modal" onClick={() => setShowEvidenceModal(false)}>X</button>
             </div>
             <div className="inlineGrid">
               <select className="input" value={evidenceType} onChange={(e) => setEvidenceType(e.target.value)}>

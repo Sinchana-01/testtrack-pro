@@ -44,9 +44,9 @@ const DeveloperIssueActionModal: React.FC<Props> = ({
   return (
     <div className="modalBackdrop" onClick={onClose}>
       <div className="modalCard" onClick={(e) => e.stopPropagation()}>
-        <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+        <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <h4 style={{ margin: 0 }}>Manage Issue</h4>
-          <button className="button small" onClick={onClose}>Close</button>
+          <button className="button small" aria-label="Close manage issue modal" onClick={onClose}>X</button>
         </div>
 
         <div className="testCaseDetails" style={{ marginBottom: "10px" }}>

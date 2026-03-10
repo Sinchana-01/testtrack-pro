@@ -802,9 +802,9 @@ const SuiteManagementSection: React.FC<Props> = ({
       {addDrawerOpen && suiteDetails && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 40 }}>
           <div style={{ position: "absolute", top: 0, right: 0, width: "min(520px, 100%)", height: "100%", background: "#fff", padding: 16, boxShadow: "-8px 0 24px rgba(0,0,0,0.18)", overflow: "auto" }}>
-            <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <strong>Add Test Cases</strong>
-              <button className="button small" onClick={() => setAddDrawerOpen(false)}>Close</button>
+              <button className="button small" aria-label="Close add test cases drawer" onClick={() => setAddDrawerOpen(false)}>X</button>
             </div>
             <input className="input" placeholder="Search test cases" value={drawerSearch} onChange={(e) => setDrawerSearch(e.target.value)} />
             <div className="listCompact" style={{ maxHeight: "65vh", overflow: "auto" }}>
@@ -822,9 +822,9 @@ const SuiteManagementSection: React.FC<Props> = ({
       {executeModalOpen && suiteDetails && (
         <div className="modalBackdrop" onClick={() => setExecuteModalOpen(false)}>
           <div className="modalCard" onClick={(e) => e.stopPropagation()}>
-            <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <h4 style={{ margin: 0 }}>Execute Suite</h4>
-              <button className="button small" onClick={() => setExecuteModalOpen(false)}>Close</button>
+              <button className="button small" aria-label="Close execute suite modal" onClick={() => setExecuteModalOpen(false)}>X</button>
             </div>
             <div className="note" style={{ marginBottom: 8 }}>
               {suiteDetails.name} | Configure execution and start.

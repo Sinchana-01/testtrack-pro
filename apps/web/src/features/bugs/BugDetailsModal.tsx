@@ -35,6 +35,7 @@ type Props = {
   bugComments: any[];
   renderCommentThreads: (items: any[], depth?: number) => JSX.Element[];
   isDeletedComment: (item: any) => boolean;
+  renderFormattedComment: (text: string) => React.ReactNode;
 };
 
 const BugDetailsModal: React.FC<Props> = ({
@@ -72,6 +73,7 @@ const BugDetailsModal: React.FC<Props> = ({
   bugComments,
   renderCommentThreads,
   isDeletedComment,
+  renderFormattedComment,
 }) => {
   const sectionOptions = useMemo(() => {
     const items: Array<{ key: "transition" | "resolution" | "comments" | "test_case"; label: string }> = [];
@@ -94,7 +96,7 @@ const BugDetailsModal: React.FC<Props> = ({
       <div className="modalCard" onClick={(e) => e.stopPropagation()}>
         <div className="row bugModalHeaderTop" style={{ justifyContent: "space-between", marginBottom: 8 }}>
           <h4 style={{ margin: 0 }}>Bug Details</h4>
-          <button className="button small" onClick={onClose}>Close</button>
+          <button className="button small" aria-label="Close bug details modal" onClick={onClose}>X</button>
         </div>
         <div className="bugSectionTabs" aria-label="Bug detail actions">
           {sectionOptions.map((item) => (
@@ -186,7 +188,7 @@ const BugDetailsModal: React.FC<Props> = ({
                     ? "Linked Test Case Details"
                     : "Bug Comments"}
                 </h4>
-                <button className="button small" onClick={() => setPopupSection(null)}>Close</button>
+                <button className="button small" aria-label="Close bug action modal" onClick={() => setPopupSection(null)}>X</button>
               </div>
 
               {popupSection === "transition" && canTransitionBugs && (
@@ -286,15 +288,15 @@ const BugDetailsModal: React.FC<Props> = ({
                   {bugComments.length > 0 && bugCommentThreads.length === 0 && (
                     <div className="listCompact">
                       {bugComments.map((item) => (
-                        <div className="row" key={item.id}>
-                          <span className="title">
-                            <strong>Comment:</strong> {isDeletedComment(item) ? "[Comment deleted]" : item.comment}
-                          </span>
-                          <span className="meta">
-                            <strong>By:</strong> {item.author?.name || item.authorId}
-                            <br />
-                            <strong>At:</strong> {new Date(item.createdAt).toLocaleString()}
-                          </span>
+                        <div className={`bugCommentItem ${isDeletedComment(item) ? "isDeleted" : ""}`} key={item.id}>
+                          <div className="bugCommentBody">
+                            {isDeletedComment(item) ? "[Comment deleted]" : renderFormattedComment(item.comment || "")}
+                          </div>
+                          <div className="bugCommentFooter">
+                            <span className="bugCommentMeta">
+                              {item.author?.name || item.authorId} | {new Date(item.createdAt).toLocaleString()}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
