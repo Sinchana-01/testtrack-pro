@@ -4021,7 +4021,7 @@ router.get("/suites/:suiteId/executions", authorizeRoles(Role.TESTER), requirePr
 
 router.get(
   "/reports/test-executions",
-  authorizeRoles(Role.TESTER, Role.DEVELOPER),
+  authorizeRoles(Role.TESTER, Role.DEVELOPER, Role.ADMIN),
   requireProjectFromRequest,
   async (req: AuthRequest, res: Response) => {
     const projectId = req.projectContext?.projectId || getProjectIdFromRequest(req);
