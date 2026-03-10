@@ -1037,6 +1037,64 @@ body {
   word-break: break-word;
 }
 
+.dashboardPageContent .bugCommentItem {
+  border: 1px solid #dbe7f3;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  padding: 10px 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.dashboardPageContent .bugCommentItem.isDeleted {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+.dashboardPageContent .bugCommentBody {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.dashboardPageContent .bugCommentBody code {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+}
+
+.dashboardPageContent .bugCommentMentions {
+  margin-top: 6px;
+  color: #1e40af;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboardPageContent .bugCommentFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px dashed #dbe7f3;
+  padding-top: 8px;
+}
+
+.dashboardPageContent .bugCommentMeta {
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dashboardPageContent .bugCommentActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .dashboardPageContent .bugSectionTabs {
   display: flex;
   flex-wrap: wrap;
@@ -1045,6 +1103,8 @@ body {
 }
 
 .dashboardPageContent .bugModalHeaderTop {
+  display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
 }
@@ -1076,7 +1136,9 @@ body {
 }
 
 .suiteExecModalHeader {
+  display: flex;
   justify-content: space-between;
+  align-items: center;
   margin-bottom: 10px;
   position: sticky;
   top: 0;
@@ -2691,16 +2753,23 @@ body {
 }
 
 .inlineNotice {
-  margin: 8px 0 14px;
-  border-radius: 10px;
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 2500;
+  width: min(420px, calc(100vw - 32px));
+  border-radius: 14px;
   border: 1px solid #cbd5e1;
-  padding: 10px 12px;
+  border-left-width: 5px;
+  padding: 12px 14px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   font-size: 13px;
   font-weight: 600;
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(8px);
 }
 
 .inlineNotice button {
@@ -2713,36 +2782,64 @@ body {
 }
 
 .inlineNotice-info {
-  background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  background: rgba(239, 246, 255, 0.98);
+  border-color: #93c5fd;
+  border-left-color: #2563eb;
+  color: #1e3a8a;
 }
 
 .inlineNotice-error {
-  background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  background: rgba(254, 242, 242, 0.98);
+  border-color: #fca5a5;
+  border-left-color: #dc2626;
+  color: #991b1b;
+}
+
+.inlineNotice-success {
+  background: rgba(240, 253, 244, 0.98);
+  border-color: #86efac;
+  border-left-color: #16a34a;
+  color: #166534;
 }
 
 .formInlineNotice {
   margin: 0 0 12px;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 1px solid #cbd5e1;
-  padding: 10px 12px;
+  border-left-width: 4px;
+  padding: 11px 12px;
   font-size: 13px;
   font-weight: 600;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
 }
 
 .formInlineNoticeInfo {
   background: #eff6ff;
-  border-color: #bfdbfe;
-  color: #1d4ed8;
+  border-color: #93c5fd;
+  border-left-color: #2563eb;
+  color: #1e3a8a;
 }
 
 .formInlineNoticeError {
   background: #fef2f2;
-  border-color: #fecaca;
-  color: #b91c1c;
+  border-color: #fca5a5;
+  border-left-color: #dc2626;
+  color: #991b1b;
+}
+
+.formInlineNoticeSuccess {
+  background: #f0fdf4;
+  border-color: #86efac;
+  border-left-color: #16a34a;
+  color: #166534;
+}
+
+@media (max-width: 768px) {
+  .inlineNotice {
+    top: 12px;
+    right: 12px;
+    width: calc(100vw - 24px);
+  }
 }
 
 .backupCardRow {

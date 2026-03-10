@@ -615,7 +615,7 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
           <div className="modalCard suiteExecModal" onClick={(e) => e.stopPropagation()}>
             <div className="row suiteExecModalHeader">
               <h4 style={{ margin: 0 }}>Test Case Execution</h4>
-              <button className="button small" onClick={() => setActiveCase(null)}>Close</button>
+              <button className="button small" aria-label="Close test case execution modal" onClick={() => setActiveCase(null)}>X</button>
             </div>
             <div className="suiteExecMeta">
               <div><strong>ID:</strong> {activeCase?.testCase?.testCaseCode || activeCase?.testCaseId}</div>
@@ -742,7 +742,7 @@ const SuiteExecutionWorkspace: React.FC<Props> = ({
           <div className="modalCard executionPopupCard" onClick={(e) => e.stopPropagation()}>
             <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
               <h4 style={{ margin: 0 }}>Create Bug Report</h4>
-              <button className="button small" onClick={() => setShowFailedBugModal(false)}>Close</button>
+              <button className="button small" aria-label="Close create bug modal" onClick={() => setShowFailedBugModal(false)}>X</button>
             </div>
             <div className="note">
               Linked execution: {failedExecutionId || "N/A"} {failedCaseLabel ? `| ${failedCaseLabel}` : ""}
