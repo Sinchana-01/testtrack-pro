@@ -14,6 +14,7 @@ import { exportAssignedBugReportCsv, exportAssignedExecutionReportCsv } from "./
 
 type Props = {
   mode?: "workspace" | "test_reports" | "performance_report" | "linked_commits";
+  dataLoading?: boolean;
   assignedBugCount: number;
   inProgressCount: number;
   needsVerificationCount: number;
@@ -27,6 +28,7 @@ type Props = {
 
 const DeveloperWorkspacePanel: React.FC<Props> = ({
   mode = "workspace",
+  dataLoading = false,
   assignedBugCount,
   inProgressCount,
   needsVerificationCount,
@@ -62,8 +64,9 @@ const DeveloperWorkspacePanel: React.FC<Props> = ({
   };
 
   useEffect(() => {
+    if (dataLoading) return;
     loadDeveloperData();
-  }, []);
+  }, [dataLoading]);
 
   useEffect(() => {
     setIssues(assignedBugs);
@@ -104,9 +107,9 @@ const DeveloperWorkspacePanel: React.FC<Props> = ({
 
       {showOverview && (
         <div className="kpiRow" style={{ marginBottom: "10px" }}>
-          <div className="kpiItem"><strong>Assigned Issues</strong><span>{dashboardCounts?.assignedCount ?? assignedBugCount}</span></div>
-          <div className="kpiItem"><strong>In Progress / Open</strong><span>{dashboardCounts?.openCount ?? inProgressCount}</span></div>
-          <div className="kpiItem"><strong>Fixed</strong><span>{dashboardCounts?.fixedCount ?? needsVerificationCount}</span></div>
+          <div className="kpiItem"><strong>Assigned Issues</strong><span>{dataLoading ? "..." : dashboardCounts?.assignedCount ?? assignedBugCount}</span></div>
+          <div className="kpiItem"><strong>In Progress / Open</strong><span>{dataLoading ? "..." : dashboardCounts?.openCount ?? inProgressCount}</span></div>
+          <div className="kpiItem"><strong>Fixed</strong><span>{dataLoading ? "..." : dashboardCounts?.fixedCount ?? needsVerificationCount}</span></div>
         </div>
       )}
 

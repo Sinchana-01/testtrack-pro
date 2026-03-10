@@ -91,6 +91,15 @@ const BugDetailsModal: React.FC<Props> = ({
   }, [sectionOptions, popupSection]);
   if (!isOpen || !selectedBug) return null;
 
+  const bugPriority = String(selectedBug?.priority || selectedBug?.bugPriority || "").trim();
+  const getBugField = (key: string): string => {
+    const directValue = selectedBug?.[key];
+    if (typeof directValue === "string" && directValue.trim()) return directValue.trim();
+    const metaValue = selectedBug?.bugMeta?.[key];
+    if (typeof metaValue === "string" && metaValue.trim()) return metaValue.trim();
+    return "";
+  };
+
   return (
     <div className="modalBackdrop" onClick={onClose}>
       <div className="modalCard" onClick={(e) => e.stopPropagation()}>
@@ -117,12 +126,12 @@ const BugDetailsModal: React.FC<Props> = ({
             <div className="bugDetailsMetaGrid">
               <div><strong>Bug ID:</strong> {selectedBug.bugId || selectedBug.id}</div>
               <div><strong>Status:</strong> {selectedBug.workflowStatus}</div>
-              <div><strong>Priority:</strong> {selectedBug.priority}</div>
+              <div><strong>Priority:</strong> {bugPriority || "N/A"}</div>
               <div><strong>Severity:</strong> {selectedBug.severity}</div>
               <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reportedBy || "N/A"}</div>
               <div><strong>Assigned To:</strong> {selectedBug.assignee?.name || selectedBug.assignedTo || "Unassigned"}</div>
               <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
-              <div><strong>Affected Version:</strong> {selectedBug.bugMeta?.affectedVersion || "N/A"}</div>
+              <div><strong>Affected Version:</strong> {getBugField("affectedVersion") || "N/A"}</div>
             </div>
             <div className="bugDetailsField">
               <strong>Title</strong>
@@ -138,19 +147,19 @@ const BugDetailsModal: React.FC<Props> = ({
             <h5 className="bugDetailsHeading">Behavior & Reproduction</h5>
             <div className="bugDetailsField">
               <strong>Steps to Reproduce</strong>
-              <p>{selectedBug.bugMeta?.stepsToReproduce || "N/A"}</p>
+              <p>{getBugField("stepsToReproduce") || "N/A"}</p>
             </div>
             <div className="bugDetailsField">
               <strong>Expected Behavior</strong>
-              <p>{selectedBug.bugMeta?.expectedBehavior || "N/A"}</p>
+              <p>{getBugField("expectedBehavior") || "N/A"}</p>
             </div>
             <div className="bugDetailsField">
               <strong>Actual Behavior</strong>
-              <p>{selectedBug.bugMeta?.actualBehavior || "N/A"}</p>
+              <p>{getBugField("actualBehavior") || "N/A"}</p>
             </div>
             <div className="bugDetailsField">
               <strong>Environment</strong>
-              <p>{selectedBug.bugMeta?.environment || "N/A"}</p>
+              <p>{getBugField("environment") || "N/A"}</p>
             </div>
           </section>
 

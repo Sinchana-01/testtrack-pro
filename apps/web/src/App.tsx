@@ -317,7 +317,6 @@ function App() {
   const [showMentionPopup, setShowMentionPopup] = useState(false);
   const [editingCommentId, setEditingCommentId] = useState("");
   const [editingCommentText, setEditingCommentText] = useState("");
-  const [quickStatusByBugId, setQuickStatusByBugId] = useState<Record<string, string>>({});
   const [bugActionNotice, setBugActionNotice] = useState<{ type: "info" | "error"; text: string } | null>(null);
   const [adminUsers, setAdminUsers] = useState<any[]>([]);
   const [adminCreateName, setAdminCreateName] = useState("");
@@ -416,9 +415,18 @@ function App() {
   const canSeeSelectionControls = hasPermission("Create Test Cases");
   const canExecuteTests = hasPermission("Execute Tests");
   const canManageTestRuns = hasPermission("Create Test Cases") || hasPermission("Execute Tests");
-  const canAccessReports = hasPermission("Reports");
+  const canAccessReports =
+    hasPermission("Reports") ||
+    hasPermission("Test Reports") ||
+    hasPermission("Performance Report") ||
+    hasPermission("Linked Commits");
   const canViewBugs =
-    hasPermission("Bug Management") || hasPermission("My Assigned Bugs") || hasPermission("All Bugs");
+    isTester ||
+    isDeveloper ||
+    isAdmin ||
+    hasPermission("Bug Management") ||
+    hasPermission("My Assigned Bugs") ||
+    hasPermission("All Bugs");
   const canCreateBugs = hasPermission("Bug Management");
   const canTransitionBugs = canViewBugs;
   const canResolveBugs = isDeveloper && hasPermission("My Assigned Bugs");
@@ -545,6 +553,14 @@ function App() {
     ).trim();
   const getBugReporterId = (item: any): string =>
     String(item?.reportedBy || item?.reporterId || item?.reporter?.id || "").trim();
+  const getBugPriority = (item: any): string => String(item?.priority || item?.bugPriority || "").trim();
+  const getBugField = (item: any, key: string): string => {
+    const directValue = item?.[key];
+    if (typeof directValue === "string" && directValue.trim()) return directValue.trim();
+    const metaValue = item?.bugMeta?.[key];
+    if (typeof metaValue === "string" && metaValue.trim()) return metaValue.trim();
+    return "";
+  };
   const bugRowsForDisplay = bugs
     .filter((item) => {
       const reporterId = getBugReporterId(item);
@@ -580,10 +596,10 @@ function App() {
     return !!currentUserId && assigneeId === currentUserId;
   });
   const assignedBugCount = bugRowsForDisplay.length;
-  const p1UrgentCount = bugRowsForDisplay.filter((item) => item.priority === "P1_URGENT").length;
+  const p1UrgentCount = bugRowsForDisplay.filter((item) => getBugPriority(item) === "P1_URGENT").length;
   const criticalBugCount = bugRowsForDisplay.filter((item) => item.severity === "CRITICAL").length;
   const developerAssignedBugCount = developerDashboardBugRows.length;
-  const developerP1UrgentCount = developerDashboardBugRows.filter((item) => item.priority === "P1_URGENT").length;
+  const developerP1UrgentCount = developerDashboardBugRows.filter((item) => getBugPriority(item) === "P1_URGENT").length;
   const developerCriticalBugCount = developerDashboardBugRows.filter((item) => item.severity === "CRITICAL").length;
   const developerRecentBugs = [...developerDashboardBugRows]
     .sort((a, b) => {
@@ -1016,7 +1032,19 @@ function App() {
       setMyCreatedBugs(Array.isArray(mineBugRows) ? mineBugRows : []);
       setSelectedBug((prev: any) => {
         if (!prev?.id) return prev;
-        return bugList.find((item) => item.id === prev.id) || null;
+        const refreshedBug = bugList.find((item) => item.id === prev.id);
+        if (!refreshedBug) return null;
+        return {
+          ...prev,
+          ...refreshedBug,
+          bugMeta: {
+            ...(prev?.bugMeta || {}),
+            ...(refreshedBug?.bugMeta || {}),
+          },
+          testCase: refreshedBug?.testCase || prev?.testCase || null,
+          reporter: refreshedBug?.reporter || prev?.reporter || null,
+          assignee: refreshedBug?.assignee || prev?.assignee || null,
+        };
       });
       if (selectedBugId && !bugList.some((item) => item.id === selectedBugId)) {
         setSelectedBugId("");
@@ -1046,27 +1074,6 @@ function App() {
     setBugTransitionDuplicateOf("");
     setBugComments(Array.isArray(commentsPayload?.comments) ? commentsPayload.comments : []);
     setBugCommentThreads(Array.isArray(commentsPayload?.threaded) ? commentsPayload.threaded : []);
-  };
-
-  const toggleBugDetails = async (bugId: string) => {
-    if (!bugId) return;
-    if (selectedBugId === bugId) {
-      setSelectedBugId("");
-      setBugModalOpen(false);
-      setSelectedBug(null);
-      setBugComments([]);
-      setBugCommentThreads([]);
-      return;
-    }
-    setSelectedBugId(bugId);
-    try {
-      await loadBugDetails(bugId);
-      setBugModalOpen(true);
-    } catch (error: any) {
-      setSelectedBugId("");
-      setBugModalOpen(false);
-      showBugActionNotice(error?.message || "Failed to open bug details", "error");
-    }
   };
 
   const selectBugForInlineActions = async (bugId: string) => {
@@ -2620,6 +2627,9 @@ function App() {
     setCurrentRole(res?.user?.role || "");
     setCurrentUserId(res?.user?.id || "");
     setDashboardDataLoaded(false);
+    setAccessibleProjects([]);
+    setActiveProjectIdState("");
+    setStoredActiveProjectId("");
     setShowTestCaseList(false);
     setExpandedTestCaseId("");
     setTestCasesVisible(false);
@@ -3207,6 +3217,7 @@ function App() {
               {showDeveloperWorkspacePanel && (
                 <DeveloperWorkspacePanel
                   mode="workspace"
+                  dataLoading={!dashboardDataLoaded || isRefreshing}
                   assignedBugCount={developerAssignedBugCount}
                   inProgressCount={developerBugStatusCounts.IN_PROGRESS}
                   needsVerificationCount={developerBugStatusCounts.FIXED}
@@ -4691,7 +4702,7 @@ function App() {
                   onQuickBugCreated={async (issue) => {
                     setActiveMenuKey("bug_management");
                     setActiveFeature("bug_management");
-                    setBugViewMode("mine");
+                    setBugViewMode("all");
                     setSelectedBugId(issue.id);
                     await loadTestCaseData();
                     await loadBugDetails(issue.id);
@@ -4964,7 +4975,7 @@ function App() {
                 )}
                 <div className="testCaseDetails" style={{ marginBottom: "10px" }}>
                   </div>
-                {!(isTester && showBugCreateForm) ? (
+                {isTester && !showBugCreateForm ? (
                 <div className="tableWrap adminUsersTableWrap" style={{ marginBottom: "12px" }}>
                   <table className="table adminUsersTable">
                     <thead>
@@ -5018,35 +5029,33 @@ function App() {
 
                 {!isTester && (
                   <>
-                <div className="note" style={{ marginBottom: "8px" }}>
-                  Created bug reports are shown here. Quick bugs from Execute Tests appear in this list after creation.
-                </div>
-                <div className="inlineGrid">
-                  <input
-                    className="input"
-                    placeholder="Search by bug id, title, status, reporter, assignee, or linked test case"
-                    value={bugSearch}
-                    onChange={(e) => setBugSearch(e.target.value)}
-                  />
-                  {isDeveloper ? (
-                    <div className="note" style={{ display: "flex", alignItems: "center", marginBottom: "10px" }}>
-                      Bug scope is controlled from sidebar menu.
+                {!isDeveloper ? (
+                  <>
+                    <div className="note" style={{ marginBottom: "8px" }}>
+                      Created bug reports are shown here. Quick bugs from Execute Tests appear in this list after creation.
                     </div>
-                  ) : (
-                    <select
-                      className="input"
-                      value={bugViewMode}
-                      onChange={(e) => setBugViewMode(e.target.value as "all" | "mine" | "assigned")}
-                    >
-                      <option value="all">All Visible Bugs</option>
-                      <option value="mine">My Created Bugs</option>
-                      <option value="assigned">Assigned To Me</option>
-                    </select>
-                  )}
-                </div>
-                <div className="note" style={{ marginBottom: "8px" }}>
-                  Showing {bugRowsForDisplay.length} of {bugs.length} bug reports
-                </div>
+                    <div className="inlineGrid">
+                      <input
+                        className="input"
+                        placeholder="Search by bug id, title, status, reporter, assignee, or linked test case"
+                        value={bugSearch}
+                        onChange={(e) => setBugSearch(e.target.value)}
+                      />
+                      <select
+                        className="input"
+                        value={bugViewMode}
+                        onChange={(e) => setBugViewMode(e.target.value as "all" | "mine" | "assigned")}
+                      >
+                        <option value="all">All Visible Bugs</option>
+                        <option value="mine">My Created Bugs</option>
+                        <option value="assigned">Assigned To Me</option>
+                      </select>
+                    </div>
+                    <div className="note" style={{ marginBottom: "8px" }}>
+                      Showing {bugRowsForDisplay.length} of {bugs.length} bug reports
+                    </div>
+                  </>
+                ) : null}
 
                 <div className="inlineGrid">
                   <select className="input" value={bugFilterStatus} onChange={(e) => setBugFilterStatus(e.target.value)}>
@@ -5113,87 +5122,40 @@ function App() {
                         <th>Priority</th>
                         <th>Severity</th>
                         <th>Assignee</th>
-                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
                       {bugRowsForDisplay.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="note">No bug reports found.</td>
+                          <td colSpan={5} className="note">No bug reports found.</td>
                         </tr>
                       ) : (
-                        bugRowsForDisplay.map((item) => {
-                          const assignedDeveloperId = String(item.assignedTo || item.assignee?.id || "");
-                          const canQuickUpdate = isDeveloper && !!currentUserId && assignedDeveloperId === currentUserId;
-                          return (
-                            <tr key={item.id}>
-                              <td className="truncateCell">{(item.bugId || item.id)} | {item.title || "Untitled Bug"}</td>
-                              <td>{item.workflowStatus || "OPEN"}</td>
-                              <td>{item.priority || "N/A"}</td>
-                              <td>{item.severity || "N/A"}</td>
-                              <td>{item.assignee?.name || item.assignee?.email || "Unassigned"}</td>
-                              <td>
-                                <div className="bugTableActions">
-                                  {canQuickUpdate ? (
-                                    <>
-                                      <select
-                                        className="input bugQuickSelect"
-                                        value={quickStatusByBugId[item.id] || item.workflowStatus || "OPEN"}
-                                        onChange={(e) =>
-                                          setQuickStatusByBugId((prev) => ({ ...prev, [item.id]: e.target.value }))
-                                        }
-                                      >
-                                        <option value="OPEN">OPEN</option>
-                                        <option value="IN_PROGRESS">IN_PROGRESS</option>
-                                        <option value="FIXED">FIXED</option>
-                                        <option value="VERIFIED">VERIFIED</option>
-                                        <option value="CLOSED">CLOSED</option>
-                                        <option value="REOPENED">REOPENED</option>
-                                        <option value="WONT_FIX">WONT_FIX</option>
-                                        <option value="DUPLICATE">DUPLICATE</option>
-                                      </select>
-                                      <button
-                                        className="button small"
-                                        onClick={async () => {
-                                          try {
-                                            const status = quickStatusByBugId[item.id] || item.workflowStatus || "OPEN";
-                                            const current = String(item.workflowStatus || "OPEN").toUpperCase();
-                                            if (String(status).toUpperCase() === current) {
-                                              showBugActionNotice(`Bug is already in ${current} status`, "error");
-                                              return;
-                                            }
-                                            await quickUpdateDeveloperBugStatusApi(item.id, status);
-                                            setQuickStatusByBugId((prev) => {
-                                              const next = { ...prev };
-                                              delete next[item.id];
-                                              return next;
-                                            });
-                                            showBugActionNotice(`Bug status changed to ${String(status).toUpperCase()}`);
-                                            await loadTestCaseData();
-                                          } catch (error: any) {
-                                            showBugActionNotice(error?.message || "Quick status update failed", "error");
-                                          }
-                                        }}
-                                      >
-                                        Quick Update
-                                      </button>
-                                    </>
-                                  ) : isDeveloper ? (
-                                    <span className="note bugReadonlyNote">Read-only</span>
-                                  ) : null}
-                                  <button
-                                    className="button small"
-                                    onClick={async () => {
-                                      await toggleBugDetails(item.id);
-                                    }}
-                                  >
-                                    {selectedBugId === item.id ? "Close" : "Open"}
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })
+                        bugRowsForDisplay.map((item) => (
+                          <tr
+                            key={item.id}
+                            className="adminUsersRow"
+                            tabIndex={0}
+                            role="button"
+                            aria-label={`Open bug ${item.title || item.bugId || item.id}`}
+                            onClick={async () => {
+                              await selectBugForInlineActions(item.id);
+                              setBugModalOpen(true);
+                            }}
+                            onKeyDown={async (event) => {
+                              if (event.key === "Enter" || event.key === " ") {
+                                event.preventDefault();
+                                await selectBugForInlineActions(item.id);
+                                setBugModalOpen(true);
+                              }
+                            }}
+                          >
+                            <td className="truncateCell">{(item.bugId || item.id)} | {item.title || "Untitled Bug"}</td>
+                            <td>{item.workflowStatus || "OPEN"}</td>
+                            <td>{getBugPriority(item) || "N/A"}</td>
+                            <td>{item.severity || "N/A"}</td>
+                            <td>{item.assignee?.name || item.assignee?.email || "Unassigned"}</td>
+                          </tr>
+                        ))
                       )}
                     </tbody>
                   </table>
@@ -5259,7 +5221,7 @@ function App() {
                         <div className="bugDetailsMetaGrid">
                           <div><strong>Reporter:</strong> {selectedBug.reporter?.name || selectedBug.reporter?.email || "N/A"}</div>
                           <div><strong>Assignee:</strong> {selectedBug.assignee?.name || selectedBug.assignee?.email || "Unassigned"}</div>
-                          <div><strong>Priority:</strong> {selectedBug.priority || "N/A"}</div>
+                          <div><strong>Priority:</strong> {getBugPriority(selectedBug) || "N/A"}</div>
                           <div><strong>Severity:</strong> {selectedBug.severity || "N/A"}</div>
                           <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
                           <div><strong>Execution:</strong> {selectedBug.executionId || "N/A"}</div>
@@ -5273,15 +5235,15 @@ function App() {
                         <h5 className="bugDetailsHeading">Behavior</h5>
                         <div className="bugDetailsField">
                           <strong>Steps to Reproduce</strong>
-                          <p>{selectedBug.bugMeta?.stepsToReproduce || "N/A"}</p>
+                          <p>{getBugField(selectedBug, "stepsToReproduce") || "N/A"}</p>
                         </div>
                         <div className="bugDetailsField">
                           <strong>Expected Behavior</strong>
-                          <p>{selectedBug.bugMeta?.expectedBehavior || "N/A"}</p>
+                          <p>{getBugField(selectedBug, "expectedBehavior") || "N/A"}</p>
                         </div>
                         <div className="bugDetailsField">
                           <strong>Actual Behavior</strong>
-                          <p>{selectedBug.bugMeta?.actualBehavior || "N/A"}</p>
+                          <p>{getBugField(selectedBug, "actualBehavior") || "N/A"}</p>
                         </div>
                       </section>
                     </div>
