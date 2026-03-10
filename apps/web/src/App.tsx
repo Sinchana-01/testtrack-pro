@@ -196,6 +196,7 @@ function App() {
   const [importPreviewErrors, setImportPreviewErrors] = useState<string[]>([]);
   const [previewReady, setPreviewReady] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [dashboardDataLoaded, setDashboardDataLoaded] = useState(false);
   const [editingId, setEditingId] = useState("");
   const [editTitle, setEditTitle] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -1020,6 +1021,7 @@ function App() {
       if (selectedBugId && !bugList.some((item) => item.id === selectedBugId)) {
         setSelectedBugId("");
       }
+      setDashboardDataLoaded(true);
     } finally {
       setIsRefreshing(false);
     }
@@ -2212,6 +2214,7 @@ function App() {
 
   useEffect(() => {
     if (screen !== "dashboard") {
+      setDashboardDataLoaded(false);
       setActiveFeature("none");
       setActiveMenuKey("dashboard_home");
       setShowTestCaseList(false);
@@ -2616,6 +2619,7 @@ function App() {
     setEmail(res?.user?.email || "");
     setCurrentRole(res?.user?.role || "");
     setCurrentUserId(res?.user?.id || "");
+    setDashboardDataLoaded(false);
     setShowTestCaseList(false);
     setExpandedTestCaseId("");
     setTestCasesVisible(false);
@@ -2773,6 +2777,7 @@ function App() {
     clearSessionTokens();
     setCurrentRole("");
     setCurrentUserId("");
+    setDashboardDataLoaded(false);
     setAccessibleProjects([]);
     setActiveProjectIdState("");
     setStoredActiveProjectId("");
@@ -3192,6 +3197,7 @@ function App() {
                   adminProjects={adminProjects}
                   adminAuditLogs={adminAuditLogs}
                   currentUserId={currentUserId}
+                  dataLoading={!dashboardDataLoaded || isRefreshing}
                   onNavigate={handleDashboardNavSelect}
                 />
 

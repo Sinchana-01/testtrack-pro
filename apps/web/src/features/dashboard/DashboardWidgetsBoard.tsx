@@ -22,6 +22,7 @@ type Props = {
   adminProjects: any[];
   adminAuditLogs: any[];
   currentUserId: string;
+  dataLoading?: boolean;
   onNavigate: (key: string) => void;
 };
 
@@ -87,6 +88,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
   adminProjects,
   adminAuditLogs,
   currentUserId,
+  dataLoading = false,
 }) => {
   const normalizedRole: RoleName = roleName === "DEVELOPER" || roleName === "ADMIN" ? roleName : "TESTER";
   const [layout, setLayout] = useState<WidgetLayoutItem[]>(normalizeLayout(normalizedRole));
@@ -300,7 +302,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
         </button>
       </div>
 
-      {layoutQuery.isLoading ? (
+      {layoutQuery.isLoading || dataLoading ? (
         <p className="note">Loading dashboard...</p>
       ) : (
         <div className="dashboardCardsGrid">
