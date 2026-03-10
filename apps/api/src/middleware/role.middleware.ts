@@ -76,6 +76,12 @@ const resolveRequiredPermission = (req: AuthRequest): string | null => {
   }
   if (path.startsWith("/bugs") || path.startsWith("/issues") || path.startsWith("/notifications/bugs")) {
     if (path.startsWith("/developer/bugs")) return "My Assigned Bugs";
+    if (req.user?.role === "TESTER") return "Bug Management";
+    if (req.user?.role === "DEVELOPER") {
+      const scope = typeof req.query?.scope === "string" ? req.query.scope.trim().toLowerCase() : "";
+      if (method === "GET" && scope === "all") return "All Bugs";
+      return "My Assigned Bugs";
+    }
     if (method === "GET") return "All Bugs";
     return "My Assigned Bugs";
   }
