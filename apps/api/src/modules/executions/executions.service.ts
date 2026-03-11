@@ -662,7 +662,13 @@ export const executionsService = {
         fail(403, "You can re-execute only your own execution");
       }
 
-      const base = toExecutionStepItems(original.testCase.steps);
+      const previousSteps = parseStoredStepResults(original.stepResults);
+      const base = (previousSteps.length > 0 ? previousSteps : toExecutionStepItems(original.testCase.steps)).map(
+        (step) => ({ ...step })
+      );
+      const executedCount = base.filter((step) => step.status !== "NOT_EXECUTED").length;
+      const progressPercent = base.length === 0 ? 0 : Math.round((executedCount / base.length) * 100);
+      const previousNotes = parseExecutionNotes(original.notes).userNotes;
       const startedAt = new Date().toISOString();
       const restarted = await tx.testExecution.create({
         data: {
@@ -672,9 +678,9 @@ export const executionsService = {
           testRunId: original.testRunId,
           result: ExecutionStatus.SKIPPED,
           stepResults: base as never,
-          progressPercent: 0,
+          progressPercent,
           isDraft: true,
-          notes: mergeExecutionNotes(null, asString(input.notes) || "Re-execution initiated", {
+          notes: mergeExecutionNotes(null, asString(input.notes) || previousNotes || "Re-execution initiated", {
             timerStartAt: startedAt,
             reexecutionOfId: original.id,
             timerState: "RUNNING",

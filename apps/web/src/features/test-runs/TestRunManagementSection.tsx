@@ -8,9 +8,10 @@ type Props = {
   testCases: any[];
   testRuns: any[];
   onRefreshData: () => Promise<void>;
+  onOpenRunExecution: (run: any) => Promise<void>;
 };
 
-const TestRunManagementSection = ({ selectedIds, testCases, testRuns, onRefreshData }: Props) => {
+const TestRunManagementSection = ({ selectedIds, testCases, testRuns, onRefreshData, onOpenRunExecution }: Props) => {
   const [runName, setRunName] = useState("");
   const [runDescription, setRunDescription] = useState("");
   const [runStartDate, setRunStartDate] = useState("");
@@ -367,6 +368,20 @@ const TestRunManagementSection = ({ selectedIds, testCases, testRuns, onRefreshD
           <div>
             <strong>Progress:</strong> {runDetails.progress?.completed || 0}/
             {runDetails.progress?.total || 0} ({runDetails.progress?.percent || 0}%)
+          </div>
+          <div className="toolbarActions" style={{ marginTop: 10 }}>
+            <button
+              className="button small"
+              onClick={async () => {
+                try {
+                  await onOpenRunExecution(runDetails);
+                } catch (error: any) {
+                  alert(error?.message || "Open run execution failed");
+                }
+              }}
+            >
+              Execute This Run
+            </button>
           </div>
         </div>
       )}

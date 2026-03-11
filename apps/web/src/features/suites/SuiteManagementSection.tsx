@@ -800,8 +800,14 @@ const SuiteManagementSection: React.FC<Props> = ({
         />
       )}
       {addDrawerOpen && suiteDetails && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 40 }}>
-          <div style={{ position: "absolute", top: 0, right: 0, width: "min(520px, 100%)", height: "100%", background: "#fff", padding: 16, boxShadow: "-8px 0 24px rgba(0,0,0,0.18)", overflow: "auto" }}>
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 40 }}
+          onClick={() => setAddDrawerOpen(false)}
+        >
+          <div
+            style={{ position: "absolute", top: 0, right: 0, width: "min(520px, 100%)", height: "100%", background: "#fff", padding: 16, boxShadow: "-8px 0 24px rgba(0,0,0,0.18)", overflow: "auto" }}
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <strong>Add Test Cases</strong>
               <button className="button small" aria-label="Close add test cases drawer" onClick={() => setAddDrawerOpen(false)}>X</button>
@@ -815,7 +821,14 @@ const SuiteManagementSection: React.FC<Props> = ({
                 </label>
               ))}
             </div>
-            <button className="button" onClick={saveDrawerCases} disabled={drawerSelection.length === 0}>Add Selected</button>
+            <div className="toolbarActions" style={{ marginTop: 12 }}>
+              <button className="button" onClick={saveDrawerCases} disabled={drawerSelection.length === 0}>
+                Add Selected
+              </button>
+              <button className="button small danger" onClick={() => setAddDrawerOpen(false)}>
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -305,6 +305,7 @@ function App() {
   const [developerDirectory, setDeveloperDirectory] = useState<
     Array<{ id: string; name: string; email: string }>
   >([]);
+  const [bugAssignDeveloperId, setBugAssignDeveloperId] = useState("");
   const [bugTransitionToStatus, setBugTransitionToStatus] = useState("");
   const [bugTransitionReason, setBugTransitionReason] = useState("");
   const [bugTransitionDuplicateOf, setBugTransitionDuplicateOf] = useState("");
@@ -1069,6 +1070,8 @@ function App() {
       isDeveloper && (activeMenuKey === "all_bugs" || bugViewMode === "all") ? { scope: "all" } : undefined;
     const [bug, commentsPayload] = await Promise.all([getBugApi(bugId, bugScope), listBugCommentsApi(bugId)]);
     setSelectedBug(bug || null);
+    const nextAssignedTo = String(bug?.assignedTo || bug?.assignee?.id || "").trim();
+    setBugAssignDeveloperId(nextAssignedTo);
     setBugTransitionToStatus(String(bug?.workflowStatus || "OPEN").toUpperCase());
     setBugTransitionReason("");
     setBugTransitionDuplicateOf("");
@@ -1098,7 +1101,10 @@ function App() {
     if (!selectedBug?.id) return;
     const current = String(selectedBug.workflowStatus || "OPEN").toUpperCase();
     const target = String(bugTransitionToStatus || "OPEN").toUpperCase();
-    if (target === current) {
+    const currentAssignedTo = String(selectedBug.assignedTo || selectedBug.assignee?.id || "").trim();
+    const nextAssignedTo = String(bugAssignDeveloperId || "").trim();
+    const assigneeChanged = nextAssignedTo !== currentAssignedTo;
+    if (target === current && !assigneeChanged) {
       showBugActionNotice(`Bug is already in ${current} status`, "error");
       return;
     }
@@ -1109,12 +1115,35 @@ function App() {
         toStatus: bugTransitionToStatus,
         reason: bugTransitionReason || undefined,
         duplicateOfBugCode: bugTransitionDuplicateOf || undefined,
+        assignedTo: nextAssignedTo || null,
       });
     }
+    setBugAssignDeveloperId("");
     setBugTransitionToStatus("");
     setBugTransitionReason("");
     setBugTransitionDuplicateOf("");
-    showBugActionNotice(`Bug status changed to ${target}`);
+    showBugActionNotice(
+      assigneeChanged && target === current ? "Bug assignee updated" : `Bug updated${assigneeChanged ? " and assigned" : ""}`
+    );
+    await loadTestCaseData();
+    await loadBugDetails(selectedBug.id);
+  };
+
+  const saveBugAssignee = async () => {
+    if (!selectedBug?.id) return;
+    const currentStatus = String(selectedBug.workflowStatus || "OPEN").toUpperCase();
+    const currentAssignedTo = String(selectedBug.assignedTo || selectedBug.assignee?.id || "").trim();
+    const nextAssignedTo = String(bugAssignDeveloperId || "").trim();
+    if (nextAssignedTo === currentAssignedTo) {
+      showBugActionNotice("Assignee is unchanged", "error");
+      return;
+    }
+    await updateBugWorkflowApi(selectedBug.id, {
+      toStatus: currentStatus,
+      assignedTo: nextAssignedTo || null,
+    });
+    setBugAssignDeveloperId("");
+    showBugActionNotice(nextAssignedTo ? "Bug assignee updated" : "Bug unassigned");
     await loadTestCaseData();
     await loadBugDetails(selectedBug.id);
   };
@@ -4618,6 +4647,28 @@ function App() {
                     testRuns={testRuns}
                     testCases={testCases}
                     onRefreshData={loadTestCaseData}
+                    onOpenRunExecution={async (run) => {
+                      const runId = String(run?.id || "").trim();
+                      if (!runId) {
+                        throw new Error("Run id is missing");
+                      }
+                      const runCases = Array.isArray(run?.testCases) ? run.testCases : [];
+                      const pendingCase =
+                        runCases.find((item: any) => String(item?.status || "").toUpperCase() === "NOT_RUN") ||
+                        runCases[0] ||
+                        null;
+                      const testCaseId = String(
+                        pendingCase?.testCaseId || pendingCase?.testCase?.id || ""
+                      ).trim();
+                      setActiveMenuKey("execute_tests");
+                      setActiveFeature("execute_tests");
+                      setExecutionRunId(runId);
+                      if (!testCaseId) {
+                        return;
+                      }
+                      setExecutionCaseId(testCaseId);
+                      await openExecutionSession(testCaseId, runId);
+                    }}
                   />
                 </div>
               )}
@@ -4718,6 +4769,17 @@ function App() {
                   bugs={bugs}
                   assignedExecutionReports={reportAssignedExecutionReports}
                   linkedCommitBugs={reportLinkedCommitBugs}
+                  onRefreshData={loadTestCaseData}
+                  onOpenExecuteTests={async (execution) => {
+                    const testCaseId = String(execution?.testCaseId || "").trim();
+                    const testRunId = String(execution?.testRunId || "").trim();
+                    setActiveMenuKey("execute_tests");
+                    setActiveFeature("execute_tests");
+                    if (!testCaseId) {
+                      return;
+                    }
+                    await openExecutionSession(testCaseId, testRunId || undefined);
+                  }}
                 />
               )}
 
@@ -5319,6 +5381,9 @@ function App() {
                   isDeveloper={isDeveloper}
                   canTransitionBugs={canTransitionBugs}
                   canResolveBugs={canResolveBugs}
+                  developerDirectory={developerDirectory}
+                  bugAssignDeveloperId={bugAssignDeveloperId}
+                  setBugAssignDeveloperId={setBugAssignDeveloperId}
                   bugTransitionToStatus={bugTransitionToStatus}
                   setBugTransitionToStatus={setBugTransitionToStatus}
                   bugTransitionReason={bugTransitionReason}
@@ -5348,6 +5413,7 @@ function App() {
                   renderCommentThreads={renderCommentThreads}
                   isDeletedComment={isDeletedComment}
                   renderFormattedComment={renderFormattedComment}
+                  onSaveAssignee={saveBugAssignee}
                 />
               </section>
               )}
