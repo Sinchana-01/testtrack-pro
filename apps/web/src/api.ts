@@ -606,8 +606,14 @@ export async function createBugFromExecutionApi(
     description?: string;
     severity?: string;
     assignedTo?: string;
+    stepsToReproduce?: string;
     expectedBehavior?: string;
     actualBehavior?: string;
+    failedStepNumber?: number;
+    failedStepAction?: string;
+    failedStepExpectedResult?: string;
+    failedStepActualResult?: string;
+    failedStepNotes?: string;
   }
 ) {
   return authJson(`/issues/from-executions/${executionId}`, {
@@ -623,6 +629,14 @@ export async function reexecuteExecutionApi(executionId: string, payload?: { not
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload || {}),
   });
+}
+
+export async function getExecutionHistoryApi(executionId: string) {
+  return authJson(`/executions/${executionId}/history`);
+}
+
+export async function compareExecutionApi(executionId: string, compareToExecutionId: string) {
+  return authJson(`/executions/${executionId}/compare/${compareToExecutionId}`);
 }
 
 export async function createBugApi(payload: Record<string, unknown>) {

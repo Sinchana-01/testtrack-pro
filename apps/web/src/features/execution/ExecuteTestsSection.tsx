@@ -12,6 +12,13 @@ import {
   stopExecutionTimerApi,
   uploadExecutionEvidenceApi,
 } from "../../api";
+import {
+  ExecutionEvidenceUiType,
+  getExecutionEvidenceLimitText,
+  inferExecutionEvidenceType,
+  mapEvidenceUiTypeToApiType,
+  validateExecutionEvidenceFile,
+} from "./executionEvidence";
 
 type Props = {
   executionCaseId: string;
@@ -149,7 +156,235 @@ const ExecuteTestsSection = ({
   const [showEvidenceModal, setShowEvidenceModal] = useState(false);
   const [showExecutionModal, setShowExecutionModal] = useState(false);
   const [postFinalizeResult, setPostFinalizeResult] = useState<"" | "PASSED" | "FAILED" | "BLOCKED" | "SKIPPED">("");
+  const [executionAutosaveState, setExecutionAutosaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [selectedEvidenceFile, setSelectedEvidenceFile] = useState<File | null>(null);
   const autoStartedExecutionRef = useRef<string>("");
+  const autosaveTimerRef = useRef<number | null>(null);
+  const autosaveInFlightRef = useRef(false);
+  const lastSavedSnapshotRef = useRef("");
+
+  const getExecutionSnapshot = (
+    stepNumberValue: string,
+    stepStatusValue: string,
+    actualResultValue: string,
+    stepNotesValue: string,
+    executionNotesValue: string
+  ): string =>
+    JSON.stringify({
+      stepNumber: String(stepNumberValue || ""),
+      status: String(stepStatusValue || ""),
+      actualResult: String(actualResultValue || ""),
+      notes: String(stepNotesValue || ""),
+      executionNotes: String(executionNotesValue || ""),
+    });
+
+  const syncSelectedStepFields = (stepNumberValue: string, stepRows: any[], executionNotesValue: string) => {
+    if (!stepNumberValue) {
+      setExecutionStepStatus("");
+      setExecutionActualResult("");
+      setExecutionStepNotes("");
+      lastSavedSnapshotRef.current = "";
+      return;
+    }
+    const stepNumber = Number(stepNumberValue);
+    const selectedStep = Array.isArray(stepRows)
+      ? stepRows.find((step: any) => Number(step?.stepNumber || 0) === stepNumber) || null
+      : null;
+    const normalizedStatus =
+      String(selectedStep?.status || "").toUpperCase() !== "NOT_EXECUTED"
+        ? String(selectedStep?.status || "").toUpperCase()
+        : "";
+    const actualResultValue = String(selectedStep?.actualResult || "");
+    const stepNotesValue = String(selectedStep?.notes || "");
+    setExecutionStepStatus(normalizedStatus);
+    setExecutionActualResult(actualResultValue);
+    setExecutionStepNotes(stepNotesValue);
+    lastSavedSnapshotRef.current = getExecutionSnapshot(
+      stepNumberValue,
+      normalizedStatus,
+      actualResultValue,
+      stepNotesValue,
+      executionNotesValue
+    );
+  };
+
+  const getSelectedStep = (): any | null => {
+    const stepNumber = Number(executionSelectedStepNumber);
+    if (!Number.isFinite(stepNumber)) return null;
+    return executionSteps.find((step: any) => Number(step?.stepNumber || 0) === stepNumber) || null;
+  };
+
+  const buildQuickBugFromFailedStep = (executionReportId?: string) => {
+    const selectedStep = getSelectedStep();
+    const stepNumber = Number(selectedStep?.stepNumber || executionSelectedStepNumber || 0);
+    const testCaseCode = String(selectedExecutionCase?.testCaseCode || selectedExecutionCase?.id || executionCaseId || "TC");
+    const testCaseTitle = String(selectedExecutionCase?.title || "Failed test case");
+    const stepAction = String(selectedStep?.action || "Execution step");
+    const expectedResult = String(selectedStep?.expectedResult || executionStepNotes || "Expected result not captured");
+    const actualResult = String(executionActualResult || selectedStep?.actualResult || `Failure observed during step ${stepNumber || "selected"}`);
+    const bugTitle = `Bug: ${testCaseCode}${stepNumber > 0 ? ` - Step ${stepNumber}` : ""}`;
+    const bugDescription = [
+      `${testCaseTitle} failed during execution${executionReportId ? ` ${executionReportId}` : ""}.`,
+      stepNumber > 0 ? `Failed Step ${stepNumber}: ${stepAction}` : "",
+      executionStepNotes ? `Failure Notes: ${executionStepNotes}` : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return {
+      title: bugTitle,
+      description: bugDescription,
+      severity: "HIGH",
+      expectedBehavior: expectedResult,
+      actualBehavior: actualResult,
+      failedStepNumber: stepNumber,
+      failedStepAction: stepAction,
+      failedStepExpectedResult: expectedResult,
+      failedStepActualResult: actualResult,
+      failedStepNotes: executionStepNotes || String(selectedStep?.notes || ""),
+    };
+  };
+
+  const populateQuickBugFromFailedStep = (executionReportId?: string) => {
+    const draft = buildQuickBugFromFailedStep(executionReportId);
+    setQuickBugTitle(draft.title);
+    setQuickBugDescription(draft.description);
+    setQuickBugSeverity(quickBugSeverity || draft.severity);
+    setQuickBugExpectedBehavior(draft.expectedBehavior);
+    setQuickBugActualBehavior(draft.actualBehavior);
+  };
+
+  const hasRequiredStepDetails = (): boolean => {
+    if (!executionStepStatus) return false;
+    return String(executionActualResult || "").trim().length > 0;
+  };
+
+  const persistExecutionStep = async (options?: { moveToNext?: boolean; source?: "manual" | "autosave" | "finalize" }) => {
+    const stepNumber = Number(executionSelectedStepNumber);
+    if (!executionId || !Number.isFinite(stepNumber) || !executionStepStatus || !hasRequiredStepDetails()) {
+      return false;
+    }
+    const snapshot = getExecutionSnapshot(
+      executionSelectedStepNumber,
+      executionStepStatus,
+      executionActualResult,
+      executionStepNotes,
+      executionNotes
+    );
+    if (options?.source !== "manual" && snapshot === lastSavedSnapshotRef.current) {
+      return true;
+    }
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+      autosaveTimerRef.current = null;
+    }
+    autosaveInFlightRef.current = true;
+    setExecutionAutosaveState("saving");
+    try {
+      const saved = await saveExecutionStepApi(executionId, stepNumber, {
+        status: executionStepStatus,
+        actualResult: executionActualResult,
+        notes: executionStepNotes,
+        executionNotes,
+      });
+      const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
+      setExecutionSteps(nextSteps);
+      setExecutionProgress(saved?.progressPercent || 0);
+      lastSavedSnapshotRef.current = snapshot;
+      setExecutionAutosaveState("saved");
+
+      if (options?.moveToNext) {
+        const sortedSteps = [...nextSteps]
+          .map((step: any) => ({ ...step, stepNumber: Number(step?.stepNumber || 0) }))
+          .filter((step: any) => step.stepNumber > 0)
+          .sort((a: any, b: any) => a.stepNumber - b.stepNumber);
+        const currentIndex = sortedSteps.findIndex((step: any) => step.stepNumber === stepNumber);
+        const nextStep = currentIndex >= 0 ? sortedSteps[currentIndex + 1] : null;
+        const nextStepNumber = nextStep ? String(nextStep.stepNumber) : "";
+        setExecutionSelectedStepNumber(nextStepNumber);
+        if (!nextStepNumber) {
+          setExecutionStepStatus("");
+          setExecutionActualResult("");
+          setExecutionStepNotes("");
+          lastSavedSnapshotRef.current = "";
+        }
+      }
+      return true;
+    } catch (error: any) {
+      setExecutionAutosaveState("error");
+      if (options?.source !== "autosave") {
+        alert(error?.message || "Execution save failed");
+      }
+      return false;
+    } finally {
+      autosaveInFlightRef.current = false;
+    }
+  };
+
+  const createBugFromCurrentFailedStep = async () => {
+    if (!executionId) {
+      alert("Open an execution first");
+      return;
+    }
+    if (!executionSelectedStepNumber) {
+      alert("Select the failed step first");
+      return;
+    }
+    if (executionStepStatus !== "FAILED") {
+      alert("Set the selected step status to FAILED before creating a bug");
+      return;
+    }
+    const selectedStep = getSelectedStep();
+    const flushed = await persistExecutionStep({ source: "manual" });
+    if (!flushed) return;
+    const final = await finalizeExecutionApi(executionId, { result: "FAILED", notes: executionNotes });
+    await loadTestCaseData();
+    setSelectedExecutionReportId(final.id);
+    setSelectedExecutionReportIdState(final.id);
+    const draft = buildQuickBugFromFailedStep(final.id);
+    setQuickBugTitle(draft.title);
+    setQuickBugDescription(draft.description);
+    setQuickBugSeverity(draft.severity);
+    setQuickBugExpectedBehavior(draft.expectedBehavior);
+    setQuickBugActualBehavior(draft.actualBehavior);
+    const issue = await createBugFromExecutionApi(final.id, {
+      title: draft.title,
+      description: draft.description,
+      severity: draft.severity,
+      stepsToReproduce:
+        selectedStep && Number(selectedStep?.stepNumber || 0) > 0
+          ? `Open ${selectedExecutionCase?.title || executionCaseId}, execute step ${selectedStep.stepNumber} (${selectedStep.action}), and observe the failure.`
+          : undefined,
+      expectedBehavior: draft.expectedBehavior,
+      actualBehavior: draft.actualBehavior,
+      assignedTo: quickBugAssignedTo || undefined,
+      failedStepNumber: draft.failedStepNumber,
+      failedStepAction: draft.failedStepAction,
+      failedStepExpectedResult: draft.failedStepExpectedResult,
+      failedStepActualResult: draft.failedStepActualResult,
+      failedStepNotes: draft.failedStepNotes,
+    });
+    resetQuickBugFields();
+    setPostFinalizeResult("");
+    setShowExecutionModal(false);
+    setExecutionCaseId("");
+    setExecutionRunId("");
+    setExecutionId("");
+    setExecutionSteps([]);
+    setExecutionProgress(0);
+    setExecutionStartedAt("");
+    setExecutionCompletedAt("");
+    setExecutionDurationSeconds(null);
+    setExecutionEvidence([]);
+    setExecutionNotes("");
+    setExecutionSelectedStepNumber("");
+    setExecutionStepStatus("");
+    setExecutionActualResult("");
+    setExecutionStepNotes("");
+    if (onQuickBugCreated) {
+      await onQuickBugCreated(issue);
+    }
+    alert(`Bug created: ${issue.id}`);
+  };
 
   useEffect(() => {
     if (executionCompletedAt) {
@@ -168,6 +403,58 @@ const ExecuteTestsSection = ({
       setShowExecutionModal(true);
     }
   }, [executionId, executionSteps.length]);
+
+  useEffect(() => {
+    if (!showExecutionModal) {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      setExecutionAutosaveState("idle");
+      return;
+    }
+    syncSelectedStepFields(executionSelectedStepNumber, executionSteps, executionNotes);
+  }, [executionSelectedStepNumber, executionSteps, showExecutionModal]);
+
+  useEffect(() => {
+    if (!showExecutionModal || !executionId || !executionSelectedStepNumber) return;
+    if (!executionStepStatus || autosaveInFlightRef.current) return;
+    if (!hasRequiredStepDetails()) {
+      setExecutionAutosaveState("idle");
+      return;
+    }
+    const snapshot = getExecutionSnapshot(
+      executionSelectedStepNumber,
+      executionStepStatus,
+      executionActualResult,
+      executionStepNotes,
+      executionNotes
+    );
+    if (snapshot === lastSavedSnapshotRef.current) return;
+    if (autosaveTimerRef.current) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+    setExecutionAutosaveState("saving");
+    autosaveTimerRef.current = window.setTimeout(() => {
+      persistExecutionStep({ source: "autosave", moveToNext: true }).catch(() => {
+        // handled in helper
+      });
+    }, 700);
+    return () => {
+      if (autosaveTimerRef.current) {
+        window.clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+    };
+  }, [
+    executionId,
+    executionSelectedStepNumber,
+    executionStepStatus,
+    executionActualResult,
+    executionStepNotes,
+    executionNotes,
+    showExecutionModal,
+  ]);
 
   useEffect(() => {
     if (!executionId) {
@@ -219,16 +506,6 @@ const ExecuteTestsSection = ({
     isApprovedCase &&
     (!executionRunId || executionSelectableCases.some((tc) => tc.id === executionCaseId));
 
-  const inferEvidenceType = (mimeType: string): string => {
-    const type = String(mimeType || "").toLowerCase();
-    if (type.startsWith("image/")) return "IMAGE";
-    if (type.startsWith("video/")) return "VIDEO";
-    if (type.includes("pdf") || type.includes("text") || type.includes("msword") || type.includes("officedocument")) {
-      return "DOCUMENT";
-    }
-    return "LOG";
-  };
-
   const readFileAsDataUrl = (file: File): Promise<string> =>
     new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -236,6 +513,8 @@ const ExecuteTestsSection = ({
       reader.onerror = () => reject(new Error("Failed to read file"));
       reader.readAsDataURL(file);
     });
+
+  const normalizedEvidenceType = ((evidenceType || "DOCUMENT") as ExecutionEvidenceUiType);
 
   return (
     <section className="panel executionCompactPanel">
@@ -308,7 +587,16 @@ const ExecuteTestsSection = ({
               <h4 style={{ margin: 0 }}>Execution Workspace</h4>
               <button className="button small" aria-label="Close execution modal" onClick={() => setShowExecutionModal(false)}>X</button>
             </div>
-          <div className="note">Progress: {executionProgress}% (auto-saved)</div>
+          <div className="note">
+            Progress: {executionProgress}% | Autosave:{" "}
+            {executionAutosaveState === "saving"
+              ? "Saving..."
+              : executionAutosaveState === "saved"
+              ? "Saved"
+              : executionAutosaveState === "error"
+              ? "Save failed"
+              : "Ready"}
+          </div>
           <div className="inlineGrid">
             <button
               className="button"
@@ -389,42 +677,44 @@ const ExecuteTestsSection = ({
           <button
             className="button"
             onClick={async () => {
-              try {
-                const stepNumber = Number(executionSelectedStepNumber);
-                if (!Number.isFinite(stepNumber)) {
-                  alert("Select a valid step");
-                  return;
-                }
-                const saved = await saveExecutionStepApi(executionId, stepNumber, {
-                  status: executionStepStatus,
-                  actualResult: executionActualResult,
-                  notes: executionStepNotes,
-                  executionNotes,
-                });
-                const nextSteps = Array.isArray(saved?.stepResults) ? saved.stepResults : executionSteps;
-                setExecutionSteps(nextSteps);
-                setExecutionProgress(saved?.progressPercent || 0);
-                const sortedSteps = [...nextSteps]
-                  .map((step: any) => ({ ...step, stepNumber: Number(step?.stepNumber || 0) }))
-                  .filter((step: any) => step.stepNumber > 0)
-                  .sort((a: any, b: any) => a.stepNumber - b.stepNumber);
-                const currentIndex = sortedSteps.findIndex((step: any) => step.stepNumber === stepNumber);
-                const nextStep = currentIndex >= 0 ? sortedSteps[currentIndex + 1] : null;
-                setExecutionSelectedStepNumber(nextStep ? String(nextStep.stepNumber) : "");
-                setExecutionStepStatus("");
-                setExecutionActualResult("");
-                setExecutionStepNotes("");
-              } catch (error: any) {
-                alert(error?.message || "Auto-save failed");
+              const saved = await persistExecutionStep({ moveToNext: true, source: "manual" });
+              if (!saved) {
+                alert("Select a valid step/status and enter actual result before saving");
               }
             }}
           >
-            Save Step (Auto-save)
+            Save Step And Next
           </button>
           <button
             className="button"
             onClick={async () => {
               try {
+                if (!String(executionActualResult || "").trim()) {
+                  alert("Enter actual result before creating a bug");
+                  return;
+                }
+                await createBugFromCurrentFailedStep();
+              } catch (error: any) {
+                alert(error?.message || "Fail and create bug failed");
+              }
+            }}
+          >
+            Fail And Create Bug
+          </button>
+          <button
+            className="button"
+            onClick={async () => {
+              try {
+                if (executionSelectedStepNumber && executionStepStatus) {
+                  if (!String(executionActualResult || "").trim()) {
+                    alert("Enter actual result before finalizing the current step");
+                    return;
+                  }
+                  const flushed = await persistExecutionStep({ source: "finalize" });
+                  if (!flushed) {
+                    return;
+                  }
+                }
                 if (!executionCompletedAt) {
                   try {
                     const timer = await stopExecutionTimerApi(executionId);
@@ -497,6 +787,7 @@ const ExecuteTestsSection = ({
                 const finalResult = String(final?.result || "").toUpperCase();
                 if (finalResult === "FAILED") {
                   setSelectedExecutionReportIdState(final.id);
+                  populateQuickBugFromFailedStep(final.id);
                   setShowQuickBugModal(true);
                   setPostFinalizeResult("FAILED");
                   alert("Execution failed. Please create a bug report now.");
@@ -697,6 +988,7 @@ const ExecuteTestsSection = ({
                 <option value="IMAGE">IMAGE</option>
                 <option value="VIDEO">VIDEO</option>
                 <option value="LOG">LOG</option>
+                <option value="HAR">HAR / NETWORK TRACE</option>
                 <option value="DOCUMENT">DOCUMENT</option>
               </select>
               <input
@@ -713,19 +1005,24 @@ const ExecuteTestsSection = ({
                 try {
                   const file = e.target.files?.[0];
                   if (!file) return;
+                  setSelectedEvidenceFile(file);
                   const dataUrl = await readFileAsDataUrl(file);
                   setEvidenceUrl(dataUrl);
                   if (!evidenceName.trim()) {
                     setEvidenceName(file.name);
                   }
                   if (!evidenceType) {
-                    setEvidenceType(inferEvidenceType(file.type));
+                    setEvidenceType(inferExecutionEvidenceType(file));
                   }
                 } catch (error: any) {
                   alert(error?.message || "Failed to read selected file");
                 }
               }}
             />
+            <div className="note" style={{ marginBottom: 8 }}>
+              Limits: Images {getExecutionEvidenceLimitText("IMAGE")}, Videos {getExecutionEvidenceLimitText("VIDEO")},
+              Logs {getExecutionEvidenceLimitText("LOG")}, HAR {getExecutionEvidenceLimitText("HAR")}
+            </div>
             <input
               className="input"
               placeholder="Evidence notes (optional)"
@@ -741,21 +1038,34 @@ const ExecuteTestsSection = ({
                       alert("Select an execution report");
                       return;
                     }
-                    if (!evidenceUrl.trim() || !evidenceName.trim()) {
+                    if (!selectedEvidenceFile || !evidenceUrl.trim() || !evidenceName.trim()) {
                       alert("Attach file and provide evidence name");
                       return;
                     }
+                    const validationMessage = validateExecutionEvidenceFile(selectedEvidenceFile, normalizedEvidenceType);
+                    if (validationMessage) {
+                      alert(validationMessage);
+                      return;
+                    }
                     const created = await uploadExecutionEvidenceApi(effectiveEvidenceExecutionId, {
-                      fileType: evidenceType,
+                      fileType: mapEvidenceUiTypeToApiType(normalizedEvidenceType),
                       fileUrl: evidenceUrl,
                       fileName: evidenceName,
                       notes: evidenceNotes,
                     });
-                    setExecutionEvidence((prev: any[]) => [created, ...prev]);
+                    setExecutionEvidence((prev: any[]) => [
+                      {
+                        ...created,
+                        fileType: normalizedEvidenceType,
+                        displayName: created?.displayName || evidenceName,
+                      },
+                      ...prev,
+                    ]);
                     setEvidenceType("");
                     setEvidenceUrl("");
                     setEvidenceName("");
                     setEvidenceNotes("");
+                    setSelectedEvidenceFile(null);
                     alert("Evidence added");
                   } catch (error: any) {
                     alert(error?.message || "Evidence upload failed");
@@ -773,7 +1083,19 @@ const ExecuteTestsSection = ({
                       return;
                     }
                     const rows = await listExecutionEvidenceApi(effectiveEvidenceExecutionId);
-                    setExecutionEvidence(Array.isArray(rows) ? rows : []);
+                    setExecutionEvidence(
+                      Array.isArray(rows)
+                        ? rows.map((item: any) => ({
+                            ...item,
+                            fileType:
+                              String(item?.displayName || item?.fileName || "")
+                                .toLowerCase()
+                                .endsWith(".har")
+                                ? "HAR"
+                                : item?.fileType,
+                          }))
+                        : []
+                    );
                   } catch (error: any) {
                     alert(error?.message || "Failed to refresh evidence");
                   }
@@ -786,15 +1108,15 @@ const ExecuteTestsSection = ({
               <div className="listCompact">
                 {executionEvidence.map((item) => (
                   <div className="row" key={item.id}>
-                    <span className="title">
-                      {item.fileUrl ? (
-                        <a href={item.fileUrl} target="_blank" rel="noreferrer">
-                          {item.fileName}
-                        </a>
-                      ) : (
-                        item.fileName
-                      )}
-                    </span>
+                      <span className="title">
+                        {item.fileUrl ? (
+                          <a href={item.fileUrl} target="_blank" rel="noreferrer">
+                            {item.displayName || item.fileName}
+                          </a>
+                        ) : (
+                          item.displayName || item.fileName
+                        )}
+                      </span>
                     <span className="meta">{item.fileType}</span>
                     <button
                       className="button small danger"

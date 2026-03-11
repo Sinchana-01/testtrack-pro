@@ -7,6 +7,9 @@ type Props = {
   isDeveloper: boolean;
   canTransitionBugs: boolean;
   canResolveBugs: boolean;
+  developerDirectory: Array<{ id: string; name: string; email: string }>;
+  bugAssignDeveloperId: string;
+  setBugAssignDeveloperId: (value: string) => void;
   bugTransitionToStatus: string;
   setBugTransitionToStatus: (value: string) => void;
   bugTransitionReason: string;
@@ -27,6 +30,7 @@ type Props = {
   bugCommentParentId: string;
   setBugCommentParentId: (value: string) => void;
   onAddComment: () => Promise<void>;
+  onSaveAssignee: () => Promise<void>;
   showMentionPopup: boolean;
   filteredMentionCandidates: Array<{ key: string; label: string }>;
   onApplyMention: (key: string) => void;
@@ -45,6 +49,9 @@ const BugDetailsModal: React.FC<Props> = ({
   isDeveloper,
   canTransitionBugs,
   canResolveBugs,
+  developerDirectory,
+  bugAssignDeveloperId,
+  setBugAssignDeveloperId,
   bugTransitionToStatus,
   setBugTransitionToStatus,
   bugTransitionReason,
@@ -65,6 +72,7 @@ const BugDetailsModal: React.FC<Props> = ({
   bugCommentParentId,
   setBugCommentParentId,
   onAddComment,
+  onSaveAssignee,
   showMentionPopup,
   filteredMentionCandidates,
   onApplyMention,
@@ -133,6 +141,29 @@ const BugDetailsModal: React.FC<Props> = ({
               <div><strong>Linked Test Case:</strong> {selectedBug.testCase?.testCaseCode || selectedBug.testCaseId || "N/A"}</div>
               <div><strong>Affected Version:</strong> {getBugField("affectedVersion") || "N/A"}</div>
             </div>
+            {!isDeveloper ? (
+              <div className="bugDetailsField">
+                <strong>Assign Developer</strong>
+                <div className="inlineGrid" style={{ alignItems: "center" }}>
+                  <select
+                    className="input"
+                    value={bugAssignDeveloperId}
+                    onChange={(e) => setBugAssignDeveloperId(e.target.value)}
+                  >
+                    <option value="">Keep unassigned / assign later</option>
+                    {developerDirectory.map((dev) => (
+                      <option key={dev.id} value={dev.id}>
+                        {dev.name ? `${dev.name} - ` : ""}
+                        {dev.email}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="button small" onClick={onSaveAssignee}>
+                    Save Assignee
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="bugDetailsField">
               <strong>Title</strong>
               <p>{selectedBug.title || "N/A"}</p>

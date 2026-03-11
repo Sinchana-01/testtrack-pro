@@ -27,6 +27,7 @@ import {
   projectGuards,
 } from "./testcase.project-scope";
 import { sendGenericEmail } from "../utils/email";
+import { validateExecutionEvidenceUpload } from "../modules/executions/execution-evidence";
 import {
   createNotification,
   createNotificationsBulk,
@@ -2672,6 +2673,10 @@ router.post(
     if (!fileType || !fileUrl || !fileName) {
       return res.status(400).json({ message: "fileType, fileUrl, and fileName are required" });
     }
+    const evidenceValidationError = validateExecutionEvidenceUpload({ fileType, fileUrl, fileName });
+    if (evidenceValidationError) {
+      return res.status(400).json({ message: evidenceValidationError });
+    }
 
     const created = await prisma.attachment.create({
       data: {
@@ -2743,6 +2748,14 @@ router.post(
       return res.status(403).json({ message: "Only approved test cases can be executed." });
     }
 
+    const previousSteps = parseStoredStepResults(original.stepResults);
+    const clonedSteps = (previousSteps.length > 0 ? previousSteps : toExecutionStepItems(original.testCase.steps)).map((step) => ({
+      ...step,
+    }));
+    const executedCount = clonedSteps.filter((item) => item.status !== "NOT_EXECUTED").length;
+    const progressPercent =
+      clonedSteps.length === 0 ? 0 : Math.round((executedCount / clonedSteps.length) * 100);
+    const previousNotes = parseExecutionNotes(original.notes).userNotes;
     const restarted = await prisma.testExecution.create({
       data: {
         testCaseId: original.testCaseId,
@@ -2750,12 +2763,12 @@ router.post(
         executedBy: req.user!.userId,
         testRunId: original.testRunId,
         result: ExecutionStatus.SKIPPED,
-        notes: mergeExecutionNotes(null, asString(req.body.notes) || "Re-execution initiated", {
+        notes: mergeExecutionNotes(null, asString(req.body.notes) || previousNotes || "Re-execution initiated", {
           timerStartAt: new Date().toISOString(),
           reexecutionOfId: original.id,
         }),
-        stepResults: toExecutionStepItems(original.testCase.steps) as never,
-        progressPercent: 0,
+        stepResults: clonedSteps as never,
+        progressPercent,
         isDraft: true,
       },
     });
@@ -2764,6 +2777,131 @@ router.post(
       originalExecutionId: original.id,
     });
     return res.status(201).json(restarted);
+  }
+);
+
+router.get(
+  "/executions/:executionId/history",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const seed = await prisma.testExecution.findUnique({
+      where: { id: req.params.executionId },
+      select: { id: true, testCaseId: true, executedBy: true },
+    });
+    if (!seed) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!canManageExecution(req, seed.executedBy)) {
+      return res.status(403).json({ message: "You can view history only for your own execution" });
+    }
+
+    const rows = await prisma.testExecution.findMany({
+      where: { testCaseId: seed.testCaseId },
+      include: {
+        executor: { select: { id: true, name: true, email: true } },
+      },
+      orderBy: { executedAt: "desc" },
+    });
+
+    return res.json(
+      rows.map((row) => {
+        const parsed = parseExecutionNotes(row.notes);
+        return {
+          id: row.id,
+          result: row.result,
+          isDraft: row.isDraft,
+          executedAt: row.executedAt,
+          progressPercent: row.progressPercent,
+          timer: {
+            startedAt: parsed.meta.timerStartAt || null,
+            completedAt: parsed.meta.timerStopAt || null,
+            durationSeconds:
+              typeof parsed.meta.manualDurationSeconds === "number"
+                ? parsed.meta.manualDurationSeconds
+                : typeof parsed.meta.durationSeconds === "number"
+                ? parsed.meta.durationSeconds
+                : null,
+          },
+          reexecutionOfId: parsed.meta.reexecutionOfId || null,
+          executor: row.executor,
+        };
+      })
+    );
+  }
+);
+
+router.get(
+  "/executions/:executionId/compare/:compareToExecutionId",
+  authorizeRoles(Role.TESTER, Role.ADMIN),
+  async (req: AuthRequest, res: Response) => {
+    const [current, previous] = await Promise.all([
+      prisma.testExecution.findUnique({ where: { id: req.params.executionId } }),
+      prisma.testExecution.findUnique({ where: { id: req.params.compareToExecutionId } }),
+    ]);
+    if (!current) {
+      return res.status(404).json({ message: "Execution not found" });
+    }
+    if (!previous) {
+      return res.status(404).json({ message: "Compare execution not found" });
+    }
+    if (current.testCaseId !== previous.testCaseId) {
+      return res.status(400).json({ message: "Executions belong to different test cases" });
+    }
+    if (!canManageExecution(req, current.executedBy) && !canManageExecution(req, previous.executedBy)) {
+      return res.status(403).json({ message: "You can compare only executions you own" });
+    }
+
+    const currentSteps = parseStoredStepResults(current.stepResults);
+    const previousSteps = parseStoredStepResults(previous.stepResults);
+    const currentMap = new Map(currentSteps.map((step) => [step.stepNumber, step]));
+    const previousMap = new Map(previousSteps.map((step) => [step.stepNumber, step]));
+    const stepNumbers = [...new Set([...currentMap.keys(), ...previousMap.keys()])].sort((a, b) => a - b);
+    const currentMeta = parseExecutionNotes(current.notes).meta;
+    const previousMeta = parseExecutionNotes(previous.notes).meta;
+
+    return res.json({
+      current: {
+        id: current.id,
+        result: current.result,
+        executedAt: current.executedAt,
+        durationSeconds:
+          typeof currentMeta.manualDurationSeconds === "number"
+            ? currentMeta.manualDurationSeconds
+            : typeof currentMeta.durationSeconds === "number"
+            ? currentMeta.durationSeconds
+            : null,
+      },
+      previous: {
+        id: previous.id,
+        result: previous.result,
+        executedAt: previous.executedAt,
+        durationSeconds:
+          typeof previousMeta.manualDurationSeconds === "number"
+            ? previousMeta.manualDurationSeconds
+            : typeof previousMeta.durationSeconds === "number"
+            ? previousMeta.durationSeconds
+            : null,
+      },
+      steps: stepNumbers.map((stepNumber) => {
+        const currentStep = currentMap.get(stepNumber);
+        const previousStep = previousMap.get(stepNumber);
+        return {
+          stepNumber,
+          action: currentStep?.action || previousStep?.action || "",
+          expectedResult: currentStep?.expectedResult || previousStep?.expectedResult || "",
+          current: {
+            status: currentStep?.status || "NOT_EXECUTED",
+            actualResult: currentStep?.actualResult || "",
+            notes: currentStep?.notes || "",
+          },
+          previous: {
+            status: previousStep?.status || "NOT_EXECUTED",
+            actualResult: previousStep?.actualResult || "",
+            notes: previousStep?.notes || "",
+          },
+        };
+      }),
+    });
   }
 );
 
@@ -3472,7 +3610,20 @@ router.get("/suites/:suiteId", authorizeRoles(Role.TESTER), requireProjectFromSu
       parentSuite: { select: { id: true, name: true } },
       childSuites: { select: { id: true, name: true, isArchived: true } },
       suiteCases: {
-        include: { testCase: { select: { id: true, title: true, testCaseCode: true, module: true } } },
+        include: {
+          testCase: {
+            select: {
+              id: true,
+              title: true,
+              testCaseCode: true,
+              module: true,
+              priority: true,
+              status: true,
+              severity: true,
+              type: true,
+            },
+          },
+        },
         orderBy: { position: "asc" },
       },
       _count: { select: { suiteCases: true } },
@@ -5234,6 +5385,31 @@ router.post(
     if (execution.result !== ExecutionStatus.FAILED) {
       return res.status(400).json({ message: "Only FAILED execution can be converted to a bug report" });
     }
+    const storedSteps = parseStoredStepResults(execution.stepResults);
+    const requestedFailedStepNumber = Number(req.body.failedStepNumber);
+    const failedStep =
+      (Number.isFinite(requestedFailedStepNumber)
+        ? storedSteps.find((item) => Number(item.stepNumber) === requestedFailedStepNumber)
+        : null) ||
+      storedSteps.find((item) => String(item?.status || "").toUpperCase() === "FAILED") ||
+      null;
+    const failedStepNumber = failedStep ? Number(failedStep.stepNumber || 0) : 0;
+    const failedStepAction = asString(req.body.failedStepAction) || asString(failedStep?.action) || "Execution step failed";
+    const failedStepExpectedResult =
+      asString(req.body.failedStepExpectedResult) || asString(failedStep?.expectedResult) || "Expected result not captured";
+    const failedStepActualResult =
+      asString(req.body.failedStepActualResult) || asString(failedStep?.actualResult) || `Execution failed with result ${execution.result}`;
+    const failedStepNotes = asString(req.body.failedStepNotes) || asString(failedStep?.notes);
+    const defaultTitleSuffix = failedStepNumber > 0 ? ` - Step ${failedStepNumber}` : "";
+    const defaultDescriptionLines = [
+      `Auto-created from failed execution ${execution.id} for test case ${execution.testCase.title}${defaultTitleSuffix}.`,
+      failedStepNumber > 0 ? `Failed Step ${failedStepNumber}: ${failedStepAction}` : "",
+      failedStepNotes ? `Failure Notes: ${failedStepNotes}` : "",
+    ].filter(Boolean);
+    const defaultStepsToReproduce =
+      failedStepNumber > 0
+        ? `Open ${execution.testCase.title}, execute step ${failedStepNumber} (${failedStepAction}), and observe the failure.`
+        : "Auto-created from failed execution";
     const assignedDeveloperId = await resolveActiveDeveloperId(req.body.assignedTo);
     if (asString(req.body.assignedTo) && !assignedDeveloperId) {
       return res.status(400).json({ message: "assignedTo must be an active developer (id or email)" });
@@ -5242,13 +5418,13 @@ router.post(
     const issue = await prismaAny.issue.create({
       data: {
         bugCode: await generateBugCode(),
-        title: asString(req.body.title) || `Bug: ${execution.testCase.title}`,
+        title: asString(req.body.title) || `Bug: ${execution.testCase.title}${defaultTitleSuffix}`,
         description:
           asString(req.body.description) ||
-          `Auto-created from failed execution ${execution.id} for test case ${execution.testCase.title}`,
-        stepsToReproduce: asString(req.body.stepsToReproduce) || "Auto-created from failed execution",
-        expectedBehavior: asString(req.body.expectedBehavior) || "Execution should pass without errors",
-        actualBehavior: asString(req.body.actualBehavior) || `Execution failed with result ${execution.result}`,
+          defaultDescriptionLines.join(" "),
+        stepsToReproduce: asString(req.body.stepsToReproduce) || defaultStepsToReproduce,
+        expectedBehavior: asString(req.body.expectedBehavior) || failedStepExpectedResult || "Execution should pass without errors",
+        actualBehavior: asString(req.body.actualBehavior) || failedStepActualResult,
         bugPriority: parseEnum(BUG_PRIORITY, req.body.priority) || BUG_PRIORITY.P3_MEDIUM,
         workflowStatus: BUG_WORKFLOW_STATUS.OPEN,
         severity: parseEnum(Severity, req.body.severity) || Severity.MEDIUM,
@@ -5599,13 +5775,33 @@ router.patch("/bugs/:id/workflow", authorizeRoles(Role.TESTER, Role.DEVELOPER, R
 
     // Legacy rows may have null workflowStatus; treat them as NEW to allow first triage transitions.
     const from = issue.workflowStatus || BUG_WORKFLOW_STATUS.NEW;
-    if (!isAllowedWorkflowTransition(from, target) && req.user!.role !== Role.ADMIN) {
+    const requestedAssignedTo = asString(req.body.assignedTo) || null;
+    let nextAssignedTo = issue.assignedTo || null;
+    let nextAssigneeEmail: string | null = null;
+    if (req.user!.role !== Role.DEVELOPER && requestedAssignedTo !== null) {
+      if (requestedAssignedTo) {
+        const assignee = await prisma.user.findFirst({
+          where: { OR: [{ id: requestedAssignedTo }, { email: requestedAssignedTo }], role: Role.DEVELOPER, isActive: true },
+          select: { id: true, email: true },
+        });
+        if (!assignee) {
+          return res.status(400).json({ message: "assignedTo must be an active developer" });
+        }
+        nextAssignedTo = assignee.id;
+        nextAssigneeEmail = assignee.email;
+      } else {
+        nextAssignedTo = null;
+      }
+    }
+    const assigneeChanged = nextAssignedTo !== (issue.assignedTo || null);
+    if (target !== from && !assigneeChanged && !isAllowedWorkflowTransition(from, target) && req.user!.role !== Role.ADMIN) {
       return res.status(400).json({ message: `Invalid transition: ${from} -> ${target}` });
     }
 
     const updated = await prismaAny.issue.update({
       where: { id: issue.id },
       data: {
+        assignedTo: nextAssignedTo,
         workflowStatus: target,
         status: issueStatusFromWorkflow(target),
         fixNotes:
@@ -5615,6 +5811,15 @@ router.patch("/bugs/:id/workflow", authorizeRoles(Role.TESTER, Role.DEVELOPER, R
       },
     });
     await writeAuditLog(req.user!.userId, "BUG_WORKFLOW_TRANSITION", "Issue", updated.id, { from, to: target });
+    if (assigneeChanged && nextAssignedTo) {
+      await notifyBugAssigned({
+        assigneeId: nextAssignedTo,
+        assigneeEmail: nextAssigneeEmail,
+        bugCode: updated.bugCode || updated.id,
+        issueId: updated.id,
+        actorId: req.user!.userId,
+      });
+    }
     const recipientIds = [issue.reportedBy, issue.assignedTo].filter(Boolean) as string[];
     if (recipientIds.length > 0) {
       const recipients = await prisma.user.findMany({
