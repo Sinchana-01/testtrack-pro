@@ -95,6 +95,8 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
   const [widgetModalOpen, setWidgetModalOpen] = useState(false);
   const [customizeMode, setCustomizeMode] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [chartProgress, setChartProgress] = useState(0);
+  const [chartHover, setChartHover] = useState<Record<string, string>>({});
 
   const layoutQuery = useQuery<{ widgets: WidgetLayoutItem[] }, Error>({
     queryKey: ["dashboard-widgets-layout", normalizedRole, currentUserId],
@@ -110,6 +112,32 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
       setLayout(normalizeLayout(normalizedRole));
     }
   }, [layoutQuery.data, normalizedRole]);
+
+  useEffect(() => {
+    if (layoutQuery.isLoading || dataLoading || normalizedRole !== "ADMIN") return;
+    setChartProgress(0);
+    const startedAt = performance.now();
+    let frame = 0;
+    const tick = (now: number) => {
+      const next = Math.min(1, (now - startedAt) / 700);
+      setChartProgress(next);
+      if (next < 1) {
+        frame = window.requestAnimationFrame(tick);
+      }
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    layoutQuery.isLoading,
+    dataLoading,
+    normalizedRole,
+    testCases.length,
+    executionReports.length,
+    bugs.length,
+    adminUsers.length,
+    adminProjects.length,
+    adminAuditLogs.length,
+  ]);
 
   const orderedWidgets = useMemo(() => {
     return [...layout].sort((a, b) => a.order - b.order).filter((item) => item.visible);
@@ -212,6 +240,117 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
     ).length;
   }, [adminProjects, currentUserId]);
 
+  const adminActiveProjects = useMemo(
+    () => adminProjects.filter((item) => item?.isActive !== false).length,
+    [adminProjects]
+  );
+
+  const adminExecutionStatus = useMemo(() => {
+    return {
+      PASSED: executionReports.filter((item) => String(item?.result || "").toUpperCase() === "PASSED").length,
+      FAILED: executionReports.filter((item) => String(item?.result || "").toUpperCase() === "FAILED").length,
+      BLOCKED: executionReports.filter((item) => String(item?.result || "").toUpperCase() === "BLOCKED").length,
+      SKIPPED: executionReports.filter((item) => String(item?.result || "").toUpperCase() === "SKIPPED").length,
+    };
+  }, [executionReports]);
+
+  const adminBugStatus = useMemo(() => {
+    const values = ["NEW", "OPEN", "IN_PROGRESS", "FIXED", "VERIFIED", "CLOSED"];
+    return values.reduce<Record<string, number>>((acc, key) => {
+      acc[key] = bugs.filter((item) => String(item?.workflowStatus || item?.status || "").toUpperCase() === key).length;
+      return acc;
+    }, {});
+  }, [bugs]);
+
+  const adminTestCaseStatus = useMemo(() => {
+    const values = ["DRAFT", "READY_FOR_REVIEW", "APPROVED", "DEPRECATED", "ARCHIVED"] as const;
+    const counts = values.reduce<Record<string, number>>((acc, key) => {
+      acc[key] = 0;
+      return acc;
+    }, {});
+
+    testCases.forEach((item) => {
+      const rawStatus = String(item?.status || "")
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "_");
+      const normalizedStatus =
+        rawStatus === "READY" || rawStatus === "READY_FOR_REVIEW" || rawStatus === "READY-FOR-REVIEW"
+          ? "READY_FOR_REVIEW"
+          : rawStatus;
+      const key = values.find((value) => value === normalizedStatus);
+      counts[key || "DRAFT"] += 1;
+    });
+
+    return counts;
+  }, [testCases]);
+
+  const adminPassRate = useMemo(() => {
+    const total = executionReports.length || 1;
+    return Math.round((adminExecutionStatus.PASSED / total) * 100);
+  }, [adminExecutionStatus, executionReports.length]);
+
+  const adminCriticalBugs = useMemo(
+    () =>
+      bugs.filter(
+        (item) =>
+          String(item?.severity || "").toUpperCase() === "CRITICAL" ||
+          String(item?.priority || item?.bugPriority || "").toUpperCase() === "P1_URGENT"
+      ).length,
+    [bugs]
+  );
+
+  const adminModuleStats = useMemo(() => {
+    const counts = new Map<string, number>();
+    testCases.forEach((item) => {
+      const key = String(item?.module || "General").trim() || "General";
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return Array.from(counts.entries())
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [testCases]);
+
+  const adminDeveloperWorkload = useMemo(() => {
+    const developerMap = new Map<string, { label: string; value: number }>();
+    adminUsers
+      .filter((user) => String(user?.role || "").toUpperCase() === "DEVELOPER")
+      .forEach((user) => {
+        developerMap.set(String(user.id), {
+          label: String(user?.name || "").trim() || String(user?.email || "").trim() || "Developer",
+          value: 0,
+        });
+      });
+    bugs.forEach((bug) => {
+      const assigneeId = String(bug?.assignedTo || bug?.assignee?.id || "").trim();
+      if (!assigneeId) return;
+      const current = developerMap.get(assigneeId);
+      if (current) {
+        current.value += 1;
+      } else {
+        developerMap.set(assigneeId, {
+          label: String(bug?.assignee?.name || bug?.assignee?.email || assigneeId),
+          value: 1,
+        });
+      }
+    });
+    return Array.from(developerMap.values())
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6);
+  }, [adminUsers, bugs]);
+
+  const adminRecentActivity = useMemo(() => {
+    return [...adminAuditLogs]
+      .slice(0, 5)
+      .map((item: any) => ({
+        id: String(item?.id || Math.random()),
+        action: String(item?.action || "Unknown Action"),
+        actor: String(item?.actor?.name || item?.user?.name || item?.actor?.email || item?.user?.email || "System"),
+        at: item?.createdAt,
+      }));
+  }, [adminAuditLogs]);
+
   const widgetMeta = new Map(WIDGETS_BY_ROLE[normalizedRole].map((item) => [item.id, item]));
 
   const updateWidget = (id: string, patch: Partial<WidgetLayoutItem>) => {
@@ -235,24 +374,114 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
     }
   };
 
-  const renderPie = (data: Record<string, number>, colors: string[]) => {
-    const entries = Object.entries(data);
+  const polarToCartesian = (cx: number, cy: number, radius: number, angleInDegrees: number) => {
+    const angleInRadians = ((angleInDegrees - 90) * Math.PI) / 180;
+    return {
+      x: cx + radius * Math.cos(angleInRadians),
+      y: cy + radius * Math.sin(angleInRadians),
+    };
+  };
+
+  const describeArc = (cx: number, cy: number, radius: number, startAngle: number, endAngle: number) => {
+    const safeEnd = endAngle <= startAngle ? startAngle + 0.001 : endAngle;
+    const start = polarToCartesian(cx, cy, radius, startAngle);
+    const end = polarToCartesian(cx, cy, radius, safeEnd);
+    const largeArcFlag = safeEnd - startAngle <= 180 ? "0" : "1";
+    return `M ${cx} ${cy} L ${start.x} ${start.y} A ${radius} ${radius} 0 ${largeArcFlag} 1 ${end.x} ${end.y} Z`;
+  };
+
+  const renderAdminPie = (chartKey: string, data: Record<string, number>, colors: string[]) => {
+    const entries = Object.entries(data).filter(([, value]) => value > 0);
+    if (entries.length === 0) {
+      return <div className="note">No lifecycle data available.</div>;
+    }
     const total = entries.reduce((sum, [, value]) => sum + value, 0) || 1;
     let cursor = 0;
     const segments = entries.map(([key, value], index) => {
       const start = cursor;
-      const end = cursor + (value / total) * 360;
+      const end = cursor + ((value / total) * 360 * chartProgress);
       cursor = end;
-      return `${colors[index % colors.length]} ${start}deg ${end}deg`;
+      return {
+        key,
+        value,
+        percent: Math.round((value / total) * 100),
+        color: colors[index % colors.length],
+        start,
+        end,
+      };
     });
     return (
-      <div className="peachChartWrap">
-        <div className="pieChart" style={{ background: `conic-gradient(${segments.join(", ")})` }} />
-        <div className="pieLegend">
-          {entries.map(([key, value]) => (
-            <div key={key}>{key}: {value}</div>
-          ))}
+      <div className="adminDashboardPieSection">
+        <div className="adminDashboardPieWrap">
+          <svg className="adminDashboardPieChart" viewBox="0 0 120 120" aria-label={chartKey}>
+            <circle cx="60" cy="60" r="56" fill="#e2e8f0" />
+            {segments.map((segment) => {
+              const label = `${segment.key}: ${segment.value} (${segment.percent}%)`;
+              return (
+                <path
+                  key={segment.key}
+                  d={describeArc(60, 60, 56, segment.start, segment.end)}
+                  fill={segment.color}
+                  className="adminDashboardPieSlice"
+                  onMouseEnter={() => setChartHover((prev) => ({ ...prev, [chartKey]: label }))}
+                  onMouseLeave={() => setChartHover((prev) => ({ ...prev, [chartKey]: "" }))}
+                  onPointerEnter={() => setChartHover((prev) => ({ ...prev, [chartKey]: label }))}
+                  onPointerLeave={() => setChartHover((prev) => ({ ...prev, [chartKey]: "" }))}
+                  onFocus={() => setChartHover((prev) => ({ ...prev, [chartKey]: label }))}
+                  onBlur={() => setChartHover((prev) => ({ ...prev, [chartKey]: "" }))}
+                >
+                  <title>{label}</title>
+                </path>
+              );
+            })}
+          </svg>
+          {chartHover[chartKey] ? <div className="adminDashboardHoverTag">{chartHover[chartKey]}</div> : null}
         </div>
+        <div className="adminDashboardPieLegend">
+          {entries.map(([key, value], index) => {
+            const label = `${key}: ${value} (${Math.round((value / total) * 100)}%)`;
+            return (
+              <button
+                key={key}
+                type="button"
+                className="adminDashboardPieLegendItem"
+                onMouseEnter={() => setChartHover((prev) => ({ ...prev, [chartKey]: label }))}
+                onMouseLeave={() => setChartHover((prev) => ({ ...prev, [chartKey]: "" }))}
+                onPointerEnter={() => setChartHover((prev) => ({ ...prev, [chartKey]: label }))}
+                onPointerLeave={() => setChartHover((prev) => ({ ...prev, [chartKey]: "" }))}
+                onFocus={() => setChartHover((prev) => ({ ...prev, [chartKey]: label }))}
+                onBlur={() => setChartHover((prev) => ({ ...prev, [chartKey]: "" }))}
+              >
+                <span className="adminDashboardPieLegendDot" style={{ background: colors[index % colors.length] }} />
+                <span>{key}: {value}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderAdminBarList = (items: Array<{ label: string; value: number }>, fillClass: string) => {
+    const maxValue = Math.max(...items.map((item) => item.value), 1);
+    return (
+      <div className="adminDashboardBarList">
+        {items.length === 0 ? (
+          <div className="note">No data available.</div>
+        ) : (
+          items.map((item) => (
+            <div key={item.label} className="adminDashboardBarRow" title={`${item.label}: ${item.value}`}>
+              <div className="adminDashboardBarLabel">{item.label}</div>
+              <div className="adminDashboardBarTrack">
+                <div
+                  className={`adminDashboardBarFill ${fillClass}`}
+                  style={{ width: `${Math.max(8, Math.round((item.value / maxValue) * 100) * chartProgress)}%` }}
+                />
+              </div>
+              <div className="adminDashboardBarValue">{item.value}</div>
+            </div>
+          ))
+        )}
       </div>
     );
   };
@@ -276,18 +505,19 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
     if (widgetId === "assigned_bugs_counter") return <div className="peachCardNumber">{devAssigned.length}</div>;
     if (widgetId === "critical_bugs_counter") return <div className="peachCardNumber">{devCriticalP1}</div>;
     if (widgetId === "bug_status_chart") {
-      return renderPie(devStatus, ["#3b82f6", "#0ea5e9", "#f59e0b", "#22c55e", "#10b981", "#64748b"]);
+      return renderAdminPie("developer-bug-status", devStatus, ["#0047ff", "#00a3a3", "#ff8c00", "#18a957", "#006d77", "#4b5563"]);
     }
     if (widgetId === "pending_tests") return <div className="peachCardNumber">{testerPendingCount}</div>;
     if (widgetId === "recent_failures") return <div className="peachCardNumber">{testerRecentFailures}</div>;
     if (widgetId === "status_breakdown") {
-      return renderPie(
+      return renderAdminPie(
+        "tester-status-breakdown",
         {
           PASSED: statusCounts.passed,
           FAILED: statusCounts.failed,
           BLOCKED: statusCounts.blocked,
         },
-        ["#16a34a", "#dc2626", "#d97706"]
+        ["#0f9d58", "#d7263d", "#ff8c00"]
       );
     }
     return <div className="note">No data</div>;
@@ -304,6 +534,75 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
 
       {layoutQuery.isLoading || dataLoading ? (
         <p className="note">Loading dashboard...</p>
+      ) : normalizedRole === "ADMIN" ? (
+        <div className="adminDashboardContent">
+          <div className="adminDashboardSummaryGrid">
+            <article className="adminDashboardSummaryCard" title={`Total users: ${adminUsers.length}`}>
+              <div className="adminDashboardSummaryLabel">Total Users</div>
+              <div className="adminDashboardSummaryValue">{adminUsers.length}</div>
+              <div className="adminDashboardSummarySub">All active roles in current scope</div>
+            </article>
+            <article className="adminDashboardSummaryCard" title={`Active projects: ${adminActiveProjects}`}>
+              <div className="adminDashboardSummaryLabel">Active Projects</div>
+              <div className="adminDashboardSummaryValue">{adminActiveProjects}</div>
+              <div className="adminDashboardSummarySub">Owned by you: {adminActiveProjectsByOwner}</div>
+            </article>
+            <article className="adminDashboardSummaryCard" title={`Total test cases: ${testCases.length}`}>
+              <div className="adminDashboardSummaryLabel">Total Test Cases</div>
+              <div className="adminDashboardSummaryValue">{testCases.length}</div>
+              <div className="adminDashboardSummarySub">Across current project scope</div>
+            </article>
+            <article className="adminDashboardSummaryCard" title={`Total executions: ${executionReports.length}`}>
+              <div className="adminDashboardSummaryLabel">Executions</div>
+              <div className="adminDashboardSummaryValue">{executionReports.length}</div>
+              <div className="adminDashboardSummarySub">Pass rate: {adminPassRate}%</div>
+            </article>
+            <article className="adminDashboardSummaryCard adminDashboardSummaryCardFail" title={`Open bugs: ${bugs.length}`}>
+              <div className="adminDashboardSummaryLabel">Bug Inventory</div>
+              <div className="adminDashboardSummaryValue">{bugs.length}</div>
+              <div className="adminDashboardSummarySub">Critical/P1: {adminCriticalBugs}</div>
+            </article>
+          </div>
+
+          <div className="adminDashboardChartGrid">
+            <section className="adminDashboardChartCard adminDashboardChartCardSquare">
+              <h5 className="adminDashboardChartTitle">Execution Result Distribution</h5>
+              {renderAdminPie("admin-execution", adminExecutionStatus, ["#0f9d58", "#d7263d", "#ff8c00", "#4b5563"])}
+            </section>
+            <section className="adminDashboardChartCard adminDashboardChartCardSquare">
+              <h5 className="adminDashboardChartTitle">Bug Workflow Status</h5>
+              {renderAdminPie("admin-bug-status", adminBugStatus, ["#0047ff", "#0096ff", "#ff8c00", "#0f9d58", "#006d77", "#4b5563"])}
+            </section>
+          </div>
+
+          <div className="adminDashboardInlineGrid">
+            <section className="adminDashboardChartCard">
+              <h5 className="adminDashboardChartTitle">Module Coverage</h5>
+              {renderAdminBarList(adminModuleStats, "module")}
+            </section>
+            <section className="adminDashboardChartCard">
+              <h5 className="adminDashboardChartTitle">Developer Bug Load</h5>
+              {renderAdminBarList(adminDeveloperWorkload, "priority")}
+            </section>
+          </div>
+
+          <section className="adminDashboardChartCard">
+            <h5 className="adminDashboardChartTitle">System Activity (7 Days)</h5>
+            <div className="adminDashboardMiniBarChart">
+              {trendBuckets.map((bucket) => (
+                <div key={bucket.key} className="adminDashboardMiniBarItem" title={`${bucket.label}: ${bucket.count}`}>
+                  <div
+                    className="adminDashboardMiniBar"
+                    style={{ height: `${Math.max(8, Math.round((bucket.count / maxTrend) * 100) * chartProgress)}%` }}
+                  />
+                  <span>{bucket.label}</span>
+                  <strong>{bucket.count}</strong>
+                </div>
+              ))}
+            </div>
+          </section>
+
+        </div>
       ) : (
         <div className="dashboardCardsGrid">
           {orderedWidgets.map((item) => (
@@ -315,7 +614,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
         </div>
       )}
 
-      {widgetModalOpen ? (
+      {widgetModalOpen && normalizedRole !== "ADMIN" ? (
         <div className="modalBackdrop">
           <div className="modalCard dashboardWidgetModal">
             <button className="closeModalBtn" onClick={() => setWidgetModalOpen(false)} aria-label="Close">
@@ -370,6 +669,3 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
 };
 
 export default DashboardWidgetsBoard;
-
-
-
