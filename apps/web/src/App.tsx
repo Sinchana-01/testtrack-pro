@@ -3402,10 +3402,10 @@ function App() {
                       {showAdminUsersListModal ? (
                         <div className="modalBackdrop">
                           <div className="modalCard backupListModalCard">
-                            <div className="panelHeader">
+                            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                               <strong>Users List</strong>
-                              <button className="button small" onClick={() => setShowAdminUsersListModal(false)}>
-                                Close
+                              <button className="button small" aria-label="Close users list modal" onClick={() => setShowAdminUsersListModal(false)}>
+                                X
                               </button>
                             </div>
                             <div className="tableWrap adminUsersTableWrap">
@@ -3685,10 +3685,10 @@ function App() {
                       {showRolePermissionList ? (
                         <div className="modalBackdrop">
                           <div className="modalCard backupListModalCard">
-                            <div className="panelHeader">
+                            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                               <strong>Role Permissions - {editPermissionRole}</strong>
-                              <button className="button small" onClick={() => setShowRolePermissionList(false)}>
-                                Close
+                              <button className="button small" aria-label="Close role permissions modal" onClick={() => setShowRolePermissionList(false)}>
+                                X
                               </button>
                             </div>
                             <div className="listCompact" style={{ marginTop: 12 }}>
@@ -3796,40 +3796,56 @@ function App() {
                       {showSystemConfigList ? (
                         <div className="modalBackdrop">
                           <div className="modalCard backupListModalCard">
-                            <div className="panelHeader">
+                            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                               <strong>System Configuration List</strong>
-                              <button className="button small" onClick={() => setShowSystemConfigList(false)}>
-                                Close
+                              <button className="button small" aria-label="Close system configuration modal" onClick={() => setShowSystemConfigList(false)}>
+                                X
                               </button>
                             </div>
-                            <div className="listCompact" style={{ marginTop: "12px" }}>
+                            <div className="listCompact">
                               {systemConfigLoading ? (
                                 <p className="note">Loading system configurations...</p>
                               ) : adminSystemConfigs.length === 0 ? (
                                 <p className="note">No system configurations found.</p>
                               ) : (
-                                adminSystemConfigs.map((config: any) => (
-                                  <button
-                                    key={config.id}
-                                    type="button"
-                                    className="row backupTriggerItem"
-                                    style={{ textAlign: "left", width: "100%", background: "#fff" }}
-                                    onClick={() => {
-                                      setSystemConfigKey(String(config.key || ""));
-                                      setSystemConfigValue(String(config.value || ""));
-                                      setShowSystemConfigList(false);
-                                    }}
-                                  >
-                                    <strong>{config.key}</strong>
-                                    <div className="note">{config.value}</div>
-                                    <div className="note">
-                                      Updated: {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "N/A"}
-                                    </div>
-                                    <div className="note">
-                                      By: {config.updater?.name || config.updater?.email || config.updatedBy || "Unknown"}
-                                    </div>
-                                  </button>
-                                ))
+                                adminSystemConfigs.map((config: any) => {
+                                  const rawValue = String(config.value || "");
+                                  let summary = rawValue;
+                                  try {
+                                    const parsed = JSON.parse(rawValue);
+                                    if (Array.isArray(parsed)) {
+                                      summary = `${parsed.length} item${parsed.length === 1 ? "" : "s"} configured`;
+                                    } else if (parsed && typeof parsed === "object") {
+                                      summary = `${Object.keys(parsed).length} setting${Object.keys(parsed).length === 1 ? "" : "s"} configured`;
+                                    }
+                                  } catch {
+                                    summary = rawValue;
+                                  }
+                                  if (summary.length > 90) {
+                                    summary = `${summary.slice(0, 90)}...`;
+                                  }
+                                  return (
+                                    <button
+                                      key={config.id}
+                                      type="button"
+                                      className="row backupTriggerItem systemConfigItemCard"
+                                      onClick={() => {
+                                        setSystemConfigKey(String(config.key || ""));
+                                        setSystemConfigValue(String(config.value || ""));
+                                        setShowSystemConfigList(false);
+                                      }}
+                                    >
+                                      <strong>{config.key}</strong>
+                                      <div className="note">{summary || "No summary available"}</div>
+                                      <div className="note">
+                                        Updated: {config.updatedAt ? new Date(config.updatedAt).toLocaleString() : "N/A"}
+                                      </div>
+                                      <div className="note">
+                                        By: {config.updater?.name || config.updater?.email || config.updatedBy || "Unknown"}
+                                      </div>
+                                    </button>
+                                  );
+                                })
                               )}
                             </div>
                           </div>
@@ -3864,7 +3880,14 @@ function App() {
                           </button>
                           <button
                             className="button small showActionBtnBlack"
-                            onClick={() => setShowAuditLogList(true)}
+                            onClick={async () => {
+                              try {
+                                await loadAdminAuditLogs(auditEntityType || undefined);
+                                setShowAuditLogList(true);
+                              } catch (error: any) {
+                                alert(error?.message || "Failed to load audit logs");
+                              }
+                            }}
                           >
                             Show Audit Logs
                           </button>
@@ -3873,10 +3896,10 @@ function App() {
                       {showAuditLogList ? (
                         <div className="modalBackdrop">
                           <div className="modalCard backupListModalCard">
-                            <div className="panelHeader">
+                            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                               <strong>Audit Logs</strong>
-                              <button className="button small" onClick={() => setShowAuditLogList(false)}>
-                                Close
+                              <button className="button small" aria-label="Close audit logs modal" onClick={() => setShowAuditLogList(false)}>
+                                X
                               </button>
                             </div>
                             <div className="listCompact">
@@ -3884,14 +3907,24 @@ function App() {
                                 <p className="note">No audit logs found.</p>
                               ) : (
                                 adminAuditLogs.map((log: any) => (
-                                  <div className="row backupTriggerItem" key={log.id}>
-                                    <strong>{log.action || "ACTION"}</strong>
-                                    <div className="note">
-                                      {log.entityType || "Entity"} {log.entityId || ""}
+                                  <div className="backupTriggerItem auditLogItemCard" key={log.id}>
+                                    <div className="auditLogItemTop">
+                                      <strong>{log.action || "ACTION"}</strong>
+                                      <span className="statusPill">{log.entityType || "Entity"}</span>
                                     </div>
-                                    <div className="note">
-                                      {(log.actor?.name || log.actor?.email || "Unknown")} |{" "}
-                                      {log.createdAt ? new Date(log.createdAt).toLocaleString() : "N/A"}
+                                    <div className="auditLogItemMetaGrid">
+                                      <div>
+                                        <span className="note">Entity ID</span>
+                                        <strong>{log.entityId || "-"}</strong>
+                                      </div>
+                                      <div>
+                                        <span className="note">Actor</span>
+                                        <strong>{log.actor?.name || log.actor?.email || "Unknown"}</strong>
+                                      </div>
+                                      <div>
+                                        <span className="note">Created</span>
+                                        <strong>{log.createdAt ? new Date(log.createdAt).toLocaleString() : "N/A"}</strong>
+                                      </div>
                                     </div>
                                   </div>
                                 ))
@@ -3946,10 +3979,10 @@ function App() {
                       {showTriggeredBackups ? (
                         <div className="modalBackdrop">
                           <div className="modalCard backupListModalCard">
-                            <div className="panelHeader">
+                            <div className="row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                               <strong>Triggered Backups</strong>
-                              <button className="button small" onClick={() => setShowTriggeredBackups(false)}>
-                                Close
+                              <button className="button small" aria-label="Close triggered backups modal" onClick={() => setShowTriggeredBackups(false)}>
+                                X
                               </button>
                             </div>
                             <div className="listCompact">
@@ -3960,21 +3993,32 @@ function App() {
                               ) : (
                                 adminBackups.map((job: any) => (
                                     <div
-                                      className={`row backupTriggerItem ${selectedBackupJobId === String(job.id) ? "active" : ""}`}
+                                      className={`backupTriggerItem backupJobItemCard ${selectedBackupJobId === String(job.id) ? "active" : ""}`}
                                       key={job.id}
                                       onClick={() => setSelectedBackupJobId(String(job.id))}
                                     >
-                                      <strong>{job.status || "PENDING"}</strong>
-                                      <div className="note">
-                                        Started: {job.startedAt ? new Date(job.startedAt).toLocaleString() : "N/A"}
+                                      <div className="auditLogItemTop">
+                                        <strong>{job.status || "PENDING"}</strong>
+                                        <span className="statusPill">{job.id ? String(job.id).slice(0, 8) : "JOB"}</span>
                                       </div>
-                                      <div className="note">
-                                        Completed: {job.completedAt ? new Date(job.completedAt).toLocaleString() : "N/A"}
+                                      <div className="auditLogItemMetaGrid">
+                                        <div>
+                                          <span className="note">Started</span>
+                                          <strong>{job.startedAt ? new Date(job.startedAt).toLocaleString() : "N/A"}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="note">Completed</span>
+                                          <strong>{job.completedAt ? new Date(job.completedAt).toLocaleString() : "N/A"}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="note">Triggered By</span>
+                                          <strong>{job.triggerUser?.name || job.triggerUser?.email || job.triggeredBy || "Unknown"}</strong>
+                                        </div>
                                       </div>
-                                      <div className="note">
-                                        By: {job.triggerUser?.name || job.triggerUser?.email || job.triggeredBy || "Unknown"}
+                                      <div className="auditLogItemNotes">
+                                        <span className="note">Notes</span>
+                                        <strong>{job.notes || "-"}</strong>
                                       </div>
-                                      <div className="note">Notes: {job.notes || "-"}</div>
                                     </div>
                                   ))
                               )}

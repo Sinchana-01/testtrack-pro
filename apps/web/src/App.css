@@ -2152,6 +2152,262 @@ body {
   color: #0f172a;
 }
 
+.adminDashboardContent {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.adminDashboardSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.adminDashboardSummaryCard {
+  min-height: 112px;
+  border: 1px solid #cbd5ff;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f6f8ff 0%, #eef3ff 100%);
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.adminDashboardSummaryCardFail .adminDashboardSummaryValue {
+  color: #b91c1c;
+}
+
+.adminDashboardSummaryCardFail {
+  border-color: #cbd5ff;
+  background: linear-gradient(180deg, #f6f8ff 0%, #eef3ff 100%);
+}
+
+.adminDashboardSummaryLabel {
+  margin: 0;
+  color: #334155;
+  line-height: 1.2;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.adminDashboardSummaryValue {
+  margin-top: 4px;
+  line-height: 1;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.adminDashboardSummarySub {
+  margin-top: auto;
+  line-height: 1.25;
+  color: #475569;
+  font-size: 11px;
+}
+
+.adminDashboardChartGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(280px, 340px));
+  justify-content: start;
+  gap: 8px;
+}
+
+.adminDashboardInlineGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.adminDashboardChartCard {
+  border: 1px solid #cbd5ff;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #f6f8ff 0%, #eef3ff 100%);
+  padding: 10px;
+  min-height: 188px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.adminDashboardChartCardSquare {
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+
+.adminDashboardChartTitle {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.adminDashboardPieSection {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.adminDashboardPieWrap {
+  position: relative;
+  width: 180px;
+  height: 180px;
+  flex: 0 0 180px;
+}
+
+.adminDashboardPieChart {
+  width: 180px;
+  height: 180px;
+  display: block;
+}
+
+.adminDashboardPieSlice {
+  cursor: pointer;
+  transition: opacity 0.18s ease;
+  pointer-events: all;
+}
+
+.adminDashboardPieSlice:hover,
+.adminDashboardPieSlice:focus {
+  opacity: 0.84;
+}
+
+.adminDashboardHoverTag {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: #0f172a;
+  color: #ffffff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: nowrap;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.adminDashboardPieLegend {
+  display: grid;
+  gap: 2px;
+  align-content: center;
+}
+
+.adminDashboardPieLegendItem {
+  border: 0;
+  background: transparent;
+  text-align: left;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  color: #334155;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.adminDashboardPieLegendItem:hover,
+.adminDashboardPieLegendItem:focus {
+  color: #0f172a;
+  text-decoration: underline;
+  outline: none;
+}
+
+.adminDashboardPieLegendDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  flex: 0 0 10px;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+.adminDashboardBarList {
+  display: grid;
+  gap: 8px;
+}
+
+.adminDashboardBarRow {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 48px;
+  align-items: center;
+  gap: 10px;
+}
+
+.adminDashboardBarLabel {
+  font-size: 12px;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.adminDashboardBarTrack {
+  height: 12px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.adminDashboardBarFill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.22s ease-out;
+}
+
+.adminDashboardBarFill.module {
+  background: linear-gradient(90deg, #0ea5e9, #0284c7);
+}
+
+.adminDashboardBarFill.priority {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.adminDashboardBarValue {
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.adminDashboardMiniBarChart {
+  height: 160px;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 6px;
+}
+
+.adminDashboardMiniBarItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.adminDashboardMiniBarItem span {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.adminDashboardMiniBar {
+  width: 100%;
+  max-width: 28px;
+  background: #2563eb;
+  border-radius: 8px 8px 2px 2px;
+  min-height: 8px;
+  transition: height 0.22s ease-out;
+}
+
 .reportDualLegend {
   display: flex;
   gap: 14px;
@@ -2302,6 +2558,30 @@ body {
 
   .reportSummaryGrid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adminDashboardSummaryGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .adminDashboardChartGrid,
+  .adminDashboardInlineGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .adminDashboardChartCardSquare {
+    aspect-ratio: auto;
+    min-height: 280px;
+  }
+
+  .adminDashboardPieSection {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .adminDashboardBarRow {
+    grid-template-columns: 1fr;
+    gap: 6px;
   }
 
   .reportsHubLayout {
@@ -3003,13 +3283,74 @@ body {
 }
 
 .backupTriggerItem {
-  border: 1px solid #000000 !important;
+  border: 1px solid #dbe7f3 !important;
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px 14px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
   cursor: pointer;
 }
 
 .backupTriggerItem.active {
-  border: 2px solid #000000 !important;
-  box-shadow: inset 0 0 0 1px #000000;
+  border: 1px solid #1d4ed8 !important;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.16), 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+
+.backupListModalCard {
+  width: min(680px, 92vw);
+}
+
+.auditLogItemCard,
+.backupJobItemCard,
+.systemConfigItemCard {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.systemConfigItemCard {
+  width: 100%;
+  text-align: left;
+  background: #ffffff;
+}
+
+.auditLogItemTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.auditLogItemMetaGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.auditLogItemMetaGrid > div,
+.auditLogItemNotes {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.auditLogItemMetaGrid strong,
+.auditLogItemNotes strong {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.auditLogItemNotes {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .auditLogItemMetaGrid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .executionCompactPanel {
