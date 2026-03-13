@@ -24,6 +24,7 @@ type DashboardLayoutProps = {
   }>;
   onNotificationClick?: (id: string) => void;
   onNotificationReply?: (id: string, message: string) => Promise<void> | void;
+  onOpenNotificationPreferences?: () => void;
   navItems: DashboardNavItem[];
   activeKey: string;
   onSelect: (key: string) => void;
@@ -61,6 +62,7 @@ const DashboardLayout = ({
   notificationItems = [],
   onNotificationClick,
   onNotificationReply,
+  onOpenNotificationPreferences,
   navItems,
   activeKey,
   onSelect,
@@ -230,6 +232,17 @@ const DashboardLayout = ({
                     <span>{currentRole || "USER"}</span>
                   </div>
                   
+                  {onOpenNotificationPreferences ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUserMenuOpen(false);
+                        onOpenNotificationPreferences();
+                      }}
+                    >
+                      Notification Preferences
+                    </button>
+                  ) : null}
                   <button type="button" onClick={onLogout}>
                     Logout
                   </button>

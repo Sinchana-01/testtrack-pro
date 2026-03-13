@@ -1,6 +1,4 @@
 import nodemailer from "nodemailer";
-import prisma from "../prisma";
-const prismaAny = prisma as any;
 import {
   bugAssignedTemplate,
   bugStatusChangedTemplate,
@@ -8,13 +6,9 @@ import {
   retestRequestedTemplate,
   testAssignedTemplate,
 } from "./emailTemplates";
-
-export type NotificationEmailType =
-  | "BUG_ASSIGNED"
-  | "BUG_STATUS_CHANGED"
-  | "TEST_ASSIGNED"
-  | "COMMENT_MENTION"
-  | "RETEST_REQUESTED";
+import { canSendNotificationEmail, NotificationDeliveryType } from "../modules/notifications/notification-preference.utils";
+import { getNotificationQuietHoursState } from "../modules/notifications/notification-email-timing";
+import { queueDeferredNotificationEmail } from "../modules/notifications/deferred-notification-email.service";
 
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
@@ -26,43 +20,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-const toMinutes = (hhmm: string): number | null => {
-  const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
-  if (!m) return null;
-  return Number(m[1]) * 60 + Number(m[2]);
-};
-
-const isInQuietHours = (start?: string | null, end?: string | null): boolean => {
-  if (!start || !end) return false;
-  const s = toMinutes(start);
-  const e = toMinutes(end);
-  if (s === null || e === null) return false;
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
-  if (s <= e) return nowMin >= s && nowMin < e;
-  return nowMin >= s || nowMin < e;
-};
-
-const canSendEmail = async (userId: string, type: NotificationEmailType): Promise<boolean> => {
-  const pref = await prismaAny.notificationPreference.findUnique({ where: { userId } });
-  if (!pref) return true;
-  if (isInQuietHours(pref.quietHoursStart, pref.quietHoursEnd)) return false;
-  switch (type) {
-    case "BUG_ASSIGNED":
-      return pref.emailBugAssigned;
-    case "COMMENT_MENTION":
-      return pref.emailComments;
-    case "BUG_STATUS_CHANGED":
-    case "RETEST_REQUESTED":
-      return pref.emailStatusChange;
-    case "TEST_ASSIGNED":
-      return true;
-    default:
-      return true;
-  }
-};
-
-const send = async (to: string, subject: string, html: string) => {
+export const sendRawNotificationEmail = async (to: string, subject: string, html: string) => {
   if (!to || !process.env.EMAIL_USER) return;
   await transporter.sendMail({
     from: `"TestTrack Pro" <${process.env.EMAIL_USER}>`,
@@ -72,9 +30,35 @@ const send = async (to: string, subject: string, html: string) => {
   });
 };
 
+const dispatchNotificationEmail = async (
+  userId: string,
+  type: NotificationDeliveryType,
+  to: string,
+  subject: string,
+  html: string
+) => {
+  if (!to || !process.env.EMAIL_USER) return;
+  const emailEnabled = await canSendNotificationEmail(userId, type);
+  if (!emailEnabled) return;
+
+  const quietState = await getNotificationQuietHoursState(userId);
+  if (quietState.inQuietHours && quietState.nextAllowedAt) {
+    await queueDeferredNotificationEmail({
+      userId,
+      type,
+      toEmail: to,
+      subject,
+      html,
+      scheduledFor: quietState.nextAllowedAt,
+    });
+    return;
+  }
+
+  await sendRawNotificationEmail(to, subject, html);
+};
+
 export const sendBugAssignedEmail = async (userId: string, email: string, bugCode: string) => {
-  if (!(await canSendEmail(userId, "BUG_ASSIGNED"))) return;
-  await send(email, `Bug Assigned: ${bugCode}`, bugAssignedTemplate(bugCode));
+  await dispatchNotificationEmail(userId, "BUG_ASSIGNED", email, `Bug Assigned: ${bugCode}`, bugAssignedTemplate(bugCode));
 };
 
 export const sendBugStatusChangedEmail = async (
@@ -83,21 +67,29 @@ export const sendBugStatusChangedEmail = async (
   bugCode: string,
   status: string
 ) => {
-  if (!(await canSendEmail(userId, "BUG_STATUS_CHANGED"))) return;
-  await send(email, `Bug Update: ${bugCode}`, bugStatusChangedTemplate(bugCode, status));
+  await dispatchNotificationEmail(
+    userId,
+    "BUG_STATUS_CHANGED",
+    email,
+    `Bug Update: ${bugCode}`,
+    bugStatusChangedTemplate(bugCode, status)
+  );
 };
 
 export const sendTestAssignedEmail = async (userId: string, email: string, runName: string) => {
-  if (!(await canSendEmail(userId, "TEST_ASSIGNED"))) return;
-  await send(email, `Test Assignment: ${runName}`, testAssignedTemplate(runName));
+  await dispatchNotificationEmail(userId, "TEST_ASSIGNED", email, `Test Assignment: ${runName}`, testAssignedTemplate(runName));
 };
 
 export const sendCommentMentionEmail = async (userId: string, email: string, bugCode: string) => {
-  if (!(await canSendEmail(userId, "COMMENT_MENTION"))) return;
-  await send(email, `Mentioned in ${bugCode}`, mentionTemplate(bugCode));
+  await dispatchNotificationEmail(userId, "COMMENT_MENTION", email, `Mentioned in ${bugCode}`, mentionTemplate(bugCode));
 };
 
 export const sendRetestRequestedEmail = async (userId: string, email: string, bugCode: string) => {
-  if (!(await canSendEmail(userId, "RETEST_REQUESTED"))) return;
-  await send(email, `Re-test Requested: ${bugCode}`, retestRequestedTemplate(bugCode));
+  await dispatchNotificationEmail(
+    userId,
+    "RETEST_REQUESTED",
+    email,
+    `Re-test Requested: ${bugCode}`,
+    retestRequestedTemplate(bugCode)
+  );
 };

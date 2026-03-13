@@ -20,6 +20,7 @@ import {
   getBugApi,
   getRefreshToken,
   getMyRolePermissionsApi,
+  getNotificationPreferencesApi,
   listBugCommentsApi,
   listNotificationsApi,
   listBugsApi,
@@ -67,6 +68,7 @@ import {
   triggerAdminBackupApi,
   upsertAdminSystemConfigApi,
   updateAdminUserApi,
+  updateNotificationPreferencesApi,
   updateSuiteApi,
   updateTestCaseApi,
   markNotificationReadApi,
@@ -84,6 +86,9 @@ import DeveloperWorkspacePanel from "./features/developer/DeveloperWorkspacePane
 import ReportsHub from "./features/reports/ReportsHub";
 import DashboardWidgetsBoard from "./features/dashboard/DashboardWidgetsBoard";
 import ProjectManagementSection from "./features/projects/ProjectManagementSection";
+import NotificationPreferencesModal, {
+  NotificationPreferenceSettings,
+} from "./features/notifications/NotificationPreferencesModal";
 import {
   getDeveloperAssignedExecutionReports,
   getDeveloperLinkedCommitBugs,
@@ -128,6 +133,21 @@ type AppNotificationItem = {
   isRead: boolean;
   bugId?: string;
   senderEmail?: string;
+};
+
+const defaultNotificationPreferences: NotificationPreferenceSettings = {
+  emailBugAssigned: true,
+  emailComments: true,
+  emailStatusChange: true,
+  emailTestAssigned: true,
+  emailRetestRequested: true,
+  inAppBugAssigned: true,
+  inAppComments: true,
+  inAppStatusChange: true,
+  inAppTestAssigned: true,
+  inAppRetestRequested: true,
+  quietHoursStart: null,
+  quietHoursEnd: null,
 };
 
 function App() {
@@ -354,6 +374,12 @@ function App() {
   const [adminSystemConfigs, setAdminSystemConfigs] = useState<any[]>([]);
   const [notificationItems, setNotificationItems] = useState<AppNotificationItem[]>([]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [showNotificationPreferences, setShowNotificationPreferences] = useState(false);
+  const [notificationPreferences, setNotificationPreferences] =
+    useState<NotificationPreferenceSettings>(defaultNotificationPreferences);
+  const [notificationPreferencesLoading, setNotificationPreferencesLoading] = useState(false);
+  const [notificationPreferencesSaving, setNotificationPreferencesSaving] = useState(false);
+  const [notificationPreferencesError, setNotificationPreferencesError] = useState("");
   const [auditEntityType, setAuditEntityType] = useState("");
   const [showAuditLogList, setShowAuditLogList] = useState(false);
   const [backupNotes, setBackupNotes] = useState("");
@@ -1401,6 +1427,75 @@ function App() {
         };
       })
       .filter((item) => item.bugId);
+  };
+
+  const loadNotificationPreferences = async () => {
+    setNotificationPreferencesLoading(true);
+    setNotificationPreferencesError("");
+    try {
+      const payload = await getNotificationPreferencesApi();
+      setNotificationPreferences({
+        emailBugAssigned: payload?.emailBugAssigned !== false,
+        emailComments: payload?.emailComments !== false,
+        emailStatusChange: payload?.emailStatusChange !== false,
+        emailTestAssigned: payload?.emailTestAssigned !== false,
+        emailRetestRequested: payload?.emailRetestRequested !== false,
+        inAppBugAssigned: payload?.inAppBugAssigned !== false,
+        inAppComments: payload?.inAppComments !== false,
+        inAppStatusChange: payload?.inAppStatusChange !== false,
+        inAppTestAssigned: payload?.inAppTestAssigned !== false,
+        inAppRetestRequested: payload?.inAppRetestRequested !== false,
+        quietHoursStart:
+          typeof payload?.quietHoursStart === "string" && payload.quietHoursStart.trim()
+            ? payload.quietHoursStart
+            : null,
+        quietHoursEnd:
+          typeof payload?.quietHoursEnd === "string" && payload.quietHoursEnd.trim()
+            ? payload.quietHoursEnd
+            : null,
+      });
+    } catch (error: any) {
+      setNotificationPreferencesError(error?.message || "Failed to load notification preferences");
+    } finally {
+      setNotificationPreferencesLoading(false);
+    }
+  };
+
+  const openNotificationPreferences = async () => {
+    setShowNotificationPreferences(true);
+    await loadNotificationPreferences();
+  };
+
+  const saveNotificationPreferences = async (payload: NotificationPreferenceSettings) => {
+    setNotificationPreferencesSaving(true);
+    setNotificationPreferencesError("");
+    try {
+      const saved = await updateNotificationPreferencesApi(payload);
+      setNotificationPreferences({
+        emailBugAssigned: saved?.emailBugAssigned !== false,
+        emailComments: saved?.emailComments !== false,
+        emailStatusChange: saved?.emailStatusChange !== false,
+        emailTestAssigned: saved?.emailTestAssigned !== false,
+        emailRetestRequested: saved?.emailRetestRequested !== false,
+        inAppBugAssigned: saved?.inAppBugAssigned !== false,
+        inAppComments: saved?.inAppComments !== false,
+        inAppStatusChange: saved?.inAppStatusChange !== false,
+        inAppTestAssigned: saved?.inAppTestAssigned !== false,
+        inAppRetestRequested: saved?.inAppRetestRequested !== false,
+        quietHoursStart:
+          typeof saved?.quietHoursStart === "string" && saved.quietHoursStart.trim() ? saved.quietHoursStart : null,
+        quietHoursEnd:
+          typeof saved?.quietHoursEnd === "string" && saved.quietHoursEnd.trim() ? saved.quietHoursEnd : null,
+      });
+      setShowNotificationPreferences(false);
+      showAppNotice("Notification preferences updated", "success");
+    } catch (error: any) {
+      const message = error?.message || "Failed to update notification preferences";
+      setNotificationPreferencesError(message);
+      throw error;
+    } finally {
+      setNotificationPreferencesSaving(false);
+    }
   };
 
   const loadNotifications = async () => {
@@ -3198,6 +3293,7 @@ function App() {
             }))}
             onNotificationClick={handleNotificationClick}
             onNotificationReply={handleNotificationReply}
+            onOpenNotificationPreferences={openNotificationPreferences}
             navItems={roleNavItems}
             activeKey={activeMenuKey}
             onSelect={(feature) => {
@@ -5813,6 +5909,20 @@ function App() {
             )}
           </DashboardLayout>
         )}
+        <NotificationPreferencesModal
+          open={showNotificationPreferences}
+          loading={notificationPreferencesLoading}
+          saving={notificationPreferencesSaving}
+          preferences={notificationPreferences}
+          error={notificationPreferencesError}
+          onClose={() => {
+            if (!notificationPreferencesSaving) {
+              setShowNotificationPreferences(false);
+              setNotificationPreferencesError("");
+            }
+          }}
+          onSave={saveNotificationPreferences}
+        />
       </div>
     </div>
   );

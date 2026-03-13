@@ -106,6 +106,13 @@ export const updatePreferences = async (req: AuthRequest, res: Response) => {
     emailBugAssigned: asBoolean(req.body.emailBugAssigned),
     emailComments: asBoolean(req.body.emailComments),
     emailStatusChange: asBoolean(req.body.emailStatusChange),
+    emailTestAssigned: asBoolean(req.body.emailTestAssigned),
+    emailRetestRequested: asBoolean(req.body.emailRetestRequested),
+    inAppBugAssigned: asBoolean(req.body.inAppBugAssigned),
+    inAppComments: asBoolean(req.body.inAppComments),
+    inAppStatusChange: asBoolean(req.body.inAppStatusChange),
+    inAppTestAssigned: asBoolean(req.body.inAppTestAssigned),
+    inAppRetestRequested: asBoolean(req.body.inAppRetestRequested),
     quietHoursStart: typeof req.body.quietHoursStart === "string" ? req.body.quietHoursStart : undefined,
     quietHoursEnd: typeof req.body.quietHoursEnd === "string" ? req.body.quietHoursEnd : undefined,
   });

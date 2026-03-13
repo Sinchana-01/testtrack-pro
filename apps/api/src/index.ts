@@ -6,6 +6,8 @@ import authRoutes from "./routes/auth.routes";
 import testcaseRoutes from "./routes/testcase.routes";
 import projectRoutes from "./routes/project.routes";
 import notificationRoutes from "./modules/notifications/notification.routes";
+import { startDeferredNotificationEmailScheduler } from "./modules/notifications/deferred-notification-email.service";
+import { sendRawNotificationEmail } from "./services/email.service";
 
 
 
@@ -55,3 +57,5 @@ const PORT = Number(process.env.PORT) || 4000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+startDeferredNotificationEmailScheduler(sendRawNotificationEmail);
