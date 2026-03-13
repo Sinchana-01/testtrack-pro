@@ -52,6 +52,7 @@ model User {
   createdMilestones      ProjectMilestone[]   @relation("MilestoneCreator")
   notifications          Notification[]
   notificationPreference NotificationPreference?
+  deferredEmails         DeferredNotificationEmail[]
 }
 
 model TestCase {
@@ -434,9 +435,36 @@ model NotificationPreference {
   emailBugAssigned  Boolean @default(true)
   emailComments     Boolean @default(true)
   emailStatusChange Boolean @default(true)
+  emailTestAssigned Boolean @default(true)
+  emailRetestRequested Boolean @default(true)
+  inAppBugAssigned  Boolean @default(true)
+  inAppComments     Boolean @default(true)
+  inAppStatusChange Boolean @default(true)
+  inAppTestAssigned Boolean @default(true)
+  inAppRetestRequested Boolean @default(true)
   quietHoursStart   String?
   quietHoursEnd     String?
   user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model DeferredNotificationEmail {
+  id           String   @id @default(uuid())
+  userId       String
+  type         String
+  toEmail      String
+  subject      String
+  html         String
+  scheduledFor DateTime
+  status       String   @default("PENDING")
+  attemptCount Int      @default(0)
+  lastError    String?
+  sentAt       DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([status, scheduledFor])
+  @@index([userId, status])
 }
 
 model ProjectMilestone {

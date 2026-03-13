@@ -1170,6 +1170,13 @@ export async function updateNotificationPreferencesApi(payload: {
   emailBugAssigned?: boolean;
   emailComments?: boolean;
   emailStatusChange?: boolean;
+  emailTestAssigned?: boolean;
+  emailRetestRequested?: boolean;
+  inAppBugAssigned?: boolean;
+  inAppComments?: boolean;
+  inAppStatusChange?: boolean;
+  inAppTestAssigned?: boolean;
+  inAppRetestRequested?: boolean;
   quietHoursStart?: string | null;
   quietHoursEnd?: string | null;
 }) {

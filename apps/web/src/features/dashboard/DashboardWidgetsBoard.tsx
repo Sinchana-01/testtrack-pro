@@ -114,7 +114,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
   }, [layoutQuery.data, normalizedRole]);
 
   useEffect(() => {
-    if (layoutQuery.isLoading || dataLoading || normalizedRole !== "ADMIN") return;
+    if (layoutQuery.isLoading || dataLoading || (normalizedRole !== "ADMIN" && normalizedRole !== "TESTER")) return;
     setChartProgress(0);
     const startedAt = performance.now();
     let frame = 0;
@@ -462,6 +462,16 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
     );
   };
 
+  const renderTesterStatusPie = () => {
+    const data = {
+      PASSED: statusCounts.passed,
+      FAILED: statusCounts.failed,
+      BLOCKED: statusCounts.blocked,
+      SKIPPED: testerReports.filter((item) => String(item?.result || "").toUpperCase() === "SKIPPED").length,
+    };
+    return renderAdminPie("tester-status-breakdown", data, ["#0f9d58", "#d7263d", "#ff8c00", "#4b5563"]);
+  };
+
   const renderAdminBarList = (items: Array<{ label: string; value: number }>, fillClass: string) => {
     const maxValue = Math.max(...items.map((item) => item.value), 1);
     return (
@@ -510,15 +520,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
     if (widgetId === "pending_tests") return <div className="peachCardNumber">{testerPendingCount}</div>;
     if (widgetId === "recent_failures") return <div className="peachCardNumber">{testerRecentFailures}</div>;
     if (widgetId === "status_breakdown") {
-      return renderAdminPie(
-        "tester-status-breakdown",
-        {
-          PASSED: statusCounts.passed,
-          FAILED: statusCounts.failed,
-          BLOCKED: statusCounts.blocked,
-        },
-        ["#0f9d58", "#d7263d", "#ff8c00"]
-      );
+      return renderTesterStatusPie();
     }
     return <div className="note">No data</div>;
   };
@@ -606,7 +608,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
       ) : (
         <div className="dashboardCardsGrid">
           {orderedWidgets.map((item) => (
-            <article className="peachStatCard" key={item.id}>
+            <article className={`peachStatCard ${item.id === "status_breakdown" ? "peachStatCardChart" : ""}`} key={item.id}>
               <div className="peachCardLabel">{widgetMeta.get(item.id)?.title || item.id}</div>
               {renderWidgetContent(item.id)}
             </article>

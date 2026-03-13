@@ -1,4 +1,5 @@
 import prisma from "../../prisma";
+import { canCreateInAppNotification } from "./notification-preference.utils";
 const prismaAny = prisma as any;
 
 export type NotificationCreateInput = {
@@ -10,6 +11,9 @@ export type NotificationCreateInput = {
 };
 
 export const createNotification = async (input: NotificationCreateInput) => {
+  if (!(await canCreateInAppNotification(input.userId, input.type))) {
+    return null;
+  }
   return prismaAny.notification.create({
     data: {
       userId: input.userId,
@@ -23,8 +27,14 @@ export const createNotification = async (input: NotificationCreateInput) => {
 
 export const createNotificationsBulk = async (inputs: NotificationCreateInput[]) => {
   if (!inputs.length) return;
+  const allowed = (
+    await Promise.all(
+      inputs.map(async (item) => ((await canCreateInAppNotification(item.userId, item.type)) ? item : null))
+    )
+  ).filter((item): item is NotificationCreateInput => Boolean(item));
+  if (!allowed.length) return;
   await prismaAny.notification.createMany({
-    data: inputs.map((item) => ({
+    data: allowed.map((item) => ({
       userId: item.userId,
       type: item.type,
       message: item.message,
@@ -76,6 +86,13 @@ export const upsertNotificationPreference = async (
     emailBugAssigned?: boolean;
     emailComments?: boolean;
     emailStatusChange?: boolean;
+    emailTestAssigned?: boolean;
+    emailRetestRequested?: boolean;
+    inAppBugAssigned?: boolean;
+    inAppComments?: boolean;
+    inAppStatusChange?: boolean;
+    inAppTestAssigned?: boolean;
+    inAppRetestRequested?: boolean;
     quietHoursStart?: string | null;
     quietHoursEnd?: string | null;
   }
@@ -87,6 +104,13 @@ export const upsertNotificationPreference = async (
       emailBugAssigned: input.emailBugAssigned ?? true,
       emailComments: input.emailComments ?? true,
       emailStatusChange: input.emailStatusChange ?? true,
+      emailTestAssigned: input.emailTestAssigned ?? true,
+      emailRetestRequested: input.emailRetestRequested ?? true,
+      inAppBugAssigned: input.inAppBugAssigned ?? true,
+      inAppComments: input.inAppComments ?? true,
+      inAppStatusChange: input.inAppStatusChange ?? true,
+      inAppTestAssigned: input.inAppTestAssigned ?? true,
+      inAppRetestRequested: input.inAppRetestRequested ?? true,
       quietHoursStart: input.quietHoursStart ?? null,
       quietHoursEnd: input.quietHoursEnd ?? null,
     },
@@ -94,6 +118,13 @@ export const upsertNotificationPreference = async (
       emailBugAssigned: input.emailBugAssigned ?? undefined,
       emailComments: input.emailComments ?? undefined,
       emailStatusChange: input.emailStatusChange ?? undefined,
+      emailTestAssigned: input.emailTestAssigned ?? undefined,
+      emailRetestRequested: input.emailRetestRequested ?? undefined,
+      inAppBugAssigned: input.inAppBugAssigned ?? undefined,
+      inAppComments: input.inAppComments ?? undefined,
+      inAppStatusChange: input.inAppStatusChange ?? undefined,
+      inAppTestAssigned: input.inAppTestAssigned ?? undefined,
+      inAppRetestRequested: input.inAppRetestRequested ?? undefined,
       quietHoursStart: input.quietHoursStart === undefined ? undefined : input.quietHoursStart,
       quietHoursEnd: input.quietHoursEnd === undefined ? undefined : input.quietHoursEnd,
     },

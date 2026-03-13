@@ -3016,6 +3016,10 @@ body {
   gap: 10px;
 }
 
+.peachStatCardChart {
+  min-height: 260px;
+}
+
 .peachCardLabel {
   font-size: 13px;
   color: #000000;
@@ -3033,6 +3037,32 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.peachStatCardChart .adminDashboardPieSection {
+  justify-content: flex-start;
+  align-items: center;
+  gap: 10px;
+  min-height: 200px;
+}
+
+.peachStatCardChart .adminDashboardPieWrap {
+  width: 150px;
+  height: 150px;
+  flex: 0 0 150px;
+}
+
+.peachStatCardChart .adminDashboardPieChart {
+  width: 150px;
+  height: 150px;
+}
+
+.peachStatCardChart .adminDashboardPieLegend {
+  gap: 6px;
+}
+
+.peachStatCardChart .adminDashboardPieLegendItem {
+  padding: 0;
 }
 
 .dashboardWidgetModal {

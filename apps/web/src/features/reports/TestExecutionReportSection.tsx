@@ -535,35 +535,6 @@ const TestExecutionReportSection: React.FC<Props> = ({ testRuns, roleName }) => 
             </table>
           </div>
 
-          <div className="tableWrap adminUsersTableWrap reportInsightCard reportInsightCardWide">
-            <h5 style={{ margin: "8px 0" }}>Failed Test Case Details</h5>
-            <table className="table adminUsersTable">
-              <thead>
-                <tr>
-                  <th>Test Case</th>
-                  <th>Module</th>
-                  <th>Tester</th>
-                  <th>Executed At</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(report.failedTestCases || []).length === 0 ? (
-                  <tr><td colSpan={5} className="note">No failed test cases.</td></tr>
-                ) : (
-                  (report.failedTestCases || []).map((item: any) => (
-                    <tr key={item.executionId}>
-                      <td className="truncateCell">{item.testCaseCode || item.testCaseId} | {item.testCaseTitle || "Untitled"}</td>
-                      <td>{item.module}</td>
-                      <td>{item.tester}</td>
-                      <td>{item.executedAt ? new Date(item.executedAt).toLocaleString() : "N/A"}</td>
-                      <td className="truncateCell">{item.notes || "-"}</td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
           </div>
         </>
       )}

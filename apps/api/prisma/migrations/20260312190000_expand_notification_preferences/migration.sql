@@ -1,0 +1,8 @@
+ALTER TABLE "NotificationPreference"
+ADD COLUMN "emailTestAssigned" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "emailRetestRequested" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "inAppBugAssigned" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "inAppComments" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "inAppStatusChange" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "inAppTestAssigned" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN "inAppRetestRequested" BOOLEAN NOT NULL DEFAULT true;
