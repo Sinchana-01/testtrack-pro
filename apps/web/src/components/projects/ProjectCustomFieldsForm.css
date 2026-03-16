@@ -1,0 +1,46 @@
+.projectCustomFieldsPanel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dbe7f3;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.projectCustomFieldsHeader {
+  display: grid;
+  gap: 2px;
+}
+
+.projectCustomFieldsHeader strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.projectCustomFieldsHeader span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.projectCustomFieldsGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.projectCustomFieldItem {
+  display: grid;
+  gap: 6px;
+}
+
+.projectCustomFieldItem span {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .projectCustomFieldsGrid {
+    grid-template-columns: 1fr;
+  }
+}

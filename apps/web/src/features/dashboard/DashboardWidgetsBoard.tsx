@@ -114,7 +114,7 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
   }, [layoutQuery.data, normalizedRole]);
 
   useEffect(() => {
-    if (layoutQuery.isLoading || dataLoading || (normalizedRole !== "ADMIN" && normalizedRole !== "TESTER")) return;
+    if (layoutQuery.isLoading || dataLoading) return;
     setChartProgress(0);
     const startedAt = performance.now();
     let frame = 0;
@@ -209,8 +209,11 @@ const DashboardWidgetsBoard: React.FC<Props> = ({
     };
   }, [normalizedRole, testerReports, executionReports]);
 
+  const getAssigneeId = (item: any): string =>
+    String(item?.assignedTo || item?.assigneeId || item?.assignee?.id || item?.assignee?.userId || "").trim();
+
   const devAssigned = useMemo(
-    () => bugs.filter((item) => String(item?.assignedTo || item?.assignee?.id || "") === currentUserId),
+    () => bugs.filter((item) => getAssigneeId(item) && getAssigneeId(item) === currentUserId),
     [bugs, currentUserId]
   );
 

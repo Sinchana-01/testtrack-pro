@@ -1,20 +1,27 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   archiveAdminProjectApi,
   createAdminProjectApi,
+  createProjectMilestoneApi,
+  deleteProjectMilestoneApi,
   getTestCasesApi,
   getMilestoneProgressApi,
   getProjectApi,
+  getProjectConfigurationApi,
   listAdminProjectsApi,
   listAdminUsersApi,
   listProjectMembersApi,
   listProjectMilestonesApi,
   listProjectsApi,
+  listTestRunsApi,
+  linkMilestoneTestRunApi,
   removeProjectMemberApi,
   restoreAdminProjectApi,
   setActiveProjectId,
   updateAdminProjectApi,
+  updateProjectMilestoneApi,
+  updateProjectConfigurationApi,
   updateProjectMemberRoleApi,
   upsertProjectMemberApi,
 } from "../../api";
@@ -22,10 +29,13 @@ import ProjectFormModal from "../../components/projects/ProjectFormModal";
 import ProjectList from "../../pages/projects/ProjectList";
 import ProjectDetails from "../../pages/projects/ProjectDetails";
 import type { ProjectCardData } from "../../components/projects/ProjectCard";
+import { syncProjectContext } from "./projectManagement.utils";
 
 type Props = {
   isAdmin: boolean;
   onRefreshData?: () => Promise<void> | void;
+  onProjectContextSelect?: (projectId: string) => void;
+  activeProjectId?: string;
 };
 
 type ProjectRoute =
@@ -56,7 +66,12 @@ const normalizeProject = (row: any): ProjectCardData => ({
   createdAt: String(row?.createdAt || ""),
 });
 
-const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) => {
+export const ProjectManagementSection: React.FC<Props> = ({
+  isAdmin,
+  onRefreshData,
+  onProjectContextSelect,
+  activeProjectId = "",
+}) => {
   const queryClient = useQueryClient();
   const [route, setRoute] = useState<ProjectRoute>(() => parseProjectRoute());
   const [search, setSearch] = useState("");
@@ -66,7 +81,9 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
   const [editingProject, setEditingProject] = useState<ProjectCardData | null>(null);
   const [busyProjectId, setBusyProjectId] = useState("");
   const [showProjectTestCases, setShowProjectTestCases] = useState(false);
-
+  const lastSyncedProjectIdRef = useRef("");
+  const suppressRouteSyncRef = useRef(false);
+  const [selectedMilestoneId, setSelectedMilestoneId] = useState("");
   const projectsQuery = useQuery<any[], Error>({
     queryKey: ["projects", isAdmin ? "admin" : "member"],
     queryFn: () => (isAdmin ? listAdminProjectsApi() : listProjectsApi({ includeArchived: true })),
@@ -102,13 +119,22 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
   });
 
   const milestoneProgressQuery = useQuery<any, Error>({
-    queryKey: ["project-milestone-progress", route.mode === "details" ? route.projectId : ""],
+    queryKey: [
+      "project-milestone-progress",
+      route.mode === "details" ? route.projectId : "",
+      selectedMilestoneId,
+    ],
     queryFn: async () => {
-      const milestones = await listProjectMilestonesApi((route as any).projectId);
-      const first = Array.isArray(milestones) && milestones.length > 0 ? milestones[0] : null;
-      if (!first?.id) return null;
-      return getMilestoneProgressApi((route as any).projectId, first.id);
+      if (!selectedMilestoneId) return null;
+      return getMilestoneProgressApi((route as any).projectId, selectedMilestoneId);
     },
+    enabled: route.mode === "details" && Boolean(selectedMilestoneId),
+    keepPreviousData: true,
+  });
+
+  const testRunsQuery = useQuery<any[], Error>({
+    queryKey: ["project-test-runs", route.mode === "details" ? route.projectId : ""],
+    queryFn: () => listTestRunsApi(),
     enabled: route.mode === "details",
     keepPreviousData: true,
   });
@@ -117,11 +143,18 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
     queryKey: ["project-testcases", route.mode === "details" ? route.projectId : ""],
     queryFn: async () => {
       if (route.mode !== "details") return [];
-      setActiveProjectId(route.projectId);
+      syncProjectContext(route.projectId, onProjectContextSelect);
       const rows = await getTestCasesApi();
       return Array.isArray(rows) ? rows : [];
     },
     enabled: route.mode === "details" && showProjectTestCases,
+    keepPreviousData: true,
+  });
+
+  const configurationQuery = useQuery<any, Error>({
+    queryKey: ["project-configuration", route.mode === "details" ? route.projectId : ""],
+    queryFn: () => getProjectConfigurationApi((route as any).projectId),
+    enabled: route.mode === "details",
     keepPreviousData: true,
   });
 
@@ -147,6 +180,25 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
     return selectedProjectFromList;
   }, [route, detailsQuery.data, selectedProjectFromList]);
 
+  useEffect(() => {
+    if (route.mode !== "details") {
+      setSelectedMilestoneId("");
+      return;
+    }
+    const rows = Array.isArray(milestonesQuery.data) ? milestonesQuery.data : [];
+    if (!rows.length) {
+      setSelectedMilestoneId("");
+      return;
+    }
+    if (!selectedMilestoneId) {
+      setSelectedMilestoneId(String(rows[0].id || ""));
+      return;
+    }
+    if (!rows.some((row) => String(row.id) === String(selectedMilestoneId))) {
+      setSelectedMilestoneId(String(rows[0].id || ""));
+    }
+  }, [route.mode, milestonesQuery.data, selectedMilestoneId]);
+
   const memberUserOptions = useMemo(
     () =>
       (Array.isArray(usersQuery.data) ? usersQuery.data : [])
@@ -165,6 +217,9 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
       queryClient.invalidateQueries({ queryKey: ["project"] }),
       queryClient.invalidateQueries({ queryKey: ["project-members"] }),
       queryClient.invalidateQueries({ queryKey: ["project-milestones"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-milestone-progress"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-test-runs"] }),
+      queryClient.invalidateQueries({ queryKey: ["project-configuration"] }),
     ]);
     if (onRefreshData) await onRefreshData();
   };
@@ -183,16 +238,43 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
   }, []);
 
   const goToList = () => {
+    suppressRouteSyncRef.current = true;
     window.history.pushState({}, "", "/projects");
     setRoute({ mode: "list" });
     setShowProjectTestCases(false);
   };
 
   const goToDetails = (projectId: string) => {
+    suppressRouteSyncRef.current = false;
     window.history.pushState({}, "", `/projects/${projectId}`);
     setRoute({ mode: "details", projectId });
     setShowProjectTestCases(false);
   };
+
+  useEffect(() => {
+    if (route.mode !== "details" || !route.projectId) return;
+    if (lastSyncedProjectIdRef.current === route.projectId) return;
+    lastSyncedProjectIdRef.current = route.projectId;
+    syncProjectContext(route.projectId, onProjectContextSelect);
+  }, [route.mode, route.mode === "details" ? route.projectId : "", onProjectContextSelect]);
+
+  useEffect(() => {
+    const normalized = String(activeProjectId || "").trim();
+    if (suppressRouteSyncRef.current) return;
+    if (!normalized) {
+      if (route.mode !== "list") {
+        window.history.replaceState({}, "", "/projects");
+        setRoute({ mode: "list" });
+        setShowProjectTestCases(false);
+      }
+      return;
+    }
+    if (route.mode === "details" && route.projectId === normalized) return;
+    lastSyncedProjectIdRef.current = normalized;
+    window.history.replaceState({}, "", `/projects/${normalized}`);
+    setRoute({ mode: "details", projectId: normalized });
+    setShowProjectTestCases(false);
+  }, [activeProjectId, route.mode, route.mode === "details" ? route.projectId : ""]);
 
   const createMutation = useMutation({
     mutationFn: createAdminProjectApi,
@@ -218,6 +300,51 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
     setFormMode("edit");
     setEditingProject(project);
     setFormOpen(true);
+  };
+
+  const handleCreateMilestone = async (payload: {
+    name: string;
+    description?: string;
+    targetDate: string;
+    status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "MISSED";
+    targetPassRate?: number;
+    targetBugClosure?: number;
+  }) => {
+    if (route.mode !== "details") return;
+    const created = await createProjectMilestoneApi(route.projectId, payload);
+    await refreshAll();
+    if (created?.id) {
+      setSelectedMilestoneId(String(created.id));
+    }
+  };
+
+  const handleUpdateMilestone = async (
+    milestoneId: string,
+    payload: {
+      name?: string;
+      description?: string;
+      targetDate?: string;
+      status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "MISSED";
+      targetPassRate?: number;
+      targetBugClosure?: number;
+    }
+  ) => {
+    if (route.mode !== "details") return;
+    await updateProjectMilestoneApi(route.projectId, milestoneId, payload);
+    await refreshAll();
+  };
+
+  const handleDeleteMilestone = async (milestoneId: string) => {
+    if (route.mode !== "details") return;
+    await deleteProjectMilestoneApi(route.projectId, milestoneId);
+    await refreshAll();
+    setSelectedMilestoneId("");
+  };
+
+  const handleLinkMilestoneRun = async (milestoneId: string, testRunId: string) => {
+    if (route.mode !== "details") return;
+    await linkMilestoneTestRunApi(route.projectId, milestoneId, testRunId);
+    await refreshAll();
   };
 
   const handleArchiveRestore = async (project: ProjectCardData) => {
@@ -301,6 +428,12 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
           milestones={Array.isArray(milestonesQuery.data) ? milestonesQuery.data : []}
           milestonePassRate={Number(milestoneProgressQuery.data?.metrics?.passRate || 0)}
           milestoneBugClosureRate={Number(milestoneProgressQuery.data?.metrics?.bugClosureRate || 0)}
+          testRuns={Array.isArray(testRunsQuery.data) ? testRunsQuery.data : []}
+          selectedMilestoneId={selectedMilestoneId}
+          milestoneProgress={milestoneProgressQuery.data || null}
+          milestoneProgressLoading={milestoneProgressQuery.isLoading || milestoneProgressQuery.isFetching}
+          configuration={configurationQuery.data || null}
+          configurationLoading={configurationQuery.isLoading || configurationQuery.isFetching}
           onBackToProjects={goToList}
           onEdit={() => selectedProject && handleEdit(selectedProject)}
           onToggleArchive={() => selectedProject && handleArchiveRestore(selectedProject)}
@@ -309,6 +442,11 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
             await upsertProjectMemberApi(selectedProject.id, { userId, roleInProject: role });
             await refreshAll();
           }}
+          onSelectMilestone={setSelectedMilestoneId}
+          onCreateMilestone={handleCreateMilestone}
+          onUpdateMilestone={handleUpdateMilestone}
+          onDeleteMilestone={handleDeleteMilestone}
+          onLinkMilestoneTestRun={handleLinkMilestoneRun}
           onChangeRole={async (memberId, role) => {
             if (!selectedProject?.id) return;
             await updateProjectMemberRoleApi(selectedProject.id, memberId, role);
@@ -328,9 +466,14 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
           }
           onViewTestCases={async () => {
             if (route.mode !== "details") return;
-            setActiveProjectId(route.projectId);
+            syncProjectContext(route.projectId, onProjectContextSelect);
             setShowProjectTestCases(true);
             await projectTestCasesQuery.refetch();
+          }}
+          onSaveConfiguration={async (payload) => {
+            if (!selectedProject?.id) return;
+            await updateProjectConfigurationApi(selectedProject.id, payload);
+            await refreshAll();
           }}
         />
       )}
@@ -339,3 +482,8 @@ const ProjectManagementSection: React.FC<Props> = ({ isAdmin, onRefreshData }) =
 };
 
 export default ProjectManagementSection;
+
+
+
+
+

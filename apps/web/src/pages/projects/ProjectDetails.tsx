@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from "react";
 import MemberTable from "../../components/projects/MemberTable";
+import ProjectConfigurationPanel from "../../components/projects/ProjectConfigurationPanel";
+import ProjectMilestonesPanel from "../../components/projects/ProjectMilestonesPanel";
 
 type ProjectDetailsData = {
   id: string;
@@ -23,6 +25,12 @@ type Props = {
   project: ProjectDetailsData | null;
   members: any[];
   milestones: any[];
+  testRuns: any[];
+  selectedMilestoneId: string;
+  milestoneProgress?: any;
+  milestoneProgressLoading?: boolean;
+  configuration: any;
+  configurationLoading?: boolean;
   testCases: any[];
   showTestCases?: boolean;
   testCasesLoading?: boolean;
@@ -32,6 +40,34 @@ type Props = {
   onEdit: () => void;
   onToggleArchive: () => void;
   onViewTestCases: () => Promise<void> | void;
+  onSaveConfiguration: (payload: {
+    customFields: Array<{ label: string; type: string; required: boolean; options?: string[] }>;
+    workflowConfig: { statuses: string[] };
+    modules: string[];
+    environments: string[];
+  }) => Promise<void> | void;
+  onSelectMilestone: (milestoneId: string) => void;
+  onCreateMilestone: (payload: {
+    name: string;
+    description?: string;
+    targetDate: string;
+    status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "MISSED";
+    targetPassRate?: number;
+    targetBugClosure?: number;
+  }) => Promise<void> | void;
+  onUpdateMilestone: (
+    milestoneId: string,
+    payload: {
+      name?: string;
+      description?: string;
+      targetDate?: string;
+      status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "MISSED";
+      targetPassRate?: number;
+      targetBugClosure?: number;
+    }
+  ) => Promise<void> | void;
+  onDeleteMilestone: (milestoneId: string) => Promise<void> | void;
+  onLinkMilestoneTestRun: (milestoneId: string, testRunId: string) => Promise<void> | void;
   onAddMember: (userId: string, role: "ADMIN" | "TESTER" | "DEVELOPER") => Promise<void> | void;
   onChangeRole: (memberId: string, role: "ADMIN" | "TESTER" | "DEVELOPER") => Promise<void> | void;
   onRemoveMember: (memberId: string) => Promise<void> | void;
@@ -44,6 +80,12 @@ const ProjectDetails: React.FC<Props> = ({
   project,
   members,
   milestones,
+  testRuns,
+  selectedMilestoneId,
+  milestoneProgress,
+  milestoneProgressLoading,
+  configuration,
+  configurationLoading,
   testCases,
   showTestCases,
   testCasesLoading,
@@ -53,13 +95,20 @@ const ProjectDetails: React.FC<Props> = ({
   onEdit,
   onToggleArchive,
   onViewTestCases,
+  onSaveConfiguration,
+  onSelectMilestone,
+  onCreateMilestone,
+  onUpdateMilestone,
+  onDeleteMilestone,
+  onLinkMilestoneTestRun,
   onAddMember,
   onChangeRole,
   onRemoveMember,
   userOptions,
   disabledActions,
 }) => {
-  const [activeTab, setActiveTab] = useState<"overview" | "members">("overview");
+  const [activeTab, setActiveTab] =
+    useState<"overview" | "configuration" | "milestones" | "members">("overview");
   const [newMemberRole, setNewMemberRole] = useState<"ADMIN" | "TESTER" | "DEVELOPER">("TESTER");
   const [newMemberUserId, setNewMemberUserId] = useState("");
 
@@ -80,7 +129,7 @@ const ProjectDetails: React.FC<Props> = ({
           <span className={`projectStatusBadge ${isArchived ? "archived" : "active"}`}>{project?.status || "ACTIVE"}</span>
         </div>
         <div className="toolbarActions">
-          {isAdmin ? (
+          {isAdmin && activeTab === "overview" ? (
             <button className="button small" onClick={onViewTestCases} disabled={Boolean(testCasesLoading)}>
               View Test Cases
             </button>
@@ -109,10 +158,22 @@ const ProjectDetails: React.FC<Props> = ({
           Overview
         </button>
         <button
+          className={`projectTab ${activeTab === "configuration" ? "active" : ""}`}
+          onClick={() => setActiveTab("configuration")}
+        >
+          Configuration
+        </button>
+        <button
           className={`projectTab ${activeTab === "members" ? "active" : ""}`}
           onClick={() => setActiveTab("members")}
         >
           Members
+        </button>
+        <button
+          className={`projectTab ${activeTab === "milestones" ? "active" : ""}`}
+          onClick={() => setActiveTab("milestones")}
+        >
+          Milestones
         </button>
       </div>
 
@@ -181,6 +242,15 @@ const ProjectDetails: React.FC<Props> = ({
         </div>
       ) : null}
 
+      {activeTab === "configuration" ? (
+        <ProjectConfigurationPanel
+          configuration={configuration}
+          loading={configurationLoading}
+          disabled={Boolean(disabledActions) || isArchived || !isAdmin}
+          onSave={onSaveConfiguration}
+        />
+      ) : null}
+
       {activeTab === "members" ? (
         <div className="projectMembersSection">
           {isAdmin ? (
@@ -218,6 +288,22 @@ const ProjectDetails: React.FC<Props> = ({
             onRemove={onRemoveMember}
           />
         </div>
+      ) : null}
+
+      {activeTab === "milestones" ? (
+        <ProjectMilestonesPanel
+          milestones={milestones}
+          testRuns={testRuns}
+          selectedMilestoneId={selectedMilestoneId}
+          progress={milestoneProgress}
+          progressLoading={milestoneProgressLoading}
+          disabled={Boolean(disabledActions) || isArchived || !isAdmin}
+          onSelect={onSelectMilestone}
+          onCreate={onCreateMilestone}
+          onUpdate={onUpdateMilestone}
+          onDelete={onDeleteMilestone}
+          onLinkTestRun={onLinkMilestoneTestRun}
+        />
       ) : null}
 
     </section>

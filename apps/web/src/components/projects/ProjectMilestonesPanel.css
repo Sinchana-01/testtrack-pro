@@ -1,0 +1,171 @@
+.projectMilestonesPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.projectMilestonesList {
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--card-border, #e6eaf0);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.milestoneList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.milestoneListItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fbfbfd;
+  text-align: left;
+}
+
+.milestoneListItem.active {
+  border-color: #2563eb;
+  background: #eef4ff;
+}
+
+.milestoneTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.milestoneStatus {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #1f2937;
+}
+
+.milestoneStatus.planned {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.milestoneStatus.in_progress {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.milestoneStatus.completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.milestoneStatus.missed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.milestoneMetaRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #475569;
+}
+
+.milestoneProgressTiny {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.milestoneProgressTrack {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.milestoneProgressFill {
+  height: 100%;
+  background: #2563eb;
+}
+
+.milestoneProgressLabel {
+  font-size: 11px;
+  color: #475569;
+  min-width: 86px;
+  text-align: right;
+}
+
+.milestoneModalBackdrop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.milestoneModalCard {
+  width: min(560px, 92vw);
+  border-radius: 14px;
+}
+
+.milestoneModalCard .modalHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.milestoneForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.milestoneProgress {
+  margin-top: 16px;
+}
+
+.milestoneProgressGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.milestoneProgressCard {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.milestoneLinker {
+  margin-top: 16px;
+}
+
+.linkedRunsList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.linkedRunItem {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
