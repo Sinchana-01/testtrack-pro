@@ -1,0 +1,155 @@
+.projectConfigPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.projectConfigHero,
+.projectConfigCardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.projectConfigHero h4,
+.projectConfigCardHeader h5 {
+  margin: 0 0 4px;
+  color: #0f172a;
+}
+
+.projectConfigHero p,
+.projectConfigCardHeader p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.projectConfigNotice {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.projectConfigGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
+  gap: 14px;
+}
+
+.projectConfigGrid.secondary {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.projectConfigCard,
+.projectConfigPreviewCard {
+  border: 1px solid #dbe7f3;
+  border-radius: 12px;
+  background: #f8fbff;
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.projectConfigList {
+  display: grid;
+  gap: 12px;
+}
+
+.projectConfigList.compact {
+  gap: 8px;
+}
+
+.projectConfigItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.projectConfigItemIndex {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.projectConfigRow,
+.projectConfigInlineRow {
+  display: grid;
+  gap: 10px;
+}
+
+.projectConfigRow {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.projectConfigInlineRow {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.projectConfigRow label,
+.projectConfigInlineRow label {
+  display: grid;
+  gap: 6px;
+}
+
+.projectConfigRow span,
+.projectConfigInlineRow span {
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.projectConfigGrow {
+  grid-column: span 1;
+}
+
+.projectConfigCheckbox {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.projectConfigPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.projectConfigPreviewGrid div {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.projectConfigPreviewGrid strong {
+  color: #0f172a;
+  font-size: 12px;
+}
+
+.projectConfigPreviewGrid span {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 960px) {
+  .projectConfigGrid,
+  .projectConfigGrid.secondary,
+  .projectConfigPreviewGrid,
+  .projectConfigRow {
+    grid-template-columns: 1fr;
+  }
+}

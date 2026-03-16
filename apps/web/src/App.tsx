@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   bulkTestCaseOperationApi,
   clearSessionTokens,
@@ -18,6 +18,7 @@ import {
   deleteTestCaseApi,
   forgotPasswordApi,
   getBugApi,
+  getProjectConfigurationApi,
   getRefreshToken,
   getMyRolePermissionsApi,
   getNotificationPreferencesApi,
@@ -85,7 +86,10 @@ import BugDetailsModal from "./features/bugs/BugDetailsModal";
 import DeveloperWorkspacePanel from "./features/developer/DeveloperWorkspacePanel";
 import ReportsHub from "./features/reports/ReportsHub";
 import DashboardWidgetsBoard from "./features/dashboard/DashboardWidgetsBoard";
-import ProjectManagementSection from "./features/projects/ProjectManagementSection";
+import { ProjectManagementSection } from "./features/projects/ProjectManagementSection";
+import ProjectCustomFieldsForm, {
+  ProjectCustomFieldDefinition,
+} from "./components/projects/ProjectCustomFieldsForm";
 import NotificationPreferencesModal, {
   NotificationPreferenceSettings,
 } from "./features/notifications/NotificationPreferencesModal";
@@ -374,6 +378,9 @@ function App() {
   const [adminSystemConfigs, setAdminSystemConfigs] = useState<any[]>([]);
   const [notificationItems, setNotificationItems] = useState<AppNotificationItem[]>([]);
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
+  const [activeProjectConfig, setActiveProjectConfig] = useState<any | null>(null);
+  const [tcCustomFieldValues, setTcCustomFieldValues] = useState<Record<string, string>>({});
+  const [editCustomFieldValues, setEditCustomFieldValues] = useState<Record<string, string>>({});
   const [showNotificationPreferences, setShowNotificationPreferences] = useState(false);
   const [notificationPreferences, setNotificationPreferences] =
     useState<NotificationPreferenceSettings>(defaultNotificationPreferences);
@@ -462,6 +469,27 @@ function App() {
   const canViewAuditLogsPermission = hasPermission("View Audit Logs");
   const rolePermissionsKey = JSON.stringify([...currentRolePermissions].sort());
   const roleNavItems = buildNavFromPermissions(roleName, rolePermissions);
+  const configuredProjectModules = Array.isArray(activeProjectConfig?.modules)
+    ? activeProjectConfig.modules.map((item: any) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const configuredProjectCustomFields: ProjectCustomFieldDefinition[] = Array.isArray(activeProjectConfig?.customFields)
+    ? activeProjectConfig.customFields
+        .map((item: any) => ({
+          label: String(item?.label || "").trim(),
+          type: String(item?.type || "TEXT").toUpperCase(),
+          required: Boolean(item?.required),
+          options: Array.isArray(item?.options)
+            ? item.options.map((option: any) => String(option || "").trim()).filter(Boolean)
+            : [],
+        }))
+        .filter((item: ProjectCustomFieldDefinition) => item.label)
+    : [];
+  const configuredProjectEnvironments = Array.isArray(activeProjectConfig?.environments)
+    ? activeProjectConfig.environments.map((item: any) => String(item || "").trim()).filter(Boolean)
+    : [];
+  const testCaseModuleOptions = Array.from(
+    new Set([...configuredProjectModules, "Authentication", "User Management", "Reporting", "General"].filter(Boolean))
+  );
 
   const menuFeatureMap: Record<string, DashboardFeature | "none"> = {
     dashboard_home: "none",
@@ -544,6 +572,36 @@ function App() {
     (normalizedFeature === "bug_management" || (isDeveloper && normalizedFeature === "developer_workspace"));
   const showTestCases = normalizedFeature === "test_cases";
   const selectedTemplateModal = templates.find((tpl) => tpl.id === selectedTemplateModalId) || null;
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadActiveProjectConfiguration = async () => {
+      if (!scopedProjectId) {
+        setActiveProjectConfig(null);
+        setTcCustomFieldValues({});
+        setEditCustomFieldValues({});
+        return;
+      }
+      try {
+        const payload = await getProjectConfigurationApi(scopedProjectId);
+        if (!cancelled) {
+          setActiveProjectConfig(payload || null);
+          setTcCustomFieldValues({});
+          setEditCustomFieldValues({});
+        }
+      } catch {
+        if (!cancelled) {
+          setActiveProjectConfig(null);
+          setTcCustomFieldValues({});
+          setEditCustomFieldValues({});
+        }
+      }
+    };
+    loadActiveProjectConfiguration();
+    return () => {
+      cancelled = true;
+    };
+  }, [scopedProjectId]);
   const selectedTestCaseModal = testCases.find((tc) => tc.id === selectedTestCaseModalId) || null;
   const filteredBulkCaseOptions = testCases.filter((tc) => {
     const query = bulkCaseQuery.trim().toLowerCase();
@@ -1286,6 +1344,11 @@ function App() {
   const applyProjectContext = (projectId: string, availableProjects: any[], adminMode: boolean) => {
     const normalized = String(projectId || "").trim();
     let nextId = normalized;
+    if (nextId && availableProjects.length === 0) {
+      setActiveProjectIdState(nextId);
+      setStoredActiveProjectId(nextId);
+      return;
+    }
     if (adminMode) {
       if (!nextId) nextId = "__ALL__";
       if (nextId !== "__ALL__" && !availableProjects.some((row: any) => row.id === nextId)) {
@@ -1420,13 +1483,51 @@ function App() {
         return {
           id: `bug:${String(row?.id || Math.random())}`,
           type: "bug" as const,
-          title: `${row?.bugCode || "BUG"} â€¢ ${workflow} â€¢ ${priority}`,
+          title: `${row?.bugCode || "BUG"} • ${workflow} • ${priority}`,
           subtitle: String(row?.title || "Bug update"),
           isRead: false,
           bugId: String(row?.id || ""),
         };
       })
       .filter((item) => item.bugId);
+  };
+
+  const buildConfiguredCustomFieldValues = (
+    metadata: Record<string, unknown>,
+    fields: ProjectCustomFieldDefinition[]
+  ): Record<string, string> => {
+    const values: Record<string, string> = {};
+    fields.forEach((field) => {
+      const rawValue = metadata?.[field.label];
+      values[field.label] = rawValue === undefined || rawValue === null ? "" : String(rawValue);
+    });
+    return values;
+  };
+
+  const mergeConfiguredCustomFieldsIntoMetadata = (
+    metadata: Record<string, unknown>,
+    customValues: Record<string, string>,
+    fields: ProjectCustomFieldDefinition[]
+  ): Record<string, unknown> => {
+    const merged = { ...metadata };
+    fields.forEach((field) => {
+      const label = field.label;
+      const rawValue = String(customValues[label] || "").trim();
+      if (!rawValue) {
+        delete merged[label];
+        return;
+      }
+      merged[label] = field.type === "NUMBER" ? Number(rawValue) : rawValue;
+    });
+    return merged;
+  };
+
+  const validateConfiguredCustomFields = (
+    customValues: Record<string, string>,
+    fields: ProjectCustomFieldDefinition[]
+  ): string | null => {
+    const missing = fields.find((field) => field.required && !String(customValues[field.label] || "").trim());
+    return missing ? `${missing.label} is required` : null;
   };
 
   const loadNotificationPreferences = async () => {
@@ -1522,7 +1623,7 @@ function App() {
           title: message,
           subtitle:
             String(row?.entityType || "").trim() && String(row?.entityId || "").trim()
-              ? `${row.entityType} • ${row.entityId}`
+              ? `${row.entityType} � ${row.entityId}`
               : String(row?.issueTitle || row?.commentPreview || "").trim(),
           isRead: Boolean(row?.isRead),
           bugId:
@@ -1672,6 +1773,7 @@ function App() {
     setTcStepsText("");
     setTcPostConditionsText("");
     setTcMetadataText("");
+    setTcCustomFieldValues({});
     setTcTagsText("");
     setTcEstimatedDurationMinutes("");
     setTcAutomationStatus("");
@@ -1995,6 +2097,14 @@ function App() {
     setEditModule(tc.module || "");
     setEditPostConditionsText(JSON.stringify(tc.postConditions ?? [], null, 2));
     setEditMetadataText(JSON.stringify(tc.metadata ?? {}, null, 2));
+    setEditCustomFieldValues(
+      buildConfiguredCustomFieldValues(
+        tc?.metadata && typeof tc.metadata === "object" && !Array.isArray(tc.metadata)
+          ? (tc.metadata as Record<string, unknown>)
+          : {},
+        configuredProjectCustomFields
+      )
+    );
     setEditTagsText((tc.tags ?? []).join(", "));
     setEditEstimatedDurationMinutes(
       tc.estimatedDurationMinutes !== null && tc.estimatedDurationMinutes !== undefined
@@ -2021,6 +2131,11 @@ function App() {
         alert("Estimated duration must be a number (minutes)");
         return;
       }
+      const customFieldError = validateConfiguredCustomFields(editCustomFieldValues, configuredProjectCustomFields);
+      if (customFieldError) {
+        alert(customFieldError);
+        return;
+      }
       await updateTestCaseApi(editingId, {
         title: editTitle,
         description: editDescription,
@@ -2030,7 +2145,11 @@ function App() {
         environmentRequirements: parseSection(editEnvironmentRequirementsText),
         module: editModule,
         postConditions: parseSection(editPostConditionsText),
-        metadata: parseMetadata(editMetadataText),
+        metadata: mergeConfiguredCustomFieldsIntoMetadata(
+          parseMetadata(editMetadataText),
+          editCustomFieldValues,
+          configuredProjectCustomFields
+        ),
         tags: parseTags(editTagsText),
         estimatedDurationMinutes: editEstimatedDurationMinutes
           ? Number(editEstimatedDurationMinutes)
@@ -2062,6 +2181,7 @@ function App() {
       setEditSeverity("");
       setEditType("");
       setEditStatus("");
+      setEditCustomFieldValues({});
       await loadTestCaseData();
       alert("Test case updated");
     } catch (error: any) {
@@ -3045,6 +3165,14 @@ function App() {
     });
   };
 
+
+  const handleProjectManagementContextSelect = useCallback((projectId: string) => {
+    const normalized = String(projectId || "").trim();
+    if (!normalized || normalized === activeProjectId) return;
+    setActiveProjectIdState(normalized);
+    setStoredActiveProjectId(normalized);
+  }, [activeProjectId]);
+
   const toggleRolePermission = (roleKey: "ADMIN" | "TESTER" | "DEVELOPER", permission: string) => {
     setRolePermissions((prev) => {
       const current = prev[roleKey] || [];
@@ -3207,7 +3335,7 @@ function App() {
           <div className={`inlineNotice inlineNotice-${inlineNotice.type}`}>
             <span>{inlineNotice.text}</span>
             <button type="button" onClick={() => setInlineNotice(null)} aria-label="Dismiss message">
-              ×
+              �
             </button>
           </div>
         ) : null}
@@ -3814,7 +3942,12 @@ function App() {
                     <>
                      
                       <div className="projectManagementCenterWrap" style={{ marginTop: 16 }}>
-                        <ProjectManagementSection isAdmin={isAdmin} onRefreshData={loadTestCaseData} />
+                        <ProjectManagementSection
+                          isAdmin={isAdmin}
+                          onRefreshData={loadTestCaseData}
+                          activeProjectId={activeProjectId}
+                          onProjectContextSelect={handleProjectManagementContextSelect}
+                        />
                       </div>
                     </>
                   )}
@@ -4148,11 +4281,24 @@ function App() {
                 <label className="fieldLabel">Module/Feature</label>
                 <select className="input" value={tcModule} onChange={(e) => setTcModule(e.target.value)} disabled={!isProjectScopeWritable}>
                   <option value="">Select module</option>
-                  <option value="Authentication">Authentication</option>
-                  <option value="User Management">User Management</option>
-                  <option value="Reporting">Reporting</option>
-                  <option value="General">General</option>
+                  {testCaseModuleOptions.map((moduleName) => (
+                    <option key={moduleName} value={moduleName}>
+                      {moduleName}
+                    </option>
+                  ))}
                 </select>
+                <ProjectCustomFieldsForm
+                  title="Project Custom Fields"
+                  fields={configuredProjectCustomFields}
+                  values={tcCustomFieldValues}
+                  disabled={!isProjectScopeWritable}
+                  onChange={(label, value) =>
+                    setTcCustomFieldValues((prev) => ({
+                      ...prev,
+                      [label]: value,
+                    }))
+                  }
+                />
                 <label className="fieldLabel">Test Steps</label>
                 <textarea className="input" placeholder="Steps JSON or one step per line" rows={4} value={tcStepsText} onChange={(e) => setTcStepsText(e.target.value)} disabled={!isProjectScopeWritable} />
                 <label className="fieldLabel">Classification</label>
@@ -4207,6 +4353,14 @@ function App() {
                         alert("Title must be 200 characters or less");
                         return;
                       }
+                      const customFieldError = validateConfiguredCustomFields(
+                        tcCustomFieldValues,
+                        configuredProjectCustomFields
+                      );
+                      if (customFieldError) {
+                        alert(customFieldError);
+                        return;
+                      }
                       await createTestCaseApi({
                         title: tcTitle,
                         description: tcDescription,
@@ -4216,7 +4370,11 @@ function App() {
                         module: tcModule,
                         steps: parseSteps(tcStepsText),
                         postConditions: [],
-                        metadata: {},
+                        metadata: mergeConfiguredCustomFieldsIntoMetadata(
+                          {},
+                          tcCustomFieldValues,
+                          configuredProjectCustomFields
+                        ),
                         tags: [],
                         estimatedDurationMinutes: null,
                         automationStatus: "",
@@ -4523,7 +4681,7 @@ function App() {
                     aria-haspopup="listbox"
                   >
                     <span>{bulkSelectedSummary}</span>
-                    <span>{bulkCasePickerOpen ? "â–²" : "â–¼"}</span>
+                    <span>{bulkCasePickerOpen ? "▲" : "▼"}</span>
                   </button>
                   {bulkCasePickerOpen ? (
                     <div className="bulkCasePickerMenu" role="listbox" aria-multiselectable="true">
@@ -4818,7 +4976,7 @@ function App() {
                   suites={suites}
                   testCases={testCases}
                   testRuns={testRuns}
-                  activeProjectId={scopedProjectId}
+                  activeProjectId={activeProjectId}
                   activeProjectName={activeProjectName}
                   showArchivedSuites={showArchivedSuites}
                   setShowArchivedSuites={setShowArchivedSuites}
@@ -4930,7 +5088,7 @@ function App() {
                   <div className={`inlineNotice inlineNotice-${bugActionNotice.type}`} style={{ marginBottom: "10px" }}>
                     <span>{bugActionNotice.text}</span>
                     <button type="button" onClick={() => setBugActionNotice(null)} aria-label="Dismiss message">
-                      ×
+                      �
                     </button>
                   </div>
                 ) : null}
@@ -5065,6 +5223,7 @@ function App() {
                         <div className="inlineGrid">
                           <input
                             className="input"
+                            list="project-environment-options"
                             placeholder="Environment (optional)"
                             value={bugCreateEnvironment}
                             onChange={(e) => setBugCreateEnvironment(e.target.value)}
@@ -5076,6 +5235,13 @@ function App() {
                             onChange={(e) => setBugCreateAffectedVersion(e.target.value)}
                           />
                         </div>
+                        {configuredProjectEnvironments.length > 0 ? (
+                          <datalist id="project-environment-options">
+                            {configuredProjectEnvironments.map((envName: string) => (
+                              <option key={envName} value={envName} />
+                            ))}
+                          </datalist>
+                        ) : null}
                         <div className="inlineGrid">
                           <input
                             className="input"
@@ -5762,7 +5928,31 @@ function App() {
                     <label className="fieldLabel" htmlFor="edit-environment-requirements">Environment Requirements</label>
                     <textarea id="edit-environment-requirements" className="input" rows={3} value={editEnvironmentRequirementsText} onChange={(e) => setEditEnvironmentRequirementsText(e.target.value)} />
                     <label className="fieldLabel" htmlFor="edit-module">Module/Feature</label>
-                    <input id="edit-module" className="input" value={editModule} onChange={(e) => setEditModule(e.target.value)} />
+                    <input
+                      id="edit-module"
+                      list="project-module-options"
+                      className="input"
+                      value={editModule}
+                      onChange={(e) => setEditModule(e.target.value)}
+                    />
+                    {testCaseModuleOptions.length > 0 ? (
+                      <datalist id="project-module-options">
+                        {testCaseModuleOptions.map((moduleName) => (
+                          <option key={moduleName} value={moduleName} />
+                        ))}
+                      </datalist>
+                    ) : null}
+                    <ProjectCustomFieldsForm
+                      title="Project Custom Fields"
+                      fields={configuredProjectCustomFields}
+                      values={editCustomFieldValues}
+                      onChange={(label, value) =>
+                        setEditCustomFieldValues((prev) => ({
+                          ...prev,
+                          [label]: value,
+                        }))
+                      }
+                    />
                     <label className="fieldLabel" htmlFor="edit-post-conditions">Post-conditions</label>
                     <textarea id="edit-post-conditions" className="input" rows={3} value={editPostConditionsText} onChange={(e) => setEditPostConditionsText(e.target.value)} />
                     <label className="fieldLabel" htmlFor="edit-metadata">Metadata</label>
@@ -5835,7 +6025,15 @@ function App() {
                     </div>
                     <div className="toolbarActions">
                       <button className="button small" onClick={saveEditCase}>Save</button>
-                      <button className="button small danger" onClick={() => setEditingId("")}>Cancel</button>
+                      <button
+                        className="button small danger"
+                        onClick={() => {
+                          setEditingId("");
+                          setEditCustomFieldValues({});
+                        }}
+                      >
+                        Cancel
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -5929,6 +6127,11 @@ function App() {
 }
 
 export default App;
+
+
+
+
+
 
 
 

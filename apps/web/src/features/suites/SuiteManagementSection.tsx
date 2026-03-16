@@ -86,6 +86,10 @@ const SuiteManagementSection: React.FC<Props> = ({
   const [drawerSearch, setDrawerSearch] = useState("");
   const [drawerSelection, setDrawerSelection] = useState<string[]>([]);
   const [expandedParents, setExpandedParents] = useState<Record<string, boolean>>({});
+  const [suiteArchiveNotice, setSuiteArchiveNotice] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
 
   const activeSuites = useMemo(() => suites, [suites]);
   const latestSuiteExecution = useMemo(() => {
@@ -406,8 +410,15 @@ const SuiteManagementSection: React.FC<Props> = ({
         await archiveSuiteApi(row.id);
       }
       await onRefreshData();
+      setSuiteArchiveNotice({
+        type: "success",
+        text: row?.isArchived ? "Suite restored successfully." : "Suite archived successfully.",
+      });
     } catch (error: any) {
-      alert(getSuiteFriendlyError(error, "Archive/restore failed"));
+      setSuiteArchiveNotice({
+        type: "error",
+        text: getSuiteFriendlyError(error, "Archive/restore failed"),
+      });
     }
   };
 
@@ -516,6 +527,34 @@ const SuiteManagementSection: React.FC<Props> = ({
             </label>
             <button className="button small" onClick={onRefreshData}>Refresh</button>
           </div>
+          {suiteArchiveNotice ? (
+            <div
+              style={{
+                border: "1px solid #e2e8f0",
+                borderLeftWidth: 5,
+                borderLeftColor: suiteArchiveNotice.type === "success" ? "#16a34a" : "#dc2626",
+                background: suiteArchiveNotice.type === "success" ? "#f0fdf4" : "#fef2f2",
+                color: suiteArchiveNotice.type === "success" ? "#166534" : "#991b1b",
+                padding: "10px 12px",
+                borderRadius: 10,
+                marginBottom: 10,
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              <span>{suiteArchiveNotice.text}</span>
+              <button
+                className="button small"
+                onClick={() => setSuiteArchiveNotice(null)}
+                style={{ background: "transparent", border: "none", padding: 0 }}
+              >
+                X
+              </button>
+            </div>
+          ) : null}
           <div style={{ border: "1px solid #e4e7ec", borderRadius: 8, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead style={{ background: "#f8fafc" }}>
